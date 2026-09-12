@@ -1,9 +1,11 @@
 import SwiftUI
 import FacturXCore
+import AppKit
 
 @main
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
         WindowGroup("Factur-X") {
@@ -24,6 +26,17 @@ struct FacturXMacApp: App {
     }
 
     @State private var selectedItem: UUID?
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first {
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        }
+    }
 }
 
 struct ContentView: View {
