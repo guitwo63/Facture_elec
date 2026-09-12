@@ -43,6 +43,9 @@ public struct CIIXMLGenerator {
 <?xml version="1.0" encoding="UTF-8"?>
 <rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
   <rsm:ExchangedDocumentContext>
+    <ram:BusinessProcessSpecifiedDocumentContextParameter>
+      <ram:ID>\(invoice.billingMode.rawValue)</ram:ID>
+    </ram:BusinessProcessSpecifiedDocumentContextParameter>
     <ram:GuidelineSpecifiedDocumentContextParameter>
       <ram:ID>\(invoice.profile.urn)</ram:ID>
     </ram:GuidelineSpecifiedDocumentContextParameter>
@@ -112,6 +115,12 @@ public struct CIIXMLGenerator {
 """
         } ?? ""
 
+        let endpoint = party.endpointID.map { id -> String in
+            """
+          <ram:ID schemeID="\(party.endpointSchemeID)">\(escape(id))</ram:ID>
+"""
+        } ?? ""
+
         let contact = xmlContact(party)
 
         let taxReg = party.vatNumber.map { vat -> String in
@@ -123,7 +132,7 @@ public struct CIIXMLGenerator {
         } ?? ""
 
         let body = """
-        <ram:\(tag)>
+        <ram:\(tag)>\(endpoint.isEmpty ? "" : endpoint)
           <ram:Name>\(escape(party.name))</ram:Name>\(legalOrg.isEmpty ? "" : legalOrg)\(contact.isEmpty ? "" : contact)
           <ram:PostalTradeAddress>
             <ram:PostcodeCode>\(escape(party.postcode))</ram:PostcodeCode>
@@ -137,24 +146,29 @@ public struct CIIXMLGenerator {
     }
 
     private func xmlContact(_ party: InvoiceParty) -> String {
-        guard party.contactName != nil || party.contactEmail != nil || party.contactPhone != nil else {
+        let name = party.contactName.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let phone = party.contactPhone.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let email = party.contactEmail.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+
+        guard name != nil || phone != nil || email != nil else {
             return ""
         }
-        let person = party.contactName.map { """
+
+        let person = name.map { """
             <ram:PersonName>\(escape($0))</ram:PersonName>
 """ } ?? ""
-        let phone = party.contactPhone.map { """
+        let phoneXML = phone.map { """
             <ram:TelephoneUniversalCommunication>
               <ram:CompleteNumber>\(escape($0))</ram:CompleteNumber>
             </ram:TelephoneUniversalCommunication>
 """ } ?? ""
-        let email = party.contactEmail.map { """
+        let emailXML = email.map { """
             <ram:EmailURIUniversalCommunication>
               <ram:URIID>\(escape($0))</ram:URIID>
             </ram:EmailURIUniversalCommunication>
 """ } ?? ""
         return """
-    <ram:DefinedTradeContact>\(person)\(phone)\(email)
+    <ram:DefinedTradeContact>\(person)\(phoneXML)\(emailXML)
     </ram:DefinedTradeContact>
 """
     }
@@ -176,12 +190,42 @@ public struct CIIXMLGenerator {
     }
 
     private func notesXML(_ invoice: Invoice) -> String {
-        guard let notes = invoice.notes, !notes.isEmpty else { return "" }
-        return """
+        var notes: [String] = []
+
+        if let custom = invoice.notes, !custom.isEmpty {
+            notes.append("""
     <ram:IncludedNote>
-      <ram:Content>\(escape(notes))</ram:Content>
+      <ram:Content>\(escape(custom))</ram:Content>
     </ram:IncludedNote>
-"""
+""")
+        }
+
+        if !invoice.legalNotePMT.isEmpty {
+            notes.append("""
+    <ram:IncludedNote>
+      <ram:Content>\(escape(invoice.legalNotePMT))</ram:Content>
+      <ram:SubjectCode>PMT</ram:SubjectCode>
+    </ram:IncludedNote>
+""")
+        }
+        if !invoice.legalNotePMD.isEmpty {
+            notes.append("""
+    <ram:IncludedNote>
+      <ram:Content>\(escape(invoice.legalNotePMD))</ram:Content>
+      <ram:SubjectCode>PMD</ram:SubjectCode>
+    </ram:IncludedNote>
+""")
+        }
+        if !invoice.legalNoteAAB.isEmpty {
+            notes.append("""
+    <ram:IncludedNote>
+      <ram:Content>\(escape(invoice.legalNoteAAB))</ram:Content>
+      <ram:SubjectCode>AAB</ram:SubjectCode>
+    </ram:IncludedNote>
+""")
+        }
+
+        return notes.joined()
     }
 
     private func xmlSettlement(_ invoice: Invoice, issue: String, due: String) -> String {
