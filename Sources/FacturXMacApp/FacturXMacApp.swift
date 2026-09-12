@@ -848,6 +848,12 @@ struct ChorusProSearchSheet: View {
             HStack {
                 Text("Rechercher dans l'annuaire Chorus Pro").font(.headline)
                 Spacer()
+                Button {
+                    if let url = URL(string: "https://facturation.chorus-pro.gouv.fr/annuaire/") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: { Label("Annuaire web", systemImage: "safari") }
+                    .buttonStyle(.bordered)
                 Button("Fermer") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding(12)
 
@@ -941,9 +947,16 @@ struct PartyEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button { showChorusSearch = true } label: {
-                    Label("Rechercher Chorus Pro", systemImage: "network")
+                    Label("Rechercher (API PISTE)", systemImage: "network")
                 }
                 .buttonStyle(.bordered)
+                Button {
+                    openWebDirectory()
+                } label: {
+                    Label("Annuaire web", systemImage: "safari")
+                }
+                .buttonStyle(.bordered)
+                .help("Ouvre l'annuaire public Chorus Pro dans le navigateur")
                 Spacer()
             }
             HStack { Text("Nom").font(.caption); star }
@@ -977,6 +990,13 @@ struct PartyEditorView: View {
             ChorusProSearchSheet(initialQuery: party.siren ?? "") { picked in
                 party = picked
             }
+        }
+    }
+
+    private func openWebDirectory() {
+        let base = "https://facturation.chorus-pro.gouv.fr/annuaire/"
+        if let url = URL(string: base) {
+            NSWorkspace.shared.open(url)
         }
     }
 }
