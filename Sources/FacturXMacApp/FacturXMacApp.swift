@@ -471,6 +471,7 @@ struct PartyPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var creatingNew = false
+    @State private var editingEntry: DirectoryEntry?
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -515,23 +516,31 @@ struct PartyPickerSheet: View {
             } else {
                 List {
                     ForEach(filtered) { entry in
-                        Button {
-                            onPick(entry)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.displayName).font(.body.weight(.medium))
-                                    Text(entry.subtitle).font(.caption).foregroundStyle(.secondary)
-                                    Text(entry.kind.label).font(.caption2)
-                                        .padding(.horizontal, 6).padding(.vertical, 1)
-                                        .background(.quaternary, in: Capsule())
+                        HStack {
+                            Button {
+                                onPick(entry)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.displayName).font(.body.weight(.medium))
+                                        Text(entry.subtitle).font(.caption).foregroundStyle(.secondary)
+                                        Text(entry.kind.label).font(.caption2)
+                                            .padding(.horizontal, 6).padding(.vertical, 1)
+                                            .background(.quaternary, in: Capsule())
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                .contentShape(Rectangle())
                             }
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            Button {
+                                editingEntry = entry
+                            } label: { Image(systemName: "pencil") }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                                .help("Modifier le tiers")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -544,6 +553,15 @@ struct PartyPickerSheet: View {
                 creatingNew = false
                 onPick(newEntry)
             }
+        }
+        .sheet(item: $editingEntry) { entry in
+            DirectoryEditorView(entry: entry, onSave: { updated in
+                directory.upsert(updated)
+                editingEntry = nil
+            }, onDelete: { toDelete in
+                directory.delete(toDelete)
+                editingEntry = nil
+            })
         }
     }
 }
@@ -611,10 +629,25 @@ struct DirectoryView: View {
                             Spacer()
                             Button {
                                 editingEntry = entry
-                            } label: { Image(systemName: "pencil") }
+                            } label: { Label("Modifier", systemImage: "pencil") }
+                                .labelStyle(.iconOnly)
                                 .buttonStyle(.borderless)
+                                .help("Modifier le tiers")
                         }
                         .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            editingEntry = entry
+                        }
+                        .contextMenu {
+                            Button {
+                                editingEntry = entry
+                            } label: { Label("Modifier", systemImage: "pencil") }
+                            Divider()
+                            Button(role: .destructive) {
+                                directory.delete(entry)
+                            } label: { Label("Supprimer", systemImage: "trash") }
+                        }
                     }
                     .onDelete { idx in
                         for i in idx { directory.delete(filtered[i]) }
@@ -623,10 +656,13 @@ struct DirectoryView: View {
             }
         }
         .sheet(item: $editingEntry) { entry in
-            DirectoryEditorView(entry: entry) { updated in
+            DirectoryEditorView(entry: entry, onSave: { updated in
                 directory.upsert(updated)
                 editingEntry = nil
-            }
+            }, onDelete: { toDelete in
+                directory.delete(toDelete)
+                editingEntry = nil
+            })
         }
         .sheet(isPresented: $creatingNew) {
             DirectoryEditorView(initialKind: .client) { newEntry in
@@ -640,23 +676,43 @@ struct DirectoryView: View {
 struct DirectoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var entry: DirectoryEntry
+    private let isEditing: Bool
     let onSave: (DirectoryEntry) -> Void
+    let onDelete: ((DirectoryEntry) -> Void)?
 
-    init(entry: DirectoryEntry, onSave: @escaping (DirectoryEntry) -> Void) {
+    init(entry: DirectoryEntry, onSave: @escaping (DirectoryEntry) -> Void, onDelete: ((DirectoryEntry) -> Void)? = nil) {
         _entry = State(initialValue: entry)
+        self.isEditing = true
         self.onSave = onSave
+        self.onDelete = onDelete
     }
 
     init(initialKind: DirectoryEntryKind, onSave: @escaping (DirectoryEntry) -> Void) {
         _entry = State(initialValue: DirectoryEntry(kind: initialKind, party: InvoiceParty(name: "", street: "", postcode: "", city: "")))
+        self.isEditing = false
         self.onSave = onSave
+        self.onDelete = nil
+    }
+
+    private var headerTitle: String {
+        if entry.party.name.trimmingCharacters(in: .whitespaces).isEmpty {
+            return isEditing ? "Modifier le tiers" : "Nouveau tiers"
+        }
+        return isEditing ? "Modifier : \(entry.party.name)" : "Nouveau tiers : \(entry.party.name)"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(entry.party.name.isEmpty ? "Nouveau tiers" : entry.party.name).font(.headline)
+                Text(headerTitle).font(.headline)
                 Spacer()
+                if isEditing, let onDelete = onDelete {
+                    Button(role: .destructive) {
+                        onDelete(entry)
+                        dismiss()
+                    } label: { Label("Supprimer", systemImage: "trash") }
+                        .buttonStyle(.bordered)
+                }
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Enregistrer") {
                     onSave(entry)
