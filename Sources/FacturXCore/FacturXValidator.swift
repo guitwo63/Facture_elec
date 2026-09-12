@@ -66,6 +66,23 @@ public struct FacturXValidator {
             warnings.append("La date d'échéance est antérieure à la date d'émission.")
         }
 
+        if invoice.seller.endpointID == nil || (invoice.seller.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+            warnings.append("L'identifiant électronique de l'émetteur (BT-49, ex. SIREN avec schemeID FR:SIRENE) est requis par la réforme française.")
+        }
+        if invoice.buyer.endpointID == nil || (invoice.buyer.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+            warnings.append("L'identifiant électronique du destinataire (BT-34, ex. SIREN avec schemeID FR:SIRENE) est requis par la réforme française.")
+        }
+
+        if invoice.legalNotePMT.trimmingCharacters(in: .whitespaces).isEmpty {
+            warnings.append("La mention sur les frais de recouvrement (note avec SubjectCode PMT) est obligatoire en France (BR-FR-05).")
+        }
+        if invoice.legalNotePMD.trimmingCharacters(in: .whitespaces).isEmpty {
+            warnings.append("La mention sur les pénalités de retard (note avec SubjectCode PMD) est obligatoire en France (BR-FR-05).")
+        }
+        if invoice.legalNoteAAB.trimmingCharacters(in: .whitespaces).isEmpty {
+            warnings.append("La mention sur l'escompte (note avec SubjectCode AAB) est obligatoire en France (BR-FR-05).")
+        }
+
         if let iban = invoice.paymentIBAN, !iban.isEmpty {
             let cleaned = iban.replacingOccurrences(of: " ", with: "")
             if cleaned.count < 15 || cleaned.count > 34 {
