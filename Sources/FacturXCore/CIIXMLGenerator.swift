@@ -115,7 +115,9 @@ public struct CIIXMLGenerator {
 """
         } ?? ""
 
-        let endpoint = party.endpointID.map { id -> String in
+        let endpointIDValue = party.endpointID?.trimmingCharacters(in: .whitespaces)
+        let effectiveEndpointID = (endpointIDValue?.isEmpty ?? true) ? (party.siren ?? nil) : endpointIDValue
+        let endpoint = effectiveEndpointID.map { id -> String in
             """
           <ram:ID schemeID="\(party.endpointSchemeID)">\(escape(id))</ram:ID>
 """
