@@ -91,7 +91,7 @@ public struct PartyRoutingAddress: Codable, Hashable, Identifiable {
     public var displayLabel: String {
         let lbl = label?.trimmingCharacters(in: .whitespaces) ?? ""
         let status = isActive ? "active" : "inactive"
-        return lbl.isEmpty ? "\(composedAddress) (\(status))" : "\(lbl) \u2014 \(composedAddress) (\(status))"
+        return lbl.isEmpty ? "\(composedAddress) (\(status))" : "\(lbl) — \(composedAddress) (\(status))"
     }
 
     private enum CodingKeys: String, CodingKey {
