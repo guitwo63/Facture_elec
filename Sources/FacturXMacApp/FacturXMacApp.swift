@@ -149,9 +149,9 @@ struct InvoiceEditorView: View {
                                 TextField("Unité", text: $line.unit).frame(width: 50)
                                 DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
                                 DoubleField("TVA %", value: $line.vatRate, format: .number)
-                                Text(String(format: "%.2f", line.wrappedValue.lineTotal))
+                                Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
-                                Button { invoice.lines.removeAll { $0.id == line.wrappedValue.id } } label: {
+                                Button { invoice.lines.removeAll { $0.id == line.id } } label: {
                                     Image(systemName: "minus.circle")
                                 }
                             }
