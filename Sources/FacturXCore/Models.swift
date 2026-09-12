@@ -64,7 +64,7 @@ public struct InvoiceParty: Codable, Hashable {
         contactEmail: String? = nil,
         contactPhone: String? = nil,
         endpointID: String? = nil,
-        endpointSchemeID: String = "0183"
+        endpointSchemeID: String = "0225"
     ) {
         self.name = name
         self.street = street
@@ -100,7 +100,7 @@ public struct InvoiceParty: Codable, Hashable {
         contactEmail = try c.decodeIfPresent(String.self, forKey: .contactEmail)
         contactPhone = try c.decodeIfPresent(String.self, forKey: .contactPhone)
         endpointID = try c.decodeIfPresent(String.self, forKey: .endpointID)
-        endpointSchemeID = try c.decodeIfPresent(String.self, forKey: .endpointSchemeID) ?? "0183"
+        endpointSchemeID = try c.decodeIfPresent(String.self, forKey: .endpointSchemeID) ?? "0225"
     }
 }
 
