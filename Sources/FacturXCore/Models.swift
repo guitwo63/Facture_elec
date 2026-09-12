@@ -80,6 +80,28 @@ public struct InvoiceParty: Codable, Hashable {
         self.endpointID = endpointID
         self.endpointSchemeID = endpointSchemeID
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, street, postcode, city, country, vatNumber, siren, legalSchemeID
+        case contactName, contactEmail, contactPhone, endpointID, endpointSchemeID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        street = try c.decodeIfPresent(String.self, forKey: .street) ?? ""
+        postcode = try c.decodeIfPresent(String.self, forKey: .postcode) ?? ""
+        city = try c.decodeIfPresent(String.self, forKey: .city) ?? ""
+        country = try c.decodeIfPresent(String.self, forKey: .country) ?? "FR"
+        vatNumber = try c.decodeIfPresent(String.self, forKey: .vatNumber)
+        siren = try c.decodeIfPresent(String.self, forKey: .siren)
+        legalSchemeID = try c.decodeIfPresent(String.self, forKey: .legalSchemeID) ?? "0002"
+        contactName = try c.decodeIfPresent(String.self, forKey: .contactName)
+        contactEmail = try c.decodeIfPresent(String.self, forKey: .contactEmail)
+        contactPhone = try c.decodeIfPresent(String.self, forKey: .contactPhone)
+        endpointID = try c.decodeIfPresent(String.self, forKey: .endpointID)
+        endpointSchemeID = try c.decodeIfPresent(String.self, forKey: .endpointSchemeID) ?? "FR:SIRENE"
+    }
 }
 
 public struct InvoiceLine: Codable, Hashable, Identifiable {
@@ -220,6 +242,36 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.legalNotePMT = legalNotePMT
         self.legalNotePMD = legalNotePMD
         self.legalNoteAAB = legalNoteAAB
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, number, type, issueDate, dueDate, currency, profile, seller, buyer
+        case buyerReference, purchaseOrderRef, lines, paymentIBAN, paymentBIC, paymentTerms, notes
+        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        number = try c.decodeIfPresent(String.self, forKey: .number) ?? ""
+        type = try c.decodeIfPresent(InvoiceTypeCode.self, forKey: .type) ?? .commercialInvoice
+        issueDate = try c.decodeIfPresent(Date.self, forKey: .issueDate) ?? Date()
+        dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate) ?? Date().addingTimeInterval(30 * 86400)
+        currency = try c.decodeIfPresent(String.self, forKey: .currency) ?? "EUR"
+        profile = try c.decodeIfPresent(FacturXProfile.self, forKey: .profile) ?? .en16931
+        seller = try c.decodeIfPresent(InvoiceParty.self, forKey: .seller) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
+        buyer = try c.decodeIfPresent(InvoiceParty.self, forKey: .buyer) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
+        buyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
+        purchaseOrderRef = try c.decodeIfPresent(String.self, forKey: .purchaseOrderRef)
+        lines = try c.decodeIfPresent([InvoiceLine].self, forKey: .lines) ?? []
+        paymentIBAN = try c.decodeIfPresent(String.self, forKey: .paymentIBAN)
+        paymentBIC = try c.decodeIfPresent(String.self, forKey: .paymentBIC)
+        paymentTerms = try c.decodeIfPresent(String.self, forKey: .paymentTerms)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        billingMode = try c.decodeIfPresent(BillingMode.self, forKey: .billingMode) ?? .m1
+        legalNotePMT = try c.decodeIfPresent(String.self, forKey: .legalNotePMT) ?? "Indemnité forfaitaire pour frais de recouvrement due à compter du 1er jour de retard : 40 EUR"
+        legalNotePMD = try c.decodeIfPresent(String.self, forKey: .legalNotePMD) ?? "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur"
+        legalNoteAAB = try c.decodeIfPresent(String.self, forKey: .legalNoteAAB) ?? "Escompte pour paiement anticipé : aucun"
     }
 
     public var lineTotal: Double {
