@@ -113,6 +113,8 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var store: InvoiceStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
+    @State private var validation: FacturXValidationResult?
+    @State private var showValidation = false
 
     var body: some View {
         ScrollView {
@@ -120,6 +122,8 @@ struct InvoiceEditorView: View {
                 HStack {
                     Text("Édition : \(invoice.number)").font(.title2.bold())
                     Spacer()
+                    Button("Valider") { runValidation() }
+                        .buttonStyle(.bordered)
                     Button("Générer le Factur-X") { export() }
                         .buttonStyle(.borderedProminent)
                 }
@@ -130,6 +134,10 @@ struct InvoiceEditorView: View {
                 if let url = exportedURL {
                     Text("Fichier généré : \(url.lastPathComponent)").font(.caption).foregroundStyle(.green)
                     Button("Afficher dans le Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                }
+
+                if showValidation, let v = validation {
+                    validationPanel(v)
                 }
 
                 GroupBox("En-tête") {
@@ -223,18 +231,78 @@ struct InvoiceEditorView: View {
     private func export() {
         exportError = nil
         exportedURL = nil
+        let preCheck = FacturXValidator().validate(invoice: invoice)
+        if !preCheck.isValid {
+            validation = preCheck
+            showValidation = true
+            exportError = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de générer."
+            return
+        }
         do {
             store.upsert(invoice)
             let data = try FacturXGenerator().generate(invoice: invoice)
+            let postCheck = FacturXValidator().validate(pdf: data)
+            if !postCheck.isValid {
+                validation = FacturXValidationResult(
+                    isValid: false,
+                    errors: postCheck.errors,
+                    warnings: preCheck.warnings + postCheck.warnings
+                )
+                showValidation = true
+                exportError = "La conformité du PDF généré a échoué : \(postCheck.errors.count) erreur(s)."
+                return
+            }
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.pdf]
             panel.nameFieldStringValue = "facture-\(invoice.number).pdf"
             if panel.runModal() == .OK, let url = panel.url {
                 try data.write(to: url)
                 exportedURL = url
+                validation = FacturXValidationResult(
+                    isValid: true,
+                    warnings: preCheck.warnings + postCheck.warnings
+                )
+                showValidation = true
             }
         } catch {
             exportError = "\(error)"
+        }
+    }
+
+    private func runValidation() {
+        validation = FacturXValidator().validate(invoice: invoice)
+        showValidation = true
+    }
+
+    private func validationPanel(_ v: FacturXValidationResult) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    if v.isValid {
+                        Label("Conforme", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("Non conforme — \(v.errors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                            .foregroundStyle(.red)
+                    }
+                    Spacer()
+                    Button { showValidation = false } label: {
+                        Image(systemName: "xmark.circle")
+                    }.buttonStyle(.plain)
+                }
+                if !v.errors.isEmpty {
+                    Text("Erreurs :").font(.caption.bold())
+                    ForEach(v.errors, id: \.self) { e in
+                        Text("• \(e)").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                if !v.warnings.isEmpty {
+                    Text("Avertissements :").font(.caption.bold())
+                    ForEach(v.warnings, id: \.self) { w in
+                        Text("• \(w)").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
