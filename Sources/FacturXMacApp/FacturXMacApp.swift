@@ -161,6 +161,11 @@ struct InvoiceEditorView: View {
                             TextField("Devise", text: $invoice.currency).frame(width: 60)
                             TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
                         }
+                        HStack {
+                            Picker("Mode facturation (BT-23)", selection: $invoice.billingMode) {
+                                ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                            }.frame(width: 320)
+                        }
                     }.padding(8)
                 }
 
@@ -202,6 +207,18 @@ struct InvoiceEditorView: View {
                         }
                         TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
                         TextField("Référence commande", text: Binding($invoice.purchaseOrderRef, replacingNilWith: ""))
+                    }.padding(8)
+                }
+
+                GroupBox("Mentions légales (FR)") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Frais de recouvrement (SubjectCode PMT) :").font(.caption.bold())
+                        TextField("Indemnité forfaitaire pour frais de recouvrement", text: $invoice.legalNotePMT)
+                        Text("Pénalités de retard (SubjectCode PMD) :").font(.caption.bold())
+                        TextField("Taux d'intérêt des pénalités de retard", text: $invoice.legalNotePMD)
+                        Text("Escompte (SubjectCode AAB) :").font(.caption.bold())
+                        TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
+                        TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
                     }.padding(8)
                 }
 
@@ -322,6 +339,10 @@ struct PartyEditorView: View {
             HStack {
                 TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
                 TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
+            }
+            HStack {
+                TextField("Identifiant électronique (BT-49/34)", text: Binding($party.endpointID, replacingNilWith: ""))
+                TextField("Scheme", text: $party.endpointSchemeID).frame(width: 100)
             }
             HStack {
                 TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
