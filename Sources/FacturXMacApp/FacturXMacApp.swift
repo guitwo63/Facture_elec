@@ -136,6 +136,19 @@ struct InvoiceEditorView: View {
                     Button("Afficher dans le Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 }
 
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Données obligatoires pour la conformité Factur-X", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
+                        Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-49/34), n° TVA si applicable.").font(.caption)
+                        Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
+                        Text("En-tête : numéro de facture, date, échéance, devise (EUR), mode de facturation (BT-23).").font(.caption)
+                        Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
+                        Text("Paiement : IBAN et BIC si virement SEPA.").font(.caption)
+                    }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 if showValidation, let v = validation {
                     validationPanel(v)
                 }
