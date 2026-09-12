@@ -1,0 +1,108 @@
+import XCTest
+import FacturXCore
+
+final class FacturXCoreTests: XCTestCase {
+
+    private func sampleInvoice() -> Invoice {
+        Invoice(
+            number: "2026-0001",
+            type: .commercialInvoice,
+            issueDate: makeDate("2026-09-01"),
+            dueDate: makeDate("2026-09-30"),
+            currency: "EUR",
+            profile: .en16931,
+            seller: InvoiceParty(
+                name: "Mon Entreprise SARL",
+                street: "12 rue du Commerce",
+                postcode: "75001",
+                city: "Paris",
+                country: "FR",
+                vatNumber: "FR12345678901",
+                siren: "123456789",
+                contactEmail: "[email protected]"
+            ),
+            buyer: InvoiceParty(
+                name: "Client Exemple SAS",
+                street: "8 avenue des Champs",
+                postcode: "75008",
+                city: "Paris",
+                country: "FR"
+            ),
+            buyerReference: "CLIENT-REF-42",
+            lines: [
+                InvoiceLine(name: "Prestation de conseil", quantity: 2, unit: "DAY", unitPrice: 600, vatRate: 20),
+                InvoiceLine(name: "Frais de déplacement", quantity: 1, unit: "C62", unitPrice: 150, vatRate: 20)
+            ],
+            paymentIBAN: "FR7630006000011234567890189",
+            paymentBIC: "AGRIFRPP",
+            paymentTerms: "Paiement à 30 jours"
+        )
+    }
+
+    func testTotals() {
+        let inv = sampleInvoice()
+        XCTAssertEqual(inv.lineTotal, 1350.00, accuracy: 0.001)
+        XCTAssertEqual(inv.taxTotal, 270.00, accuracy: 0.001)
+        XCTAssertEqual(inv.grandTotal, 1620.00, accuracy: 0.001)
+    }
+
+    func testXMLContainsEN16931URN() throws {
+        let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        XCTAssertTrue(s.contains("urn:cen.eu:en16931:2017"))
+        XCTAssertTrue(s.contains("<ram:CrossIndustryInvoice") == false)
+        XCTAssertTrue(s.contains("<rsm:CrossIndustryInvoice"))
+        XCTAssertTrue(s.contains("factur-x") == false)
+        XCTAssertTrue(s.contains("AFRelationship") == false)
+    }
+
+    func testXMLStructureRequiredElements() throws {
+        let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        XCTAssertTrue(s.contains("<ram:ID>2026-0001</ram:ID>"))
+        XCTAssertTrue(s.contains("<ram:TypeCode>380</ram:TypeCode>"))
+        XCTAssertTrue(s.contains("format=\"102\">20260901<"))
+        XCTAssertTrue(s.contains("<ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>"))
+        XCTAssertTrue(s.contains("<ram:SpecifiedTaxRegistration>"))
+        XCTAssertTrue(s.contains("schemeID=\"VA\">FR12345678901"))
+        XCTAssertTrue(s.contains("schemeID=\"0002\">123456789"))
+        XCTAssertTrue(s.contains("<ram:BilledQuantity unitCode=\"DAY\">2.0000"))
+        XCTAssertTrue(s.contains("factur-x.xml") == false)
+    }
+
+    func testPostalAddressOrder() throws {
+        let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        if let addrRange = s.range(of: "<ram:PostalTradeAddress>") {
+            let addr = s[addrRange.lowerBound..<(s.range(of: "</ram:PostalTradeAddress>", range: addrRange.upperBound..<s.endIndex)?.upperBound ?? s.endIndex)]
+            let order = ["PostcodeCode", "LineOne", "CityName", "CountryID"].map { addr.range(of: "<ram:\($0)>") }
+            XCTAssertNotNil(order[0])
+            for i in 0..<(order.count - 1) {
+                if let a = order[i], let b = order[i + 1] {
+                    XCTAssertLessThan(a.lowerBound, b.lowerBound, "Order violation in PostalTradeAddress")
+                }
+            }
+        }
+    }
+
+    func testEmbedProducesFacturXWithAttachment() throws {
+        let invoice = sampleInvoice()
+        let generator = FacturXGenerator()
+        let data = try generator.generate(invoice: invoice)
+        let s = String(data: data, encoding: .isoLatin1) ?? ""
+        XCTAssertTrue(s.contains("/AFRelationship /Alternative"))
+        XCTAssertTrue(s.contains("/EmbeddedFiles"))
+        XCTAssertTrue(s.contains("factur-x.xml"))
+        XCTAssertTrue(s.contains("/AF "))
+        XCTAssertTrue(s.contains("urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#"))
+        XCTAssertTrue(s.contains("fx:ConformanceLevel>EN 16931"))
+        XCTAssertTrue(s.contains("<pdfaid:part>3</pdfaid:part>"))
+    }
+
+    private func makeDate(_ s: String) -> Date {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f.date(from: s)!
+    }
+}
