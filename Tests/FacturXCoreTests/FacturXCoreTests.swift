@@ -86,8 +86,14 @@ final class FacturXCoreTests: XCTestCase {
     func testXMLContainsEndpointIDs() throws {
         let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
         let s = String(data: xml, encoding: .utf8) ?? ""
-        XCTAssertTrue(s.contains("schemeID=\"0225\">123456789<"))
-        XCTAssertTrue(s.contains("schemeID=\"0225\">987654321<"))
+        XCTAssertTrue(s.contains("<ram:URIUniversalCommunication>"),
+                      "BT-34/BT-49 doivent être émis via ram:URIUniversalCommunication")
+        XCTAssertTrue(s.contains("schemeID=\"0225\">123456789<"),
+                      "L'identifiant émetteur (BT-34) doit porter schemeID 0225")
+        XCTAssertTrue(s.contains("schemeID=\"0225\">987654321<"),
+                      "L'identifiant destinataire (BT-49) doit porter schemeID 0225")
+        XCTAssertFalse(s.contains("<ram:ID schemeID=\"0225\">"),
+                       "Le ram:ID nu ne doit plus porter schemeID (non conforme CII EN16931)")
     }
 
     func testXMLContainsLegalNotes() throws {
