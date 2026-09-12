@@ -146,9 +146,9 @@ public struct CIIXMLGenerator {
     }
 
     private func xmlContact(_ party: InvoiceParty) -> String {
-        let name = party.contactName.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let phone = party.contactPhone.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let email = party.contactEmail.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let name = trimmedNonEmpty(party.contactName)
+        let phone = trimmedNonEmpty(party.contactPhone)
+        let email = trimmedNonEmpty(party.contactEmail)
 
         guard name != nil || phone != nil || email != nil else {
             return ""
@@ -171,6 +171,12 @@ public struct CIIXMLGenerator {
     <ram:DefinedTradeContact>\(person)\(phoneXML)\(emailXML)
     </ram:DefinedTradeContact>
 """
+    }
+
+    private func trimmedNonEmpty(_ s: String?) -> String? {
+        guard let s = s else { return nil }
+        let t = s.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : t
     }
 
     private func buyerReferenceXML(_ invoice: Invoice) -> String {
