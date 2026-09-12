@@ -131,7 +131,9 @@ public struct CIIXMLGenerator {
         }
         let endpoint = effectiveEndpointID.map { id -> String in
             """
-          <ram:ID schemeID="\(effectiveSchemeID)">\(escape(id))</ram:ID>
+          <ram:URIUniversalCommunication>
+            <ram:URIID schemeID="\(effectiveSchemeID)">\(escape(id))</ram:URIID>
+          </ram:URIUniversalCommunication>
 """
         } ?? ""
 
@@ -146,14 +148,14 @@ public struct CIIXMLGenerator {
         } ?? ""
 
         let body = """
-        <ram:\(tag)>\(endpoint.isEmpty ? "" : endpoint)
+        <ram:\(tag)>
           <ram:Name>\(escape(party.name))</ram:Name>\(legalOrg.isEmpty ? "" : legalOrg)\(contact.isEmpty ? "" : contact)
           <ram:PostalTradeAddress>
             <ram:PostcodeCode>\(escape(party.postcode))</ram:PostcodeCode>
             <ram:LineOne>\(escape(party.street))</ram:LineOne>
             <ram:CityName>\(escape(party.city))</ram:CityName>
             <ram:CountryID>\(escape(party.country))</ram:CountryID>
-          </ram:PostalTradeAddress>\(taxReg.isEmpty ? "" : taxReg)
+          </ram:PostalTradeAddress>\(endpoint.isEmpty ? "" : endpoint)\(taxReg.isEmpty ? "" : taxReg)
         </ram:\(tag)>
 """
         return body
