@@ -6,13 +6,15 @@ import UniformTypeIdentifiers
 @main
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
+    @StateObject private var directory = PartyDirectory.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
         WindowGroup("Factur-X") {
-            ContentView()
+            RootView()
                 .environmentObject(store)
-                .frame(minWidth: 900, minHeight: 600)
+                .environmentObject(directory)
+                .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
@@ -25,16 +27,16 @@ struct FacturXMacApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Nouvelle facture") {
-                    let draft = store.newDraft()
-                    store.upsert(draft)
-                    selectedItem = draft.id
+                    NotificationCenter.default.post(name: .newInvoiceRequested, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
         }
     }
+}
 
-    @State private var selectedItem: UUID?
+extension Notification.Name {
+    static let newInvoiceRequested = Notification.Name("newInvoiceRequested")
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -51,9 +53,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-struct ContentView: View {
+enum RootTab: String, CaseIterable, Identifiable {
+    case invoices = "Factures"
+    case directory = "Annuaire"
+    var id: String { rawValue }
+}
+
+struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
+    @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $tab) {
+                ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(8)
+
+            switch tab {
+            case .invoices:
+                InvoicesTabView(selectedID: $selectedID)
+            case .directory:
+                DirectoryView()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
+            tab = .invoices
+            let draft = store.newDraft()
+            store.upsert(draft)
+            selectedID = draft.id
+        }
+    }
+}
+
+struct InvoicesTabView: View {
+    @EnvironmentObject var store: InvoiceStore
+    @Binding var selectedID: UUID?
 
     var body: some View {
         NavigationSplitView {
@@ -188,11 +225,11 @@ struct InvoiceEditorView: View {
                 }
 
                 GroupBox("Émetteur (vous)") {
-                    PartyEditorView(party: $invoice.seller)
+                    PartySection(party: $invoice.seller, role: .seller)
                 }
 
                 GroupBox("Destinataire") {
-                    PartyEditorView(party: $invoice.buyer)
+                    PartySection(party: $invoice.buyer, role: .buyer)
                 }
 
                 GroupBox("Lignes") {
@@ -357,6 +394,291 @@ struct InvoiceEditorView: View {
                 }
             }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+struct PartySection: View {
+    enum Role {
+        case seller, buyer
+        var title: String { self == .seller ? "Émetteur" : "Destinataire" }
+        var defaultKind: DirectoryEntryKind { self == .seller ? .fournisseur : .client }
+    }
+
+    @Binding var party: InvoiceParty
+    let role: Role
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var showPicker = false
+    @State private var showSaveSheet = false
+    @State private var saveName = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button {
+                    showPicker = true
+                } label: {
+                    Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    saveName = party.name
+                    showSaveSheet = true
+                } label: {
+                    Label("Enregistrer dans l'annuaire", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.bordered)
+                .disabled(party.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                Spacer()
+            }
+
+            PartyEditorView(party: $party)
+        }
+        .padding(8)
+        .sheet(isPresented: $showPicker) {
+            PartyPickerSheet(role: role) { selected in
+                party = selected.party
+                showPicker = false
+            }
+        }
+        .sheet(isPresented: $showSaveSheet) {
+            VStack(spacing: 12) {
+                Text("Enregistrer dans l'annuaire").font(.headline)
+                TextField("Nom affiché", text: $saveName).frame(width: 320)
+                HStack {
+                    Button("Annuler") { showSaveSheet = false }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Enregistrer") {
+                        var p = party
+                        p.name = saveName.trimmingCharacters(in: .whitespaces).isEmpty ? party.name : saveName
+                        let entry = DirectoryEntry(kind: role.defaultKind, party: p)
+                        directory.upsert(entry)
+                        showSaveSheet = false
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                }
+            }.padding(20)
+        }
+    }
+}
+
+struct PartyPickerSheet: View {
+    let role: PartySection.Role
+    let onPick: (DirectoryEntry) -> Void
+
+    @EnvironmentObject var directory: PartyDirectory
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var creatingNew = false
+
+    var filtered: [DirectoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let base: [DirectoryEntry]
+        if q.isEmpty {
+            base = directory.entries
+        } else {
+            base = directory.entries.filter {
+                $0.displayName.lowercased().contains(q)
+                    || ($0.party.siren ?? "").lowercased().contains(q)
+                    || ($0.party.vatNumber ?? "").lowercased().contains(q)
+                    || $0.party.city.lowercased().contains(q)
+            }
+        }
+        return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Annuaire — choisir \(role.title.lowercased())").font(.headline)
+                Spacer()
+                Button {
+                    creatingNew = true
+                } label: { Label("Nouveau", systemImage: "plus") }
+                    .buttonStyle(.bordered)
+                Button("Fermer") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(12)
+
+            TextField("Rechercher (nom, SIREN, ville…)", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 12).padding(.bottom, 8)
+
+            Divider()
+
+            if filtered.isEmpty {
+                Text("Aucun tiers. Cliquez « Nouveau » pour en créer un.")
+                    .foregroundStyle(.secondary)
+                    .padding()
+            } else {
+                List {
+                    ForEach(filtered) { entry in
+                        Button {
+                            onPick(entry)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.displayName).font(.body.weight(.medium))
+                                    Text(entry.subtitle).font(.caption).foregroundStyle(.secondary)
+                                    Text(entry.kind.label).font(.caption2)
+                                        .padding(.horizontal, 6).padding(.vertical, 1)
+                                        .background(.quaternary, in: Capsule())
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minWidth: 460, minHeight: 420)
+        .sheet(isPresented: $creatingNew) {
+            DirectoryEditorView(initialKind: role.defaultKind) { newEntry in
+                directory.upsert(newEntry)
+                creatingNew = false
+                onPick(newEntry)
+            }
+        }
+    }
+}
+
+struct DirectoryView: View {
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var query = ""
+    @State private var editingEntry: DirectoryEntry?
+    @State private var creatingNew = false
+
+    var filtered: [DirectoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return directory.entries }
+        return directory.entries.filter {
+            $0.displayName.lowercased().contains(q)
+                || ($0.party.siren ?? "").lowercased().contains(q)
+                || ($0.party.vatNumber ?? "").lowercased().contains(q)
+                || $0.party.city.lowercased().contains(q)
+        }
+        .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Annuaire des tiers").font(.title2.bold())
+                Spacer()
+                Button {
+                    creatingNew = true
+                } label: { Label("Nouveau tiers", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+
+            TextField("Rechercher (nom, SIREN, ville…)", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 12).padding(.bottom, 8)
+
+            Divider()
+
+            if filtered.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.2").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucun tiers dans l'annuaire.")
+                        .foregroundStyle(.secondary)
+                    Button("Ajouter un tiers") { creatingNew = true }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(filtered) { entry in
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(entry.displayName).font(.headline)
+                                    Text(entry.kind.label).font(.caption2)
+                                        .padding(.horizontal, 6).padding(.vertical, 1)
+                                        .background(.quaternary, in: Capsule())
+                                }
+                                Text(entry.party.fullAddressLine).font(.caption).foregroundStyle(.secondary)
+                                if let sub = entry.subtitle.isEmpty ? nil : entry.subtitle {
+                                    Text(sub).font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                            Spacer()
+                            Button {
+                                editingEntry = entry
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .onDelete { idx in
+                        let toDelete = filtered[idx]
+                        for e in toDelete { directory.delete(e) }
+                    }
+                }
+            }
+        }
+        .sheet(item: $editingEntry) { entry in
+            DirectoryEditorView(entry: entry) { updated in
+                directory.upsert(updated)
+                editingEntry = nil
+            }
+        }
+        .sheet(isPresented: $creatingNew) {
+            DirectoryEditorView(initialKind: .client) { newEntry in
+                directory.upsert(newEntry)
+                creatingNew = false
+            }
+        }
+    }
+}
+
+struct DirectoryEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var entry: DirectoryEntry
+    let onSave: (DirectoryEntry) -> Void
+
+    init(entry: DirectoryEntry, onSave: @escaping (DirectoryEntry) -> Void) {
+        _entry = State(initialValue: entry)
+        self.onSave = onSave
+    }
+
+    init(initialKind: DirectoryEntryKind, onSave: @escaping (DirectoryEntry) -> Void) {
+        _entry = State(initialValue: DirectoryEntry(kind: initialKind, party: InvoiceParty(name: "", street: "", postcode: "", city: "")))
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(entry.party.name.isEmpty ? "Nouveau tiers" : entry.party.name).font(.headline)
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Enregistrer") {
+                    onSave(entry)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+
+            Picker("Type", selection: $entry.kind) {
+                ForEach(DirectoryEntryKind.allCases, id: \.self) { Text($0.label).tag($0) }
+            }.pickerStyle(.segmented)
+
+            GroupBox("Identité et adresse") {
+                PartyEditorView(party: $entry.party)
+            }
+
+            TextField("Note (optionnel)", text: Binding($entry.note, replacingNilWith: ""))
+        }
+        .padding(16)
+        .frame(minWidth: 520, minHeight: 480)
     }
 }
 

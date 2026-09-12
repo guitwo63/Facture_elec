@@ -102,6 +102,15 @@ public struct InvoiceParty: Codable, Hashable {
         endpointID = try c.decodeIfPresent(String.self, forKey: .endpointID)
         endpointSchemeID = try c.decodeIfPresent(String.self, forKey: .endpointSchemeID) ?? "0225"
     }
+
+    public var fullAddressLine: String {
+        var parts: [String] = []
+        if !street.trimmingCharacters(in: .whitespaces).isEmpty { parts.append(street) }
+        if !postcode.trimmingCharacters(in: .whitespaces).isEmpty { parts.append(postcode) }
+        if !city.trimmingCharacters(in: .whitespaces).isEmpty { parts.append(city) }
+        if !country.trimmingCharacters(in: .whitespaces).isEmpty { parts.append(country) }
+        return parts.joined(separator: ", ")
+    }
 }
 
 public struct InvoiceLine: Codable, Hashable, Identifiable {
