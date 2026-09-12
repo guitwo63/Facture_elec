@@ -113,6 +113,19 @@ struct InvoicesTabView: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 HStack {
+                    Button {
+                        let draft = store.newDraft()
+                        store.upsert(draft)
+                        selectedID = draft.id
+                    } label: {
+                        Label("Nouvelle", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Spacer()
+                }
+                .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+
+                HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Rechercher (numéro, client, SIREN…)", text: $query)
                         .textFieldStyle(.plain)
@@ -151,17 +164,6 @@ struct InvoicesTabView: View {
                 }
             }
             .navigationTitle("Factures")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        let draft = store.newDraft()
-                        store.upsert(draft)
-                        selectedID = draft.id
-                    } label: {
-                        Label("Nouvelle", systemImage: "plus")
-                    }
-                }
-            }
         } detail: {
             if let id = selectedID,
                store.invoices.contains(where: { $0.id == id }) {
