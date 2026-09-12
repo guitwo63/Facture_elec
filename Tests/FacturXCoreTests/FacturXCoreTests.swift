@@ -99,6 +99,55 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertTrue(s.contains("<pdfaid:part>3</pdfaid:part>"))
     }
 
+    func testEmbeddedFilesNamesNotDoubleNested() throws {
+        let invoice = sampleInvoice()
+        let data = try FacturXGenerator().generate(invoice: invoice)
+        let s = String(data: data, encoding: .isoLatin1) ?? ""
+        XCTAssertFalse(s.contains("<< /Names << /EmbeddedFiles"),
+                       "L'arbre Names ne doit pas être doublement enveloppé dans /Names.")
+        XCTAssertTrue(s.contains("<< /EmbeddedFiles << /Names ["),
+                     "La structure /Names /EmbeddedFiles doit être directement accessible.")
+    }
+
+    func testValidatorPassesOnValidInvoice() {
+        let v = FacturXValidator().validate(invoice: sampleInvoice())
+        XCTAssertTrue(v.isValid, "Erreurs inattendues : \(v.errors)")
+    }
+
+    func testValidatorFailsOnEmptyInvoice() {
+        let inv = Invoice(number: "", seller: InvoiceParty(name: "", street: "", postcode: "", city: ""),
+                          buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""))
+        let v = FacturXValidator().validate(invoice: inv)
+        XCTAssertFalse(v.isValid)
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("numéro de facture") }))
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("émetteur") }))
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("destinataire") }))
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("au moins une ligne") }))
+    }
+
+    func testValidatorFailsOnNegativePrice() {
+        var inv = sampleInvoice()
+        inv.lines[0].unitPrice = -50
+        let v = FacturXValidator().validate(invoice: inv)
+        XCTAssertFalse(v.isValid)
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("prix unitaire ne peut pas être négatif") }))
+    }
+
+    func testValidatorPDFDetectsFacturXAttachment() throws {
+        let data = try FacturXGenerator().generate(invoice: sampleInvoice())
+        let v = FacturXValidator().validate(pdf: data)
+        XCTAssertTrue(v.isValid, "Erreurs PDF : \(v.errors)")
+    }
+
+    func testValidatorPDFFailsOnBarePDF() {
+        let renderer = InvoicePDFRenderer()
+        let pdf = renderer.render(invoice: sampleInvoice())
+        let v = FacturXValidator().validate(pdf: pdf)
+        XCTAssertFalse(v.isValid)
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("factur-x.xml") }))
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("/EmbeddedFiles") }))
+    }
+
     private func makeDate(_ s: String) -> Date {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
