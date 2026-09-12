@@ -442,7 +442,15 @@ struct PartySection: View {
         .padding(8)
         .sheet(isPresented: $showPicker) {
             PartyPickerSheet(role: role) { selected in
-                party = selected.party
+                var p = selected.party
+                if let routing = selected.defaultRoutingAddress, routing.isActive {
+                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+                    if !composed.isEmpty {
+                        p.endpointID = composed
+                        p.endpointSchemeID = "0225"
+                    }
+                }
+                party = p
                 showPicker = false
             }
         }
@@ -529,6 +537,11 @@ struct PartyPickerSheet: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(entry.displayName).font(.body.weight(.medium))
                                         Text(entry.subtitle).font(.caption).foregroundStyle(.secondary)
+                                        if let routing = entry.defaultRoutingAddress, routing.isActive {
+                                            Text("Adresse de routage : \(routing.composedAddress)")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
                                         Text(entry.kind.label).font(.caption2)
                                             .padding(.horizontal, 6).padding(.vertical, 1)
                                             .background(.quaternary, in: Capsule())
