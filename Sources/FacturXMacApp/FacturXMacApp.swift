@@ -156,8 +156,10 @@ struct InvoiceEditorView: View {
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            LabeledContent(Text("Numéro *").foregroundColor(.red)) {
+                            LabeledContent {
                                 TextField("", text: $invoice.number).frame(width: 160)
+                            } label: {
+                                Text("Numéro *").foregroundColor(.red)
                             }
                             Picker("Type", selection: $invoice.type) {
                                 ForEach(InvoiceTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
