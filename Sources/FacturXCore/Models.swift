@@ -201,7 +201,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
 public extension Double {
     func rounded(toPlaces places: Int = 2) -> Double {
         let factor = pow(10.0, Double(places))
-        return (self * factor).rounded() / factor
+        return (self * factor).rounded(.toNearestOrEven) / factor
     }
 
     func formatted(amount: Bool = true) -> String {
