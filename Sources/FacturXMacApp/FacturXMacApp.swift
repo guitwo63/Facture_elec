@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
     @StateObject private var directory = PartyDirectory.shared
+    @StateObject private var chorusSettings = ChorusProSettings.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -14,6 +15,7 @@ struct FacturXMacApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(directory)
+                .environmentObject(chorusSettings)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -56,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum RootTab: String, CaseIterable, Identifiable {
     case invoices = "Factures"
     case directory = "Annuaire"
+    case settings = "Réglages"
     var id: String { rawValue }
 }
 
@@ -77,6 +80,8 @@ struct RootView: View {
                 InvoicesTabView(selectedID: $selectedID)
             case .directory:
                 DirectoryView()
+            case .settings:
+                SettingsView()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
@@ -737,13 +742,189 @@ struct DirectoryEditorView: View {
     }
 }
 
+struct SettingsView: View {
+    @EnvironmentObject var chorusSettings: ChorusProSettings
+    @State private var testMessage: String?
+    @State private var testing = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Réglages").font(.title2.bold())
+
+                GroupBox("Annuaire Chorus Pro (PISTE)") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Renseignez les identifiants de votre application PISTE pour activer la recherche des adresses de facturation électronique.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text("Client ID").frame(width: 100, alignment: .leading)
+                            TextField("Client ID", text: $chorusSettings.credentials.clientID)
+                        }
+                        HStack {
+                            Text("Client Secret").frame(width: 100, alignment: .leading)
+                            SecureField("Client Secret", text: $chorusSettings.credentials.clientSecret)
+                        }
+                        HStack {
+                            Text("URL Token").frame(width: 100, alignment: .leading)
+                            TextField("URL Token", text: $chorusSettings.credentials.tokenURL)
+                        }
+                        HStack {
+                            Text("Base API").frame(width: 100, alignment: .leading)
+                            TextField("Base API", text: $chorusSettings.credentials.apiBaseURL)
+                        }
+                        HStack {
+                            Button {
+                                chorusSettings.save()
+                            } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                                .buttonStyle(.borderedProminent)
+                            Button {
+                                testing = true
+                                testMessage = nil
+                                Task {
+                                    do {
+                                        let service = ChorusProService()
+                                        _ = try await service.fetchToken(credentials: chorusSettings.credentials)
+                                        testMessage = "Connexion réussie — jeton obtenu."
+                                    } catch {
+                                        testMessage = "Échec : \(error.localizedDescription)"
+                                    }
+                                    testing = false
+                                }
+                            } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
+                                .buttonStyle(.bordered)
+                                .disabled(testing || !chorusSettings.credentials.isConfigured)
+                            Spacer()
+                        }
+                        if let m = testMessage {
+                            Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        }
+                        Text("Obtenir des identifiants : portail PISTE (api.gouv.fr) → créer une application → ajouter l'API Chorus Pro.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }.padding(8)
+                }
+                Spacer()
+            }.padding()
+        }
+    }
+}
+
+struct ChorusProSearchSheet: View {
+    @EnvironmentObject var chorusSettings: ChorusProSettings
+    @Environment(\.dismiss) private var dismiss
+    @State private var query: String
+    @State private var results: [ChorusProResult] = []
+    @State private var searching = false
+    @State private var error: String?
+    let onPick: (InvoiceParty) -> Void
+
+    init(initialQuery: String, onPick: @escaping (InvoiceParty) -> Void) {
+        _query = State(initialValue: initialQuery)
+        self.onPick = onPick
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Rechercher dans l'annuaire Chorus Pro").font(.headline)
+                Spacer()
+                Button("Fermer") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(12)
+
+            HStack {
+                TextField("SIRET ou SIREN", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { runSearch() }
+                Button { runSearch() } label: { Label("Rechercher", systemImage: "magnifyingglass") }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(searching || query.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.horizontal, 12).padding(.bottom, 8)
+
+            if !chorusSettings.credentials.isConfigured {
+                Text("Identifiants PISTE non configurés. Ouvrez l'onglet Réglages.")
+                    .font(.caption).foregroundStyle(.orange).padding(12)
+            }
+
+            if searching {
+                HStack { Spacer(); ProgressView(); Spacer() }.padding()
+            } else if let err = error {
+                Text(err).font(.caption).foregroundStyle(.red).padding(12)
+            } else {
+                Divider()
+                if results.isEmpty {
+                    Text("Saisissez un SIRET et lancez la recherche.")
+                        .foregroundStyle(.secondary).padding()
+                } else {
+                    List {
+                        ForEach(results) { r in
+                            Button {
+                                onPick(r.toInvoiceParty())
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(r.denomination ?? "(sans dénomination)").font(.body.weight(.medium))
+                                        Text(r.displaySubtitle).font(.caption).foregroundStyle(.secondary)
+                                        if let addr = r.addressLine, !addr.isEmpty {
+                                            Text(addr).font(.caption2).foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minWidth: 520, minHeight: 460)
+    }
+
+    private func runSearch() {
+        guard chorusSettings.credentials.isConfigured else {
+            error = "Identifiants PISTE non configurés."
+            return
+        }
+        searching = true
+        error = nil
+        results = []
+        Task {
+            do {
+                let r = try await ChorusProService().searchRecipient(
+                    siretOrSiren: query,
+                    credentials: chorusSettings.credentials
+                )
+                results = r
+                if r.isEmpty { error = "Aucun résultat." }
+            } catch let e as ChorusProError {
+                self.error = e.errorDescription
+            } catch {
+                self.error = error.localizedDescription
+            }
+            searching = false
+        }
+    }
+}
+
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
+    @State private var showChorusSearch = false
 
     private var star: some View { Text(" *").foregroundColor(.red) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button { showChorusSearch = true } label: {
+                    Label("Rechercher Chorus Pro", systemImage: "network")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+            }
             HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
             TextField("Adresse", text: $party.street)
@@ -771,6 +952,11 @@ struct PartyEditorView: View {
                 TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
             }
         }.padding(8)
+        .sheet(isPresented: $showChorusSearch) {
+            ChorusProSearchSheet(initialQuery: party.siren ?? "") { picked in
+                party = picked
+            }
+        }
     }
 }
 
