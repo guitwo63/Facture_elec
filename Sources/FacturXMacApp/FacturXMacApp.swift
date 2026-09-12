@@ -1,6 +1,7 @@
 import SwiftUI
 import FacturXCore
 import AppKit
+import UniformTypeIdentifiers
 
 @main
 struct FacturXMacApp: App {
@@ -123,6 +124,8 @@ struct InvoiceEditorView: View {
                     Text("Édition : \(invoice.number)").font(.title2.bold())
                     Spacer()
                     Button("Valider") { runValidation() }
+                        .buttonStyle(.bordered)
+                    Button("Exporter XML") { exportXML() }
                         .buttonStyle(.bordered)
                     Button("Générer le Factur-X") { export() }
                         .buttonStyle(.borderedProminent)
@@ -304,6 +307,24 @@ struct InvoiceEditorView: View {
     private func runValidation() {
         validation = FacturXValidator().validate(invoice: invoice)
         showValidation = true
+    }
+
+    private func exportXML() {
+        do {
+            let xml = try CIIXMLGenerator().generate(invoice: invoice)
+            let xmlString = String(data: xml, encoding: .utf8) ?? ""
+            print("=== XML CII ===")
+            print(xmlString)
+            print("=== FIN XML ===")
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.xml]
+            panel.nameFieldStringValue = "facture-\(invoice.number).xml"
+            if panel.runModal() == .OK, let url = panel.url {
+                try xml.write(to: url)
+            }
+        } catch {
+            exportError = "\(error)"
+        }
     }
 
     private func validationPanel(_ v: FacturXValidationResult) -> some View {
