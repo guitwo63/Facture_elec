@@ -19,14 +19,19 @@ final class FacturXCoreTests: XCTestCase {
                 country: "FR",
                 vatNumber: "FR12345678901",
                 siren: "123456789",
-                contactEmail: "[email protected]"
+                contactEmail: "[email protected]",
+                endpointID: "123456789",
+                endpointSchemeID: "FR:SIRENE"
             ),
             buyer: InvoiceParty(
                 name: "Client Exemple SAS",
                 street: "8 avenue des Champs",
                 postcode: "75008",
                 city: "Paris",
-                country: "FR"
+                country: "FR",
+                siren: "987654321",
+                endpointID: "987654321",
+                endpointSchemeID: "FR:SIRENE"
             ),
             buyerReference: "CLIENT-REF-42",
             lines: [
@@ -35,7 +40,8 @@ final class FacturXCoreTests: XCTestCase {
             ],
             paymentIBAN: "FR7630006000011234567890189",
             paymentBIC: "AGRIFRPP",
-            paymentTerms: "Paiement à 30 jours"
+            paymentTerms: "Paiement à 30 jours",
+            billingMode: .m1
         )
     }
 
@@ -68,6 +74,41 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertTrue(s.contains("schemeID=\"0002\">123456789"))
         XCTAssertTrue(s.contains("<ram:BilledQuantity unitCode=\"DAY\">2.0000"))
         XCTAssertTrue(s.contains("factur-x.xml") == false)
+    }
+
+    func testXMLContainsBillingMode() throws {
+        let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        XCTAssertTrue(s.contains("BusinessProcessSpecifiedDocumentContextParameter"))
+        XCTAssertTrue(s.contains("<ram:ID>M1</ram:ID>"))
+    }
+
+    func testXMLContainsEndpointIDs() throws {
+        let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        XCTAssertTrue(s.contains("schemeID=\"FR:SIRENE\">123456789<"))
+        XCTAssertTrue(s.contains("schemeID=\"FR:SIRENE\">987654321<"))
+    }
+
+    func testXMLContainsLegalNotes() throws {
+        let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        XCTAssertTrue(s.contains("<ram:SubjectCode>PMT</ram:SubjectCode>"))
+        XCTAssertTrue(s.contains("<ram:SubjectCode>PMD</ram:SubjectCode>"))
+        XCTAssertTrue(s.contains("<ram:SubjectCode>AAB</ram:SubjectCode>"))
+    }
+
+    func testXMLNoEmptyPersonName() throws {
+        var inv = sampleInvoice()
+        inv.seller = InvoiceParty(
+            name: "Test", street: "", postcode: "", city: "",
+            contactName: "   ", contactEmail: "[email protected]"
+        )
+        let xml = try CIIXMLGenerator().generate(invoice: inv)
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        XCTAssertFalse(s.contains("<ram:PersonName></ram:PersonName>"),
+                       "PersonName ne doit pas être vide")
+        XCTAssertTrue(s.contains("DefinedTradeContact"))
     }
 
     func testPostalAddressOrder() throws {
@@ -112,6 +153,8 @@ final class FacturXCoreTests: XCTestCase {
     func testValidatorPassesOnValidInvoice() {
         let v = FacturXValidator().validate(invoice: sampleInvoice())
         XCTAssertTrue(v.isValid, "Erreurs inattendues : \(v.errors)")
+        XCTAssertTrue(v.warnings.isEmpty || v.warnings.allSatisfy { !$0.contains("BT-49") && !$0.contains("BT-34") },
+                      "Ne doit pas avertir sur BT-49/BT-34 si endpointID présent")
     }
 
     func testValidatorFailsOnEmptyInvoice() {
