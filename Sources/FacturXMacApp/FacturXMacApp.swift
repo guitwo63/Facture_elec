@@ -156,7 +156,7 @@ struct InvoiceEditorView: View {
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            LabeledContent("Numéro") {
+                            LabeledContent(Text("Numéro *").foregroundColor(.red)) {
                                 TextField("", text: $invoice.number).frame(width: 160)
                             }
                             Picker("Type", selection: $invoice.type) {
@@ -194,7 +194,7 @@ struct InvoiceEditorView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach($invoice.lines) { $line in
                             HStack {
-                                TextField("Désignation", text: $line.name).frame(minWidth: 220)
+                                TextField("Désignation *", text: $line.name).frame(minWidth: 220)
                                 DoubleField("Qté", value: $line.quantity, format: .number)
                                 TextField("Unité", text: $line.unit).frame(width: 50)
                                 DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
@@ -340,21 +340,29 @@ struct InvoiceEditorView: View {
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
 
+    private var star: some View { Text(" *").foregroundColor(.red) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
             TextField("Adresse", text: $party.street)
             HStack {
                 TextField("Code postal", text: $party.postcode)
                 TextField("Ville", text: $party.city)
-                TextField("Pays", text: $party.country).frame(width: 60)
             }
             HStack {
-                TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
+                Text("Pays").font(.caption); star
+                TextField("Pays (ex. FR)", text: $party.country).frame(width: 60)
+            }
+            HStack {
+                Text("SIREN").font(.caption); star
                 TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
+                TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
             }
             HStack {
-                TextField("Identifiant électronique (BT-49/34)", text: Binding($party.endpointID, replacingNilWith: ""))
+                Text("Ident. élec. (BT-49/34)").font(.caption)
+                TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
                 TextField("Scheme", text: $party.endpointSchemeID).frame(width: 100)
             }
             HStack {
