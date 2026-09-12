@@ -96,23 +96,58 @@ struct RootView: View {
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @Binding var selectedID: UUID?
+    @State private var query = ""
+
+    var filteredInvoices: [Invoice] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return store.invoices }
+        return store.invoices.filter { invoice in
+            invoice.number.lowercased().contains(q)
+                || invoice.buyer.name.lowercased().contains(q)
+                || (invoice.buyer.siren ?? "").lowercased().contains(q)
+                || (invoice.seller.name.lowercased()).contains(q)
+        }
+    }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedID) {
-                ForEach(store.invoices) { invoice in
-                    VStack(alignment: .leading) {
-                        Text(invoice.number).font(.headline)
-                        Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text(String(format: "%.2f %@ TTC", invoice.grandTotal, invoice.currency))
-                            .font(.caption2).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Rechercher (numéro, client, SIREN…)", text: $query)
+                        .textFieldStyle(.plain)
+                        .onSubmit { }
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .tag(invoice.id)
                 }
-                .onDelete { idx in
-                    store.invoices.remove(atOffsets: idx)
-                    store.save()
+                .padding(8)
+                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+
+                List(selection: $selectedID) {
+                    ForEach(filteredInvoices) { invoice in
+                        VStack(alignment: .leading) {
+                            Text(invoice.number).font(.headline)
+                            Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", invoice.grandTotal, invoice.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .tag(invoice.id)
+                    }
+                    .onDelete { idx in
+                        let toRemove = idx.compactMap { i in
+                            i < filteredInvoices.count ? filteredInvoices[i] : nil
+                        }
+                        for inv in toRemove {
+                            store.invoices.removeAll { $0.id == inv.id }
+                        }
+                        store.save()
+                    }
                 }
             }
             .navigationTitle("Factures")
