@@ -617,8 +617,7 @@ struct DirectoryView: View {
                         .padding(.vertical, 2)
                     }
                     .onDelete { idx in
-                        let toDelete = filtered[idx]
-                        for e in toDelete { directory.delete(e) }
+                        for i in idx { directory.delete(filtered[i]) }
                     }
                 }
             }
