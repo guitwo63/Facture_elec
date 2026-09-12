@@ -5,22 +5,58 @@ public struct ChorusProCredentials: Codable, Equatable {
     public var clientSecret: String
     public var tokenURL: String
     public var apiBaseURL: String
+    public var scope: String
+    public var techLogin: String
+    public var techPassword: String
 
     public init(
         clientID: String,
         clientSecret: String,
-        tokenURL: String = "https://oauth.piste.gouv.fr/oauth2/v1/token",
-        apiBaseURL: String = "https://api.piste.gouv.fr"
+        tokenURL: String = "https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token",
+        apiBaseURL: String = "https://sandbox-api.aife.economie.gouv.fr",
+        scope: String = "openid",
+        techLogin: String = "",
+        techPassword: String = ""
     ) {
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.tokenURL = tokenURL
         self.apiBaseURL = apiBaseURL
+        self.scope = scope
+        self.techLogin = techLogin
+        self.techPassword = techPassword
     }
 
     public var isConfigured: Bool {
         !clientID.trimmingCharacters(in: .whitespaces).isEmpty
             && !clientSecret.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    public var hasTechnicalAccount: Bool {
+        !techLogin.trimmingCharacters(in: .whitespaces).isEmpty
+            && !techPassword.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    public var cproAccountHeader: String? {
+        guard hasTechnicalAccount else { return nil }
+        return Data("\(techLogin):\(techPassword)".utf8).base64EncodedString()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clientID, clientSecret, tokenURL, apiBaseURL, scope, techLogin, techPassword
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        clientID = try c.decodeIfPresent(String.self, forKey: .clientID) ?? ""
+        clientSecret = try c.decodeIfPresent(String.self, forKey: .clientSecret) ?? ""
+        tokenURL = try c.decodeIfPresent(String.self, forKey: .tokenURL)
+            ?? "https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token"
+        apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL)
+            ?? "https://sandbox-api.aife.economie.gouv.fr"
+        scope = try c.decodeIfPresent(String.self, forKey: .scope) ?? "openid"
+        techLogin = try c.decodeIfPresent(String.self, forKey: .techLogin) ?? ""
+        techPassword = try c.decodeIfPresent(String.self, forKey: .techPassword) ?? ""
     }
 }
 
@@ -104,6 +140,10 @@ public final class ChorusProService {
         return String(digits.prefix(9))
     }
 
+    private func urlEncode(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
+    }
+
     private struct TokenResponse: Decodable {
         let access_token: String?
         let token_type: String?
@@ -118,9 +158,12 @@ public final class ChorusProService {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let basic = Data("\(credentials.clientID):\(credentials.clientSecret)".utf8).base64EncodedString()
-        req.setValue("Basic \(basic)", forHTTPHeaderField: "Authorization")
-        let body = "grant_type=client_credentials&scope=scope"
+        let scope = credentials.scope.trimmingCharacters(in: .whitespaces).isEmpty
+            ? "openid" : credentials.scope
+        let body = "grant_type=client_credentials"
+            + "&client_id=\(urlEncode(credentials.clientID))"
+            + "&client_secret=\(urlEncode(credentials.clientSecret))"
+            + "&scope=\(urlEncode(scope))"
         req.httpBody = body.data(using: .utf8)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
@@ -149,6 +192,9 @@ public final class ChorusProService {
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        if let cpro = credentials.cproAccountHeader {
+            req.setValue(cpro, forHTTPHeaderField: "cpro-account")
+        }
         let payload: [String: Any] = [
             "idCriteria": query,
             "typeRecherche": query.count >= 14 ? "SIRET" : "SIREN"

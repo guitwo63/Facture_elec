@@ -754,7 +754,7 @@ struct SettingsView: View {
 
                 GroupBox("Annuaire Chorus Pro (PISTE)") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Renseignez les identifiants de votre application PISTE pour activer la recherche des adresses de facturation électronique.")
+                        Text("Renseignez les identifiants de votre application PISTE (client_id / client_secret) et le compte technique Chorus Pro requis pour appeler l'API.")
                             .font(.caption).foregroundStyle(.secondary)
                         HStack {
                             Text("Client ID").frame(width: 100, alignment: .leading)
@@ -765,12 +765,26 @@ struct SettingsView: View {
                             SecureField("Client Secret", text: $chorusSettings.credentials.clientSecret)
                         }
                         HStack {
+                            Text("Scope").frame(width: 100, alignment: .leading)
+                            TextField("openid", text: $chorusSettings.credentials.scope)
+                        }
+                        HStack {
                             Text("URL Token").frame(width: 100, alignment: .leading)
                             TextField("URL Token", text: $chorusSettings.credentials.tokenURL)
                         }
                         HStack {
                             Text("Base API").frame(width: 100, alignment: .leading)
                             TextField("Base API", text: $chorusSettings.credentials.apiBaseURL)
+                        }
+                        Divider()
+                        Text("Compte technique Chorus Pro (en-tête cpro-account)").font(.caption.bold())
+                        HStack {
+                            Text("Login tech.").frame(width: 100, alignment: .leading)
+                            TextField("login technique", text: $chorusSettings.credentials.techLogin)
+                        }
+                        HStack {
+                            Text("Mot de passe").frame(width: 100, alignment: .leading)
+                            SecureField("mot de passe technique", text: $chorusSettings.credentials.techPassword)
                         }
                         HStack {
                             Button {
@@ -798,8 +812,15 @@ struct SettingsView: View {
                         if let m = testMessage {
                             Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
                         }
-                        Text("Obtenir des identifiants : portail PISTE (api.gouv.fr) → créer une application → ajouter l'API Chorus Pro.")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sandbox (tests)").font(.caption2.bold())
+                            Text("Token : https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token").font(.caption2).foregroundStyle(.tertiary)
+                            Text("API : https://sandbox-api.aife.economie.gouv.fr").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Production").font(.caption2.bold())
+                            Text("Token : https://oauth.aife.economie.gouv.fr/api/oauth/token").font(.caption2).foregroundStyle(.tertiary)
+                            Text("API : https://api.aife.economie.gouv.fr").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Scope par défaut : openid. Créez l'application sur PISTE, souscrivez l'API Chorus Pro, puis créez un compte technique Chorus Pro pour l'en-tête cpro-account.").font(.caption2).foregroundStyle(.tertiary)
+                        }
                     }.padding(8)
                 }
                 Spacer()
