@@ -735,10 +735,132 @@ struct DirectoryEditorView: View {
                 PartyEditorView(party: $entry.party)
             }
 
+            GroupBox("Adresses de facturation électronique (Chorus Pro)") {
+                RoutingAddressEditorView(addresses: $entry.routingAddresses)
+            }
+
             TextField("Note (optionnel)", text: Binding($entry.note, replacingNilWith: ""))
         }
         .padding(16)
-        .frame(minWidth: 520, minHeight: 480)
+        .frame(minWidth: 560, minHeight: 560)
+    }
+}
+
+struct RoutingAddressEditorView: View {
+    @Binding var addresses: [PartyRoutingAddress]
+    @State private var editing: PartyRoutingAddress?
+    @State private var showEditor = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if addresses.isEmpty {
+                Text("Aucune adresse de routage. Ajoutez-en une pour déclarer l'adresse de facturation électronique (BT-49/BT-34).")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(addresses) { addr in
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(addr.format.label).font(.caption.bold())
+                            Text(addr.composedAddress).font(.system(.caption, design: .monospaced))
+                            if let lbl = addr.label, !lbl.isEmpty {
+                                Text(lbl).font(.caption).foregroundColor(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if addr.isDefault {
+                            Text("défaut").font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.2), in: Capsule())
+                        }
+                        if !addr.isActive {
+                            Text("inactive").font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.2), in: Capsule())
+                        }
+                        Button { editing = addr; showEditor = true } label: {
+                            Image(systemName: "pencil")
+                        }.buttonStyle(.borderless)
+                        Button(role: .destructive) {
+                            addresses.removeAll { $0.id == addr.id }
+                            if addresses.allSatisfy({ !$0.isDefault }), let f = addresses.first {
+                                addresses[0].isDefault = true
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                        }.buttonStyle(.borderless)
+                    }
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+                }
+            }
+            Button {
+                editing = PartyRoutingAddress(siren: "")
+                showEditor = true
+            } label: {
+                Label("Ajouter une adresse", systemImage: "plus.circle")
+            }.buttonStyle(.bordered)
+        }
+        .padding(8)
+        .sheet(isPresented: $showEditor) {
+            if let addr = editing {
+                RoutingAddressFormView(addresses: $addresses, editing: addr)
+            }
+        }
+    }
+}
+
+struct RoutingAddressFormView: View {
+    @Binding var addresses: [PartyRoutingAddress]
+    @State private var draft: PartyRoutingAddress
+    @Environment(\.dismiss) private var dismiss
+    private let existingID: UUID?
+
+    init(addresses: Binding<[PartyRoutingAddress]>, editing: PartyRoutingAddress) {
+        _addresses = addresses
+        _draft = State(initialValue: editing)
+        existingID = editing.id
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(existingID == nil ? "Nouvelle adresse de routage" : "Modifier l'adresse de routage").font(.headline)
+            Picker("Format", selection: $draft.format) {
+                ForEach(RoutingAddressFormat.allCases, id: \.self) { Text($0.label).tag($0) }
+            }.pickerStyle(.segmented)
+            Text(draft.format.help).font(.caption).foregroundColor(.secondary)
+
+            TextField("SIREN (9 chiffres)", text: $draft.siren)
+            if draft.format == .sirenSiret || draft.format == .sirenSiretCodeRoutage {
+                TextField("SIRET (14 chiffres)", text: Binding($draft.siret, replacingNilWith: ""))
+            }
+            if draft.format == .sirenSuffixe {
+                TextField("Suffixe", text: Binding($draft.suffixe, replacingNilWith: ""))
+            }
+            if draft.format == .sirenSiretCodeRoutage {
+                TextField("Code de routage", text: Binding($draft.codeRoutage, replacingNilWith: ""))
+            }
+            TextField("Libellé (optionnel)", text: Binding($draft.label, replacingNilWith: ""))
+            Toggle("Adresse active", isOn: $draft.isActive)
+            Toggle("Adresse par défaut", isOn: $draft.isDefault)
+            HStack {
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Enregistrer") {
+                    if draft.isDefault {
+                        for i in addresses.indices { addresses[i].isDefault = false }
+                    }
+                    if let id = existingID, let idx = addresses.firstIndex(where: { $0.id == id }) {
+                        addresses[idx] = draft
+                    } else {
+                        if addresses.isEmpty { draft.isDefault = true }
+                        addresses.append(draft)
+                    }
+                    if addresses.allSatisfy({ !$0.isDefault }), let f = addresses.first {
+                        addresses[0].isDefault = true
+                    }
+                    dismiss()
+                }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+            }
+        }.padding(16).frame(minWidth: 420, minHeight: 360)
     }
 }
 

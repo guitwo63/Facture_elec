@@ -14,22 +14,123 @@ public enum DirectoryEntryKind: String, Codable, CaseIterable {
     }
 }
 
+public enum RoutingAddressFormat: String, Codable, CaseIterable {
+    case siren
+    case sirenSiret
+    case sirenSuffixe
+    case sirenSiretCodeRoutage
+
+    public var label: String {
+        switch self {
+        case .siren: return "SIREN"
+        case .sirenSiret: return "SIREN_SIRET"
+        case .sirenSuffixe: return "SIREN_Suffixe"
+        case .sirenSiretCodeRoutage: return "SIREN_SIRET_CodeRoutage"
+        }
+    }
+
+    public var help: String {
+        switch self {
+        case .siren: return "Adresse de niveau unité légale (9 chiffres)"
+        case .sirenSiret: return "Adresse d'établissement (14 chiffres)"
+        case .sirenSuffixe: return "Suffixe rattaché au SIREN (ex. SIREN_SUFFIXE)"
+        case .sirenSiretCodeRoutage: return "Code routage rattaché au SIRET (ex. SIREN_SIRET_CODE)"
+        }
+    }
+}
+
+public struct PartyRoutingAddress: Codable, Hashable, Identifiable {
+    public var id: UUID
+    public var format: RoutingAddressFormat
+    public var siren: String
+    public var siret: String?
+    public var suffixe: String?
+    public var codeRoutage: String?
+    public var label: String?
+    public var isActive: Bool
+    public var isDefault: Bool
+
+    public init(
+        id: UUID = UUID(),
+        format: RoutingAddressFormat = .siren,
+        siren: String = "",
+        siret: String? = nil,
+        suffixe: String? = nil,
+        codeRoutage: String? = nil,
+        label: String? = nil,
+        isActive: Bool = true,
+        isDefault: Bool = false
+    ) {
+        self.id = id
+        self.format = format
+        self.siren = siren
+        self.siret = siret
+        self.suffixe = suffixe
+        self.codeRoutage = codeRoutage
+        self.label = label
+        self.isActive = isActive
+        self.isDefault = isDefault
+    }
+
+    public var composedAddress: String {
+        switch format {
+        case .siren:
+            return siren
+        case .sirenSiret:
+            return [siren, siret].compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }.joined(separator: "_")
+        case .sirenSuffixe:
+            return [siren, suffixe].compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }.joined(separator: "_")
+        case .sirenSiretCodeRoutage:
+            return [siren, siret, codeRoutage].compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }.joined(separator: "_")
+        }
+    }
+
+    public var displayLabel: String {
+        let lbl = label?.trimmingCharacters(in: .whitespaces) ?? ""
+        let status = isActive ? "active" : "inactive"
+        return lbl.isEmpty ? "\(composedAddress) (\(status))" : "\(lbl) \u2014 \(composedAddress) (\(status))"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, format, siren, siret, suffixe, codeRoutage, label, isActive, isDefault
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        format = try c.decodeIfPresent(RoutingAddressFormat.self, forKey: .format) ?? .siren
+        siren = try c.decodeIfPresent(String.self, forKey: .siren) ?? ""
+        siret = try c.decodeIfPresent(String.self, forKey: .siret)
+        suffixe = try c.decodeIfPresent(String.self, forKey: .suffixe)
+        codeRoutage = try c.decodeIfPresent(String.self, forKey: .codeRoutage)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+    }
+}
+
 public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var id: UUID
     public var kind: DirectoryEntryKind
     public var party: InvoiceParty
     public var note: String?
+    public var routingAddresses: [PartyRoutingAddress]
 
     public init(
         id: UUID = UUID(),
         kind: DirectoryEntryKind = .client,
         party: InvoiceParty,
-        note: String? = nil
+        note: String? = nil,
+        routingAddresses: [PartyRoutingAddress] = []
     ) {
         self.id = id
         self.kind = kind
         self.party = party
         self.note = note
+        self.routingAddresses = routingAddresses
     }
 
     public var displayName: String {
@@ -54,7 +155,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, party, note
+        case id, kind, party, note, routingAddresses
     }
 
     public init(from decoder: Decoder) throws {
@@ -64,6 +165,12 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         party = try c.decodeIfPresent(InvoiceParty.self, forKey: .party)
             ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        routingAddresses = try c.decodeIfPresent([PartyRoutingAddress].self, forKey: .routingAddresses) ?? []
+    }
+
+    public var defaultRoutingAddress: PartyRoutingAddress? {
+        routingAddresses.first(where: { $0.isDefault && $0.isActive })
+            ?? routingAddresses.first(where: { $0.isActive })
     }
 }
 
