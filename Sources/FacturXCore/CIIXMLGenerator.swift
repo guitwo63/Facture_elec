@@ -118,7 +118,7 @@ public struct CIIXMLGenerator {
         let endpointIDValue = party.endpointID?.trimmingCharacters(in: .whitespaces)
         let usingSirenFallback = (endpointIDValue?.isEmpty ?? true)
         let effectiveEndpointID = usingSirenFallback ? (party.siren ?? nil) : endpointIDValue
-        let effectiveSchemeID = usingSirenFallback ? "0183" : party.endpointSchemeID
+        let effectiveSchemeID = usingSirenFallback ? "0225" : party.endpointSchemeID
         let endpoint = effectiveEndpointID.map { id -> String in
             """
           <ram:ID schemeID="\(effectiveSchemeID)">\(escape(id))</ram:ID>
