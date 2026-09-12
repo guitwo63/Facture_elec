@@ -24,6 +24,7 @@ FacturXMacApp/
 │   │   ├── CIIXMLGenerator.swift  # Générateur XML CII EN 16931
 │   │   ├── InvoicePDFRenderer.swift   # Rendu PDF lisible (CoreGraphics)
 │   │   ├── FacturXEmbedder.swift  # Embarquement PDF/A-3 + XMP
+│   │   ├── FacturXValidator.swift # Validation interne (données + PDF)
 │   │   ├── FacturXGenerator.swift # Façade
 │   │   └── InvoiceStore.swift     # Persistance (UserDefaults)
 │   └── FacturXMacApp/            # App SwiftUI (menu, fenêtres, édition)
@@ -59,13 +60,23 @@ Dans Xcode : `Product > Run` (⌘R). L'app ouvre une fenêtre à deux colonnes :
 2. Ajoutez les lignes (désignation, quantité, unité, prix unitaire HT, taux TVA).
 3. Renseignez l'IBAN/BIC et les conditions de paiement.
 4. Choisissez le **profil Factur-X** (EN 16931 par défaut).
-5. Cliquez **Générer le Factur-X** → le PDF hybride est créé.
+5. Cliquez **« Valider »** pour vérifier la conformité de la facture (champs obligatoires, cohérence, profil).
+6. Cliquez **Générer le Factur-X** → un contrôle de conformité est exécuté automatiquement avant et après la génération. Le PDF hybride n'est produit que si la validation passe.
+
+Un panneau de validation affiche les erreurs (en rouge) et avertissements (en orange).
 
 Les factures sont sauvegardées localement (UserDefaults) entre les sessions.
 
 ## Validation
 
-Le XML CII produit est conforme au XSD EN 16931. Pour vérifier le fichier final (PDF + XML embarqué) :
+L'application intègre un **validateur interne** (`FacturXValidator`) qui vérifie :
+- les champs obligatoires de la facture (numéro, émetteur, destinataire, lignes) ;
+- la cohérence des données (quantités positives, devise ISO 4217, dates) ;
+- la structure du PDF généré (présence de `factur-x.xml`, `/AFRelationship /Alternative`, `/EmbeddedFiles`, `/AF`, métadonnées XMP Factur-X et PDF/A-3).
+
+La validation est exécutée avant et après la génération. Le bouton **« Valider »** permet de la déclencher manuellement.
+
+Le XML CII produit est conforme au XSD EN 16931. Pour vérifier le fichier final (PDF + XML embarqué) avec un outil externe :
 
 - **Mustang** (validateur Factur-X/ZUGFeRD de référence) : https://www.mustangproject.org/
 - **veraPDF** (validation du conteneur PDF/A-3) : https://verapdf.org/
