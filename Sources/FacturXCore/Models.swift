@@ -1,5 +1,41 @@
 import Foundation
 
+public enum BillingMode: String, Codable, CaseIterable {
+    case b1 = "B1", s1 = "S1", m1 = "M1"
+    case b2 = "B2", s2 = "S2", m2 = "M2"
+    case s3 = "S3"
+    case b4 = "B4", s4 = "S4", m4 = "M4"
+    case s5 = "S5", s6 = "S6"
+    case b7 = "B7", s7 = "S7"
+    case b8 = "B8", s8 = "S8", m8 = "M8"
+    case b9 = "B9", s9 = "S9", m9 = "M9"
+
+    public var label: String {
+        switch self {
+        case .b1: return "Facturation papier (B1)"
+        case .s1: return "Portail public de facturation (S1)"
+        case .m1: return "Dématérialisation (M1)"
+        case .b2: return "Facturation papier (B2)"
+        case .s2: return "Portail public (S2)"
+        case .m2: return "Dématérialisation (M2)"
+        case .s3: return "Portail public (S3)"
+        case .b4: return "Facturation papier (B4)"
+        case .s4: return "Portail public (S4)"
+        case .m4: return "Dématérialisation (M4)"
+        case .s5: return "Portail public (S5)"
+        case .s6: return "Portail public (S6)"
+        case .b7: return "Facturation papier (B7)"
+        case .s7: return "Portail public (S7)"
+        case .b8: return "Facturation papier (B8)"
+        case .s8: return "Portail public (S8)"
+        case .m8: return "Dématérialisation (M8)"
+        case .b9: return "Facturation papier (B9)"
+        case .s9: return "Portail public (S9)"
+        case .m9: return "Dématérialisation (M9)"
+        }
+    }
+}
+
 public struct InvoiceParty: Codable, Hashable {
     public var name: String
     public var street: String
@@ -12,6 +48,8 @@ public struct InvoiceParty: Codable, Hashable {
     public var contactName: String?
     public var contactEmail: String?
     public var contactPhone: String?
+    public var endpointID: String?
+    public var endpointSchemeID: String
 
     public init(
         name: String,
@@ -24,7 +62,9 @@ public struct InvoiceParty: Codable, Hashable {
         legalSchemeID: String = "0002",
         contactName: String? = nil,
         contactEmail: String? = nil,
-        contactPhone: String? = nil
+        contactPhone: String? = nil,
+        endpointID: String? = nil,
+        endpointSchemeID: String = "FR:SIRENE"
     ) {
         self.name = name
         self.street = street
@@ -37,6 +77,8 @@ public struct InvoiceParty: Codable, Hashable {
         self.contactName = contactName
         self.contactEmail = contactEmail
         self.contactPhone = contactPhone
+        self.endpointID = endpointID
+        self.endpointSchemeID = endpointSchemeID
     }
 }
 
@@ -131,6 +173,10 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var paymentBIC: String?
     public var paymentTerms: String?
     public var notes: String?
+    public var billingMode: BillingMode
+    public var legalNotePMT: String
+    public var legalNotePMD: String
+    public var legalNoteAAB: String
 
     public init(
         id: UUID = UUID(),
@@ -148,7 +194,11 @@ public struct Invoice: Codable, Hashable, Identifiable {
         paymentIBAN: String? = nil,
         paymentBIC: String? = nil,
         paymentTerms: String? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        billingMode: BillingMode = .m1,
+        legalNotePMT: String = "Indemnité forfaitaire pour frais de recouvrement due à compter du 1er jour de retard : 40 EUR",
+        legalNotePMD: String = "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur",
+        legalNoteAAB: String = "Escompte pour paiement anticipé : aucun"
     ) {
         self.id = id
         self.number = number
@@ -166,6 +216,10 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.paymentBIC = paymentBIC
         self.paymentTerms = paymentTerms
         self.notes = notes
+        self.billingMode = billingMode
+        self.legalNotePMT = legalNotePMT
+        self.legalNotePMD = legalNotePMD
+        self.legalNoteAAB = legalNoteAAB
     }
 
     public var lineTotal: Double {
