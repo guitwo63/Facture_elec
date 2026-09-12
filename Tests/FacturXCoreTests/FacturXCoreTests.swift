@@ -21,7 +21,7 @@ final class FacturXCoreTests: XCTestCase {
                 siren: "123456789",
                 contactEmail: "[email protected]",
                 endpointID: "123456789",
-                endpointSchemeID: "FR:SIRENE"
+                endpointSchemeID: "0183"
             ),
             buyer: InvoiceParty(
                 name: "Client Exemple SAS",
@@ -31,7 +31,7 @@ final class FacturXCoreTests: XCTestCase {
                 country: "FR",
                 siren: "987654321",
                 endpointID: "987654321",
-                endpointSchemeID: "FR:SIRENE"
+                endpointSchemeID: "0183"
             ),
             buyerReference: "CLIENT-REF-42",
             lines: [
@@ -86,8 +86,8 @@ final class FacturXCoreTests: XCTestCase {
     func testXMLContainsEndpointIDs() throws {
         let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
         let s = String(data: xml, encoding: .utf8) ?? ""
-        XCTAssertTrue(s.contains("schemeID=\"FR:SIRENE\">123456789<"))
-        XCTAssertTrue(s.contains("schemeID=\"FR:SIRENE\">987654321<"))
+        XCTAssertTrue(s.contains("schemeID=\"0183\">123456789<"))
+        XCTAssertTrue(s.contains("schemeID=\"0183\">987654321<"))
     }
 
     func testXMLContainsLegalNotes() throws {
