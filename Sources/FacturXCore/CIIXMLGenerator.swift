@@ -117,9 +117,18 @@ public struct CIIXMLGenerator {
 
         let endpointIDValue = trimmedNonEmpty(party.endpointID)
         let sirenValue = trimmedNonEmpty(party.siren)
-        let usingSirenFallback = endpointIDValue == nil && sirenValue != nil
         let effectiveEndpointID = endpointIDValue ?? sirenValue
-        let effectiveSchemeID = usingSirenFallback ? "0225" : party.endpointSchemeID
+        let effectiveSchemeID: String
+        if endpointIDValue != nil {
+            let raw = party.endpointSchemeID.trimmingCharacters(in: .whitespaces)
+            if raw.isEmpty || raw == "FR:SIRENE" || raw == "0183" {
+                effectiveSchemeID = "0225"
+            } else {
+                effectiveSchemeID = raw
+            }
+        } else {
+            effectiveSchemeID = "0225"
+        }
         let endpoint = effectiveEndpointID.map { id -> String in
             """
           <ram:ID schemeID="\(effectiveSchemeID)">\(escape(id))</ram:ID>
