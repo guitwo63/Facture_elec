@@ -264,3 +264,4 @@ public final class ChorusProSettings: ObservableObject {
             defaults.set(data, forKey: storageKey)
         }
     }
+}
