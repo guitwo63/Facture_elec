@@ -831,7 +831,7 @@ struct RoutingAddressEditorView: View {
                         }.buttonStyle(.borderless)
                         Button(role: .destructive) {
                             addresses.removeAll { $0.id == addr.id }
-                            if addresses.allSatisfy({ !$0.isDefault }), let f = addresses.first {
+                            if addresses.allSatisfy({ !$0.isDefault }), !addresses.isEmpty {
                                 addresses[0].isDefault = true
                             }
                         } label: {
@@ -904,7 +904,7 @@ struct RoutingAddressFormView: View {
                         if addresses.isEmpty { draft.isDefault = true }
                         addresses.append(draft)
                     }
-                    if addresses.allSatisfy({ !$0.isDefault }), let f = addresses.first {
+                    if addresses.allSatisfy({ !$0.isDefault }), !addresses.isEmpty {
                         addresses[0].isDefault = true
                     }
                     dismiss()
