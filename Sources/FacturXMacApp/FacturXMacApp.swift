@@ -12,6 +12,14 @@ struct FacturXMacApp: App {
             ContentView()
                 .environmentObject(store)
                 .frame(minWidth: 900, minHeight: 600)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        NSApp.activate(ignoringOtherApps: true)
+                        if let window = NSApp.windows.first {
+                            window.makeKeyAndOrderFront(nil)
+                        }
+                    }
+                }
         }
         .commands {
             CommandGroup(after: .newItem) {
@@ -32,9 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first {
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NSApp.activate(ignoringOtherApps: true)
+            for window in NSApp.windows {
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
+            }
         }
     }
 }
