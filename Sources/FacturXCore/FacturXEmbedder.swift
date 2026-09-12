@@ -28,7 +28,7 @@ public struct FacturXEmbedder {
 
         var pdf = pdfData
         var newObjects: [PDFObject] = []
-        let base = info.maxObjectNumber + 1
+        let base = info.maxObjectNumber
 
         let xmlStream = PDFObject(
             num: base,
@@ -127,7 +127,7 @@ public struct FacturXEmbedder {
 
     private func makeEmbeddedFilesNames(filename: String, filespecRef: String) -> Data {
         let hexName = filename.map { String(format: "%02x", $0.asciiValue ?? 0) }.joined()
-        let body = "<< /Names << /EmbeddedFiles << /Names [ <\(hexName)> \(filespecRef) ] >> >> >>"
+        let body = "<< /EmbeddedFiles << /Names [ <\(hexName)> \(filespecRef) ] >> >>"
         return body.data(using: .ascii)!
     }
 
