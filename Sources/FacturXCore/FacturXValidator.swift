@@ -29,12 +29,22 @@ public struct FacturXValidator {
         if invoice.seller.country.trimmingCharacters(in: .whitespaces).isEmpty {
             errors.append("Le pays de l'émetteur est obligatoire (code ISO à 2 lettres, ex. FR).")
         }
+        let sellerHasEndpoint = (invoice.seller.endpointID?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
+        let sellerHasSiren = (invoice.seller.siren?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
+        if !sellerHasEndpoint && !sellerHasSiren {
+            errors.append("L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-49).")
+        }
 
         if invoice.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty {
             errors.append("Le nom du destinataire (acheteur) est obligatoire.")
         }
         if invoice.buyer.country.trimmingCharacters(in: .whitespaces).isEmpty {
             errors.append("Le pays du destinataire est obligatoire (code ISO à 2 lettres, ex. FR).")
+        }
+        let buyerHasEndpoint = (invoice.buyer.endpointID?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
+        let buyerHasSiren = (invoice.buyer.siren?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
+        if !buyerHasEndpoint && !buyerHasSiren {
+            errors.append("Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-34).")
         }
 
         if invoice.lines.isEmpty {
@@ -67,10 +77,14 @@ public struct FacturXValidator {
         }
 
         if invoice.seller.endpointID == nil || (invoice.seller.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-            warnings.append("L'identifiant électronique de l'émetteur (BT-49, ex. SIREN avec schemeID FR:SIRENE) est requis par la réforme française.")
+            if (invoice.seller.siren ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                warnings.append("L'identifiant électronique de l'émetteur (BT-49) sera déduit du SIREN si renseigné.")
+            }
         }
         if invoice.buyer.endpointID == nil || (invoice.buyer.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-            warnings.append("L'identifiant électronique du destinataire (BT-34, ex. SIREN avec schemeID FR:SIRENE) est requis par la réforme française.")
+            if (invoice.buyer.siren ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                warnings.append("L'identifiant électronique du destinataire (BT-34) sera déduit du SIREN si renseigné.")
+            }
         }
 
         if invoice.legalNotePMT.trimmingCharacters(in: .whitespaces).isEmpty {
