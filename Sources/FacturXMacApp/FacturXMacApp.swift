@@ -62,7 +62,7 @@ struct ContentView: View {
             }
         } detail: {
             if let id = selectedID,
-               let invoice = store.invoices.first(where: { $0.id == id }) {
+               store.invoices.contains(where: { $0.id == id }) {
                 InvoiceEditorView(invoice: binding(for: id))
             } else {
                 Text("Sélectionnez ou créez une facture")
@@ -244,6 +244,12 @@ struct DoubleField: View {
     let label: String
     @Binding var value: Double
     let format: FloatingPointFormatStyle<Double>
+
+    init(_ label: String, value: Binding<Double>, format: FloatingPointFormatStyle<Double>) {
+        self.label = label
+        self._value = value
+        self.format = format
+    }
 
     var body: some View {
         HStack {
