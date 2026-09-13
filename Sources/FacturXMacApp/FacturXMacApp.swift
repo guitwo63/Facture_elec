@@ -240,7 +240,7 @@ struct InvoicesTabView: View {
                             } label: { Label("Supprimer", systemImage: "trash") }
                         }
                     }
-                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 360)
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
                 }
 
                 if let id = selectedID,
