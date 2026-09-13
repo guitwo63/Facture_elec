@@ -1397,7 +1397,7 @@ struct DirectoryEditorView: View {
             }.pickerStyle(.segmented)
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
             }
 
             if !tagStore.tags.isEmpty {
@@ -1549,7 +1549,7 @@ struct SettingsView: View {
                                 .buttonStyle(.bordered)
                         }
                         Divider()
-                        PartyEditorView(party: $store.myCompany, showWebButton: false)
+                        PartyEditorView(party: $store.myCompany, showWebButton: false, isFournisseur: true)
                         Button {
                             store.save()
                         } label: { Label("Enregistrer l'émetteur par défaut", systemImage: "checkmark.circle") }
