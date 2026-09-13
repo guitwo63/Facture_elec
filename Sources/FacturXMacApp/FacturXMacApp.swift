@@ -1762,6 +1762,15 @@ struct SettingsView: View {
                         .font(.headline)
                 }
 
+                Divider()
+                HStack {
+                    Text("Facture_elec v0.2.0").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let repo = URL(string: "https://github.com/guitwo63/Facture_elec") {
+                        Link("GitHub", destination: repo).font(.caption)
+                    }
+                }
+
                 Spacer()
             }.padding()
         }
