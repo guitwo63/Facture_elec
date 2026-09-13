@@ -904,20 +904,7 @@ struct DirectoryDetailView: View {
                         Divider()
                         Text("Identifiants").font(.headline)
                         if let s = entry.party.siren, !s.isEmpty {
-                            HStack(alignment: .top) {
-                                Text("SIREN").font(.callout.bold()).frame(width: 160, alignment: .leading)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(s).font(.body)
-                                    if SireneValidator.isValidSiren(s) {
-                                        Label("valide (Luhn)", systemImage: "checkmark.circle.fill")
-                                            .font(.caption2).foregroundStyle(.green)
-                                    } else {
-                                        Label("invalide (Luhn)", systemImage: "exclamationmark.triangle.fill")
-                                            .font(.caption2).foregroundStyle(.orange)
-                                    }
-                                }
-                                Spacer()
-                            }
+                            detailRow("SIREN", s)
                         }
                         if let st = entry.party.siret, !st.isEmpty {
                             HStack(alignment: .top) {
