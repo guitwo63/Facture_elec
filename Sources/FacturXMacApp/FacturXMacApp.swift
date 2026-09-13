@@ -471,6 +471,19 @@ struct InvoiceEditorView: View {
 
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
+                        if !linkedCreditNotes.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.uturn.backward.circle.fill")
+                                    .foregroundStyle(.orange)
+                                Text(linkedCreditNotes.count == 1
+                                     ? "Avoir lié : \(linkedCreditNotes[0].number)"
+                                     : "Avoirs liés : \(linkedCreditNotes.map { $0.number }.joined(separator: ", "))")
+                                    .font(.caption.bold())
+                                Spacer()
+                            }
+                            .padding(6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+                        }
                         HStack(alignment: .top, spacing: 24) {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
@@ -663,6 +676,14 @@ struct InvoiceEditorView: View {
                 .font(bold ? .body.bold() : .body)
                 .monospacedDigit()
         }.frame(width: 280)
+    }
+
+    private var linkedCreditNotes: [Invoice] {
+        guard !invoice.number.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        return store.invoices.filter {
+            $0.type == .creditNote
+                && ($0.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces)
+        }
     }
 
     private func export() {
