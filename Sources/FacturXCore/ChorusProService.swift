@@ -12,8 +12,8 @@ public struct ChorusProCredentials: Codable, Equatable {
     public init(
         clientID: String,
         clientSecret: String,
-        tokenURL: String = "https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token",
-        apiBaseURL: String = "https://sandbox-api.aife.economie.gouv.fr",
+        tokenURL: String = "https://sandbox-oauth.piste.gouv.fr/api/oauth/token",
+        apiBaseURL: String = "https://sandbox-api.piste.gouv.fr",
         scope: String = "openid",
         techLogin: String = "",
         techPassword: String = ""
@@ -51,9 +51,9 @@ public struct ChorusProCredentials: Codable, Equatable {
         clientID = try c.decodeIfPresent(String.self, forKey: .clientID) ?? ""
         clientSecret = try c.decodeIfPresent(String.self, forKey: .clientSecret) ?? ""
         tokenURL = try c.decodeIfPresent(String.self, forKey: .tokenURL)
-            ?? "https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token"
+            ?? "https://sandbox-oauth.piste.gouv.fr/api/oauth/token"
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL)
-            ?? "https://sandbox-api.aife.economie.gouv.fr"
+            ?? "https://sandbox-api.piste.gouv.fr"
         scope = try c.decodeIfPresent(String.self, forKey: .scope) ?? "openid"
         techLogin = try c.decodeIfPresent(String.self, forKey: .techLogin) ?? ""
         techPassword = try c.decodeIfPresent(String.self, forKey: .techPassword) ?? ""
