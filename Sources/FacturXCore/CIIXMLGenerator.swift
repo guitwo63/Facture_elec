@@ -72,6 +72,7 @@ public struct CIIXMLGenerator {
         let total = String(format: "%.2f", line.lineTotal)
         let rate = formatRate(line.vatRate)
         let category = "S"
+        let unitCode = line.unit.trimmingCharacters(in: .whitespaces).isEmpty ? "C62" : line.unit
         let desc = line.description.map { """
             <ram:Description>\(escape($0))</ram:Description>
 """ } ?? ""
@@ -87,7 +88,7 @@ public struct CIIXMLGenerator {
             </ram:NetPriceProductTradePrice>
           </ram:SpecifiedLineTradeAgreement>
           <ram:SpecifiedLineTradeDelivery>
-            <ram:BilledQuantity unitCode="\(line.unit)">\(qty)</ram:BilledQuantity>
+            <ram:BilledQuantity unitCode="\(unitCode)">\(qty)</ram:BilledQuantity>
           </ram:SpecifiedLineTradeDelivery>
           <ram:SpecifiedLineTradeSettlement>
             <ram:ApplicableTradeTax>
