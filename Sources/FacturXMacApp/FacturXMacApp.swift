@@ -1099,6 +1099,7 @@ struct PartyEditorView: View {
     @Binding var party: InvoiceParty
     @Binding var routingAddresses: [PartyRoutingAddress]
     @State private var showRoutingEditor = false
+    @State private var editingAddress: PartyRoutingAddress?
     @State private var dinumResults: [SireneResult] = []
     @State private var dinumLoading = false
     @State private var dinumError: String?
@@ -1179,6 +1180,19 @@ struct PartyEditorView: View {
                                 .background(Color.accentColor.opacity(0.2), in: Capsule())
                         }
                         Spacer()
+                        Button {
+                            editingAddress = addr
+                        } label: { Image(systemName: "pencil") }
+                            .buttonStyle(.borderless)
+                            .help("Modifier cette adresse")
+                        Button(role: .destructive) {
+                            routingAddresses.removeAll { $0.id == addr.id }
+                            if routingAddresses.allSatisfy({ !$0.isDefault }), !routingAddresses.isEmpty {
+                                routingAddresses[0].isDefault = true
+                            }
+                        } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                            .help("Supprimer cette adresse")
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
@@ -1212,6 +1226,9 @@ struct PartyEditorView: View {
                 siren: party.siren ?? "",
                 addresses: $routingAddresses
             )
+        }
+        .sheet(item: $editingAddress) { addr in
+            RoutingAddressFormView(addresses: $routingAddresses, editing: addr)
         }
     }
 
