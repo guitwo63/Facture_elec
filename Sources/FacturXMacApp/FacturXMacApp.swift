@@ -680,8 +680,7 @@ struct InvoiceEditorView: View {
                         }
                         .labelsHidden()
                         .frame(width: 200)
-                        .disabled(!isLocked)
-                        .help(isLocked ? "Statut de la facture (modifiable une fois verrouillée)" : "Verrouillez la facture pour modifier le statut")
+                        .help("Statut de la facture (modifiable à tout moment)")
                     }
                     Button { showValidation = false } label: {
                         Image(systemName: "xmark.circle")
