@@ -247,19 +247,21 @@ struct InvoiceEditorView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("Édition : \(invoice.number)").font(.title2.bold())
-                    Spacer()
-                    Button("Valider") { runValidation() }
-                        .buttonStyle(.bordered)
-                    Button("Exporter XML") { exportXML() }
-                        .buttonStyle(.bordered)
-                    Button("Générer le Factur-X") { export() }
-                        .buttonStyle(.borderedProminent)
-                }
-
+        VStack(spacing: 0) {
+            HStack {
+                Text("Édition : \(invoice.number)").font(.title2.bold())
+                Spacer()
+                Button("Valider") { runValidation() }
+                    .buttonStyle(.bordered)
+                Button("Exporter XML") { exportXML() }
+                    .buttonStyle(.bordered)
+                Button("Générer le Factur-X") { export() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
                         .onChange(of: invoice.number) { _ in exportError = nil }
@@ -387,6 +389,7 @@ struct InvoiceEditorView: View {
                     }.padding(8).frame(maxWidth: .infinity)
                 }
             }.padding()
+        }
         }
     }
 
