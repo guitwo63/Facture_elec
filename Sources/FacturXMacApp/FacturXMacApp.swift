@@ -895,7 +895,7 @@ struct DirectoryDetailView: View {
                 Divider()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
                         detailRow("Type", entry.kind.label)
                         if let s = entry.party.siren, !s.isEmpty { detailRow("SIREN", s) }
                         if let v = entry.party.vatNumber, !v.isEmpty { detailRow("N° TVA", v) }
@@ -911,42 +911,42 @@ struct DirectoryDetailView: View {
 
                         if !entry.routingAddresses.isEmpty {
                             Divider()
-                            Text("Adresses de facturation électronique").font(.caption.bold())
+                            Text("Adresses de facturation électronique").font(.callout.bold())
                             ForEach(entry.routingAddresses) { addr in
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(addr.format.label).font(.caption.bold())
-                                        Text(addr.composedAddress).font(.system(.caption, design: .monospaced))
+                                        Text(addr.format.label).font(.callout.bold())
+                                        Text(addr.composedAddress).font(.system(.callout, design: .monospaced))
                                         if let lbl = addr.label, !lbl.isEmpty {
                                             Text(lbl).font(.caption).foregroundColor(.secondary)
                                         }
                                     }
                                     Spacer()
                                     if addr.isDefault {
-                                        Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                        Text("défaut").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
                                             .background(Color.accentColor.opacity(0.2), in: Capsule())
                                     }
                                     if !addr.isActive {
-                                        Text("inactive").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                        Text("inactive").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
                                             .background(Color.gray.opacity(0.2), in: Capsule())
                                     }
                                 }
-                                .padding(6)
-                                .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                                .padding(8)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                             }
                         }
 
                         if let note = entry.note, !note.isEmpty {
                             Divider()
-                            Text("Note").font(.caption.bold())
-                            Text(note).font(.caption).foregroundStyle(.secondary)
+                            Text("Note").font(.callout.bold())
+                            Text(note).font(.callout).foregroundStyle(.secondary)
                         }
 
                         if entry.isArchived {
                             Label("Tiers archivé", systemImage: "archivebox")
-                                .font(.caption.bold()).foregroundStyle(.orange)
+                                .font(.callout.bold()).foregroundStyle(.orange)
                         }
-                    }.padding(12)
+                    }.padding(14)
                 }
             }
         } else {
@@ -961,8 +961,8 @@ struct DirectoryDetailView: View {
 
     private func detailRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top) {
-            Text(label).font(.caption.bold()).frame(width: 140, alignment: .leading)
-            Text(value).font(.caption)
+            Text(label).font(.callout.bold()).frame(width: 160, alignment: .leading)
+            Text(value).font(.body)
             Spacer()
         }
     }
