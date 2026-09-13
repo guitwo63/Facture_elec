@@ -118,19 +118,22 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var party: InvoiceParty
     public var note: String?
     public var routingAddresses: [PartyRoutingAddress]
+    public var isArchived: Bool
 
     public init(
         id: UUID = UUID(),
         kind: DirectoryEntryKind = .client,
         party: InvoiceParty,
         note: String? = nil,
-        routingAddresses: [PartyRoutingAddress] = []
+        routingAddresses: [PartyRoutingAddress] = [],
+        isArchived: Bool = false
     ) {
         self.id = id
         self.kind = kind
         self.party = party
         self.note = note
         self.routingAddresses = routingAddresses
+        self.isArchived = isArchived
     }
 
     public var displayName: String {
@@ -155,7 +158,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, party, note, routingAddresses
+        case id, kind, party, note, routingAddresses, isArchived
     }
 
     public init(from decoder: Decoder) throws {
@@ -166,6 +169,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
             ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         note = try c.decodeIfPresent(String.self, forKey: .note)
         routingAddresses = try c.decodeIfPresent([PartyRoutingAddress].self, forKey: .routingAddresses) ?? []
+        isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
     }
 
     public var defaultRoutingAddress: PartyRoutingAddress? {

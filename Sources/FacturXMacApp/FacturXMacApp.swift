@@ -525,11 +525,12 @@ struct PartyPickerSheet: View {
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let active = directory.entries.filter { !$0.isArchived }
         let base: [DirectoryEntry]
         if q.isEmpty {
-            base = directory.entries
+            base = active
         } else {
-            base = directory.entries.filter {
+            base = active.filter {
                 $0.displayName.lowercased().contains(q)
                     || ($0.party.siren ?? "").lowercased().contains(q)
                     || ($0.party.vatNumber ?? "").lowercased().contains(q)
@@ -626,11 +627,13 @@ struct DirectoryView: View {
     @State private var query = ""
     @State private var editingEntry: DirectoryEntry?
     @State private var creatingNew = false
+    @State private var showArchived = false
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return directory.entries }
-        return directory.entries.filter {
+        let base = directory.entries.filter { showArchived || !$0.isArchived }
+        guard !q.isEmpty else { return base }
+        return base.filter {
             $0.displayName.lowercased().contains(q)
                 || ($0.party.siren ?? "").lowercased().contains(q)
                 || ($0.party.vatNumber ?? "").lowercased().contains(q)
@@ -644,6 +647,11 @@ struct DirectoryView: View {
             HStack {
                 Text("Annuaire des tiers").font(.title2.bold())
                 Spacer()
+                Toggle(isOn: $showArchived) {
+                    Label("Afficher les archives", systemImage: "archivebox")
+                }
+                .toggleStyle(.checkbox)
+                .help("Afficher les tiers archivés")
                 Button {
                     creatingNew = true
                 } label: { Label("Nouveau tiers", systemImage: "plus") }
@@ -675,6 +683,12 @@ struct DirectoryView: View {
                                     Text(entry.kind.label).font(.caption2)
                                         .padding(.horizontal, 6).padding(.vertical, 1)
                                         .background(.quaternary, in: Capsule())
+                                    if entry.isArchived {
+                                        Label("Archive", systemImage: "archivebox")
+                                            .font(.caption2)
+                                            .padding(.horizontal, 6).padding(.vertical, 1)
+                                            .background(Color.orange.opacity(0.2), in: Capsule())
+                                    }
                                 }
                                 Text(entry.party.fullAddressLine).font(.caption).foregroundStyle(.secondary)
                                 if let sub = entry.subtitle.isEmpty ? nil : entry.subtitle {
@@ -698,6 +712,15 @@ struct DirectoryView: View {
                             Button {
                                 editingEntry = entry
                             } label: { Label("Modifier", systemImage: "pencil") }
+                            Divider()
+                            Button {
+                                var e = entry
+                                e.isArchived.toggle()
+                                directory.upsert(e)
+                            } label: {
+                                Label(entry.isArchived ? "Désarchiver" : "Archiver",
+                                      systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+                            }
                             Divider()
                             Button(role: .destructive) {
                                 directory.delete(entry)
@@ -761,6 +784,15 @@ struct DirectoryEditorView: View {
             HStack {
                 Text(headerTitle).font(.headline)
                 Spacer()
+                if isEditing {
+                    Button {
+                        entry.isArchived.toggle()
+                    } label: {
+                        Label(entry.isArchived ? "Désarchiver" : "Archiver",
+                              systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+                    }
+                    .buttonStyle(.bordered)
+                }
                 if isEditing, let onDelete = onDelete {
                     Button(role: .destructive) {
                         onDelete(entry)
@@ -782,79 +814,13 @@ struct DirectoryEditorView: View {
             }.pickerStyle(.segmented)
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party)
-            }
-
-            GroupBox("Adresses de facturation électronique (Chorus Pro)") {
-                RoutingAddressEditorView(addresses: $entry.routingAddresses)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses)
             }
 
             TextField("Note (optionnel)", text: Binding($entry.note, replacingNilWith: ""))
         }
         .padding(16)
         .frame(minWidth: 560, minHeight: 560)
-    }
-}
-
-struct RoutingAddressEditorView: View {
-    @Binding var addresses: [PartyRoutingAddress]
-    @State private var editing: PartyRoutingAddress?
-    @State private var showEditor = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if addresses.isEmpty {
-                Text("Aucune adresse de routage. Ajoutez-en une pour déclarer l'adresse de facturation électronique (BT-49/BT-34).")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                ForEach(addresses) { addr in
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(addr.format.label).font(.caption.bold())
-                            Text(addr.composedAddress).font(.system(.caption, design: .monospaced))
-                            if let lbl = addr.label, !lbl.isEmpty {
-                                Text(lbl).font(.caption).foregroundColor(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if addr.isDefault {
-                            Text("défaut").font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.accentColor.opacity(0.2), in: Capsule())
-                        }
-                        if !addr.isActive {
-                            Text("inactive").font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.gray.opacity(0.2), in: Capsule())
-                        }
-                        Button { editing = addr; showEditor = true } label: {
-                            Image(systemName: "pencil")
-                        }.buttonStyle(.borderless)
-                        Button(role: .destructive) {
-                            addresses.removeAll { $0.id == addr.id }
-                            if addresses.allSatisfy({ !$0.isDefault }), !addresses.isEmpty {
-                                addresses[0].isDefault = true
-                            }
-                        } label: {
-                            Image(systemName: "trash")
-                        }.buttonStyle(.borderless)
-                    }
-                    .padding(6)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
-                }
-            }
-            Button {
-                editing = PartyRoutingAddress(siren: "")
-                showEditor = true
-            } label: {
-                Label("Ajouter une adresse", systemImage: "plus.circle")
-            }.buttonStyle(.bordered)
-        }
-        .padding(8)
-        .sheet(isPresented: $showEditor) {
-            if let addr = editing {
-                RoutingAddressFormView(addresses: $addresses, editing: addr)
-            }
-        }
     }
 }
 
@@ -918,13 +884,15 @@ struct SettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @State private var testMessage: String?
     @State private var testing = false
+    @State private var dinumExpanded = true
+    @State private var pisteExpanded = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Réglages").font(.title2.bold())
 
-                GroupBox("Recherche entreprises (DINUM — gratuit, sans authentification)") {
+                DisclosureGroup(isExpanded: $dinumExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("L'API recherche-entreprises.api.gouv.fr (DINUM) pré-remplit la désignation et l'adresse postale d'un tiers à partir d'un SIREN, SIRET ou nom. Gratuite, publique, sans compte ni jeton. Ne donne pas l'adresse de routage PPF.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -933,8 +901,12 @@ struct SettingsView: View {
                             Text("Formats de requête : q=siren:XXXXXXXXX, q=siret:XXXXXXXXXXXXXX, ou q=nom").font(.caption2).foregroundStyle(.tertiary)
                         }
                     }.padding(8)
+                } label: {
+                    Label("Recherche entreprises (DINUM — gratuit)", systemImage: "magnifyingglass.circle")
+                        .font(.headline)
                 }
-                GroupBox("Annuaire Chorus Pro (PISTE)") {
+
+                DisclosureGroup(isExpanded: $pisteExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Renseignez les identifiants de votre application PISTE (client_id / client_secret) et le compte technique Chorus Pro requis pour appeler l'API.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -1004,7 +976,11 @@ struct SettingsView: View {
                             Text("Scope par défaut : openid. L'API Annuaire (ppf.annuaire) est réservée aux Plateformes Agréées approuvées — sinon utiliser l'Annuaire web. L'API Structures (cpro.structures) renvoie dénomination + statut sans l'adresse de routage.").font(.caption2).foregroundStyle(.tertiary)
                         }
                     }.padding(8)
+                } label: {
+                    Label("Annuaire Chorus Pro (PISTE)", systemImage: "network")
+                        .font(.headline)
                 }
+
                 Spacer()
             }.padding()
         }
@@ -1121,23 +1097,31 @@ struct ChorusProSearchSheet: View {
 
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
-    @State private var showChorusSearch = false
-    @State private var showSireneSearch = false
+    @Binding var routingAddresses: [PartyRoutingAddress]
+    @State private var showRoutingEditor = false
+    @State private var dinumResults: [SireneResult] = []
+    @State private var dinumLoading = false
+    @State private var dinumError: String?
+    @State private var lastSearchKey: String = ""
+
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil) {
+        self._party = party
+        if let ra = routingAddresses {
+            self._routingAddresses = ra
+        } else {
+            self._routingAddresses = .constant([])
+        }
+    }
 
     private var star: some View { Text(" *").foregroundColor(.red) }
+
+    private var searchTrigger: String {
+        "\((party.name.trimmingCharacters(in: .whitespaces)))|\((party.siren ?? ""))"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button { showChorusSearch = true } label: {
-                    Label("Rechercher (API PISTE)", systemImage: "network")
-                }
-                .buttonStyle(.bordered)
-                Button { showSireneSearch = true } label: {
-                    Label("Rechercher (DINUM)", systemImage: "magnifyingglass.circle")
-                }
-                .buttonStyle(.bordered)
-                .help("Pré-remplit désignation, adresse et n° TVA depuis un SIREN, SIRET ou nom via l'API DINUM (gratuit, sans authentification)")
                 Button {
                     openWebDirectory()
                 } label: {
@@ -1145,10 +1129,15 @@ struct PartyEditorView: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Ouvre l'annuaire public Chorus Pro dans le navigateur")
+                if dinumLoading { ProgressView().controlSize(.small) }
                 Spacer()
+            }
+            if let err = dinumError {
+                Text(err).font(.caption).foregroundStyle(.red)
             }
             HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
+                .onChange(of: party.name) { _ in scheduleDinumSearch() }
             TextField("Adresse", text: $party.street)
             HStack {
                 TextField("Code postal", text: $party.postcode)
@@ -1161,6 +1150,7 @@ struct PartyEditorView: View {
             HStack {
                 Text("SIREN").font(.caption); star
                 TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
+                    .onChange(of: party.siren) { _ in scheduleDinumSearch() }
                 TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
             }
             HStack {
@@ -1173,16 +1163,87 @@ struct PartyEditorView: View {
                 TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
                 TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
             }
-        }.padding(8)
-        .sheet(isPresented: $showChorusSearch) {
-            ChorusProSearchSheet(initialQuery: party.siren ?? "") { picked in
-                party = picked
+            Button {
+                showRoutingEditor = true
+            } label: {
+                Label("Adresses de facturation électronique", systemImage: "envelope.badge")
             }
+            .buttonStyle(.bordered)
+            if !routingAddresses.isEmpty {
+                ForEach(routingAddresses) { addr in
+                    HStack(spacing: 8) {
+                        Text(addr.format.label).font(.caption.bold())
+                        Text(addr.composedAddress).font(.system(.caption, design: .monospaced))
+                        if addr.isDefault {
+                            Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.2), in: Capsule())
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                }
+            }
+            if !dinumResults.isEmpty {
+                Divider()
+                Text("Suggestions (DINUM)").font(.caption.bold())
+                ForEach(dinumResults, id: \.self) { r in
+                    Button {
+                        party = r.merged(into: party)
+                        dinumResults = []
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(r.denomination ?? r.siren).font(.body.weight(.semibold))
+                            HStack(spacing: 8) {
+                                Text("SIREN : \(r.siren)").font(.caption).foregroundStyle(.secondary)
+                                if let v = r.vatNumber { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+                            }
+                            if let st = r.street, let pc = r.postcode, let c = r.city {
+                                Text("\(st) \(pc) \(c)").font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }.padding(8)
+        .sheet(isPresented: $showRoutingEditor) {
+            RoutingAddressQuickEditor(
+                siren: party.siren ?? "",
+                addresses: $routingAddresses
+            )
         }
-        .sheet(isPresented: $showSireneSearch) {
-            SireneSearchSheet(query: party.siren ?? "") { picked in
-                party = picked.merged(into: party)
-                showSireneSearch = false
+    }
+
+    private func scheduleDinumSearch() {
+        let key = searchTrigger
+        guard key != lastSearchKey else { return }
+        lastSearchKey = key
+        let name = party.name.trimmingCharacters(in: .whitespaces)
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        if name.count < 3 && siren.count < 9 {
+            dinumResults = []
+            dinumError = nil
+            return
+        }
+        let query = siren.count >= 9 ? siren : name
+        guard !query.isEmpty else { return }
+        dinumLoading = true
+        dinumError = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            let currentKey = searchTrigger
+            guard currentKey == key else { return }
+            do {
+                let res = try await SireneService().lookup(query: query)
+                await MainActor.run {
+                    dinumResults = res
+                    dinumLoading = false
+                }
+            } catch let e as SireneError {
+                await MainActor.run { dinumError = e.errorDescription; dinumLoading = false }
+            } catch {
+                await MainActor.run { dinumError = error.localizedDescription; dinumLoading = false }
             }
         }
     }
@@ -1195,85 +1256,72 @@ struct PartyEditorView: View {
     }
 }
 
-struct SireneSearchSheet: View {
+struct RoutingAddressQuickEditor: View {
     @Environment(\.dismiss) private var dismiss
-    let query: String
-    let onPick: (SireneResult) -> Void
-
-    @State private var searchText: String = ""
-    @State private var results: [SireneResult] = []
-    @State private var loading = false
-    @State private var error: String?
+    let siren: String
+    @Binding var addresses: [PartyRoutingAddress]
+    @State private var editing: PartyRoutingAddress?
+    @State private var showForm = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recherche entreprises (DINUM)").font(.headline)
-            Text("SIREN, SIRET ou nom de l'entreprise. Aucune authentification requise.")
+            Text("Adresses de facturation électronique").font(.headline)
+            Text("Adresses de routage Chorus Pro (BT-49/BT-34). Une seule est marquée par défaut et s'applique à la facture.")
                 .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                TextField("SIREN, SIRET ou nom", text: $searchText)
-                    .onSubmit { runSearch() }
-                Button {
-                    runSearch()
-                } label: { Label("Rechercher", systemImage: "magnifyingglass") }
-                .buttonStyle(.borderedProminent)
-                .disabled(loading || searchText.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            if loading {
-                ProgressView().controlSize(.small)
-            }
-            if let err = error {
-                Text(err).font(.caption).foregroundStyle(.red)
-            }
-            List(results, id: \.self) { r in
-                Button {
-                    onPick(r)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(r.denomination ?? r.siren).font(.body.weight(.semibold))
-                        HStack(spacing: 8) {
-                            Text("SIREN : \(r.siren)").font(.caption).foregroundStyle(.secondary)
-                            if let s = r.siret { Text("SIRET : \(s)").font(.caption).foregroundStyle(.secondary) }
-                            if let v = r.vatNumber { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+            if addresses.isEmpty {
+                Text("Aucune adresse. Cliquez sur « Ajouter » pour créer une adresse vide.")
+                    .font(.caption).foregroundColor(.secondary)
+            } else {
+                ForEach(addresses) { addr in
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(addr.format.label).font(.caption.bold())
+                            Text(addr.composedAddress).font(.system(.caption, design: .monospaced))
+                            if let lbl = addr.label, !lbl.isEmpty {
+                                Text(lbl).font(.caption).foregroundColor(.secondary)
+                            }
                         }
-                        if let st = r.street, let pc = r.postcode, let c = r.city {
-                            Text("\(st) \(pc) \(c)").font(.caption).foregroundStyle(.tertiary)
+                        Spacer()
+                        if addr.isDefault {
+                            Text("défaut").font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.2), in: Capsule())
                         }
+                        if !addr.isActive {
+                            Text("inactive").font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.2), in: Capsule())
+                        }
+                        Button { editing = addr; showForm = true } label: { Image(systemName: "pencil") }
+                            .buttonStyle(.borderless)
+                        Button(role: .destructive) {
+                            addresses.removeAll { $0.id == addr.id }
+                            if addresses.allSatisfy({ !$0.isDefault }), !addresses.isEmpty {
+                                addresses[0].isDefault = true
+                            }
+                        } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
                     }
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                 }
-                .buttonStyle(.plain)
             }
+            Button {
+                editing = PartyRoutingAddress(siren: siren)
+                showForm = true
+            } label: { Label("Ajouter une adresse", systemImage: "plus.circle") }
+                .buttonStyle(.bordered)
             HStack {
                 Spacer()
                 Button("Fermer") { dismiss() }.keyboardShortcut(.cancelAction)
             }
-        }.padding(16).frame(minWidth: 480, minHeight: 360)
-        .onAppear { searchText = query }
-    }
-
-    private func runSearch() {
-        let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
-        error = nil
-        loading = true
-        results = []
-        Task {
-            do {
-                let res = try await SireneService().lookup(query: q)
-                await MainActor.run {
-                    results = res
-                    loading = false
-                    if res.isEmpty { error = "Aucune entreprise trouvée." }
-                }
-            } catch let e as SireneError {
-                await MainActor.run { error = e.errorDescription; loading = false }
-            } catch let err {
-                await MainActor.run { error = err.localizedDescription; loading = false }
+        }
+        .padding(16).frame(minWidth: 480, minHeight: 360)
+        .sheet(isPresented: $showForm) {
+            if let addr = editing {
+                RoutingAddressFormView(addresses: $addresses, editing: addr)
             }
         }
     }
 }
-
 struct DoubleField: View {
     let label: String
     @Binding var value: Double
