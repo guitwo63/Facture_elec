@@ -433,6 +433,8 @@ struct InvoiceEditorView: View {
                     .buttonStyle(.borderedProminent)
                 Button("Tester sur Super PDP") { validateOnSuperPDP() }
                     .buttonStyle(.bordered)
+                Button("Tester sur FNFE-MPE") { validateOnFNFE() }
+                    .buttonStyle(.bordered)
             }
             .padding(12)
             Divider()
@@ -756,6 +758,45 @@ struct InvoiceEditorView: View {
             try data.write(to: tmp)
             exportedURL = tmp
             if let validator = URL(string: "https://www.superpdp.tech/outils/validateur-facture-electronique/") {
+                NSWorkspace.shared.open(validator)
+            }
+            validation = FacturXValidationResult(
+                isValid: true,
+                warnings: preCheck.warnings + postCheck.warnings
+            )
+            showValidation = true
+        } catch {
+            exportError = "\(error)"
+        }
+    }
+
+    private func validateOnFNFE() {
+        exportError = nil
+        let preCheck = FacturXValidator().validate(invoice: invoice)
+        if !preCheck.isValid {
+            validation = preCheck
+            showValidation = true
+            exportError = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de tester."
+            return
+        }
+        do {
+            let data = try FacturXGenerator().generate(invoice: invoice)
+            let postCheck = FacturXValidator().validate(pdf: data)
+            if !postCheck.isValid {
+                validation = FacturXValidationResult(
+                    isValid: false,
+                    errors: postCheck.errors,
+                    warnings: preCheck.warnings + postCheck.warnings
+                )
+                showValidation = true
+                exportError = "La conformité du PDF généré a échoué : \(postCheck.errors.count) erreur(s)."
+                return
+            }
+            let safeName = invoice.number.replacingOccurrences(of: "/", with: "-")
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("facture-\(safeName).pdf")
+            try data.write(to: tmp)
+            exportedURL = tmp
+            if let validator = URL(string: "https://services.fnfe-mpe.org/") {
                 NSWorkspace.shared.open(validator)
             }
             validation = FacturXValidationResult(
