@@ -32,12 +32,38 @@ func hexString(from color: Color) -> String {
 
 struct InfoBadge: View {
     let text: String
+    @State private var isHovering = false
+    @State private var showTask: DispatchWorkItem?
     var body: some View {
         Image(systemName: "info.circle")
             .font(.caption)
             .foregroundStyle(.secondary)
-            .help(text)
             .accessibilityLabel(Text(text))
+            .onHover { hovering in
+                showTask?.cancel()
+                if hovering {
+                    let task = DispatchWorkItem { isHovering = true }
+                    showTask = task
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: task)
+                } else {
+                    isHovering = false
+                }
+            }
+            .overlay(alignment: .top) {
+                if isHovering {
+                    Text(text)
+                        .font(.caption2)
+                        .padding(6)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(4)
+                        .shadow(radius: 2)
+                        .frame(maxWidth: 250)
+                        .fixedSize()
+                        .offset(y: -22)
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+                }
+            }
     }
 }
 
@@ -321,6 +347,8 @@ struct InvoiceEditorView: View {
     @State private var exportedURL: URL?
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
+    @State private var isLocked = false
+    @State private var showUnlockAlert = false
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -345,13 +373,36 @@ struct InvoiceEditorView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Édition : \(invoice.number)").font(.title2.bold())
+                if isLocked {
+                    Label("Lecture seule", systemImage: "lock.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
+                }
                 Spacer()
+                if isLocked {
+                    Button { showUnlockAlert = true } label: {
+                        Label("Modifier", systemImage: "lock.open")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Repasser en édition (la facture n'est plus protégée)")
+                } else if validation?.isValid == true {
+                    Button { isLocked = true } label: {
+                        Label("Verrouiller", systemImage: "lock")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Protéger la facture validée en lecture seule")
+                }
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
+                    .disabled(isLocked)
                 Button("Exporter XML") { exportXML() }
                     .buttonStyle(.bordered)
+                    .disabled(isLocked)
                 Button("Générer le Factur-X") { export() }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isLocked)
             }
             .padding(12)
             Divider()
@@ -525,7 +576,14 @@ struct InvoiceEditorView: View {
                     }.padding(8).frame(maxWidth: .infinity)
                 }
             }.padding()
+                .disabled(isLocked)
         }
+            .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
+                Button("Annuler", role: .cancel) { }
+                Button("Modifier", role: .destructive) { isLocked = false }
+            } message: {
+                Text("La facture était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout dépôt PDP.")
+            }
         }
     }
 

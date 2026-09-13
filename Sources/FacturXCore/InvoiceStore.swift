@@ -72,7 +72,6 @@ public final class InvoiceStore: ObservableObject {
         credit.lines = invoice.lines.map { line in
             var l = line
             l.id = UUID()
-            l.quantity = -line.quantity
             return l
         }
         return credit
