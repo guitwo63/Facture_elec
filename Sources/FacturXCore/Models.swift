@@ -69,7 +69,10 @@ public struct InvoiceParty: Codable, Hashable {
         contactEmail: String? = nil,
         contactPhone: String? = nil,
         endpointID: String? = nil,
-        endpointSchemeID: String = "0225"
+        endpointSchemeID: String = "0225",
+        iban: String? = nil,
+        bic: String? = nil,
+        paymentTerms: String? = nil
     ) {
         self.name = name
         self.street = street
