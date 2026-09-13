@@ -25,7 +25,7 @@ public struct CIIXMLGenerator {
         let buyer = xmlParty(invoice.buyer, role: .buyer)
         let agreement = """
         <ram:ApplicableHeaderTradeAgreement>
-\(buyerReferenceXML(invoice))\(seller)\(buyer)\(purchaseOrderXML(invoice))
+\(buyerReferenceXML(invoice))\(seller)\(buyer)\(purchaseOrderXML(invoice))\(contractXML(invoice))\(tenderXML(invoice))
         </ram:ApplicableHeaderTradeAgreement>
 """
         let delivery = """
@@ -35,6 +35,7 @@ public struct CIIXMLGenerator {
               <udt:DateTimeString format="102">\(issue)</udt:DateTimeString>
             </ram:OccurrenceDateTime>
           </ram:ActualDeliverySupplyChainEvent>
+\(receivingAdviceXML(invoice))\(despatchAdviceXML(invoice))
         </ram:ApplicableHeaderTradeDelivery>
 """
         let settlement = xmlSettlement(invoice, issue: issue, due: due)
@@ -209,6 +210,38 @@ public struct CIIXMLGenerator {
       <ram:BuyerOrderReferencedDocument>
         <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
       </ram:BuyerOrderReferencedDocument>
+"""
+    }
+    private func contractXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.contractRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:ContractReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:ContractReferencedDocument>
+"""
+    }
+    private func tenderXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.tenderRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:TendererReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:TendererReferencedDocument>
+"""
+    }
+    private func receivingAdviceXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.receivingAdviceRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:ReceivingAdviceReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:ReceivingAdviceReferencedDocument>
+"""
+    }
+    private func despatchAdviceXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.despatchAdviceRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:DespatchAdviceReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:DespatchAdviceReferencedDocument>
 """
     }
 
