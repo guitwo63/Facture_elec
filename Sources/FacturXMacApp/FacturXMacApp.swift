@@ -8,6 +8,7 @@ struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
+    @StateObject private var sireneSettings = SireneSettings.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -16,6 +17,7 @@ struct FacturXMacApp: App {
                 .environmentObject(store)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
+                .environmentObject(sireneSettings)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -916,14 +918,71 @@ struct RoutingAddressFormView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
+    @EnvironmentObject var sireneSettings: SireneSettings
     @State private var testMessage: String?
     @State private var testing = false
+    @State private var sireneMessage: String?
+    @State private var sireneTesting = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Réglages").font(.title2.bold())
 
+                GroupBox("Annuaire INSEE Sirene (gratuit)") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("L'API Sirene V3 de l'INSEE permet de pré-remplir la désignation et l'adresse postale d'un tiers à partir de son SIREN/SIRET. Gratuite, mais nécessite une application sur le portail api.insee.fr (souscrire \"Sirene - V3\"). Ne donne pas l'adresse de routage PPF.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text("Client key").frame(width: 100, alignment: .leading)
+                            TextField("Client key", text: $sireneSettings.credentials.clientKey)
+                        }
+                        HStack {
+                            Text("Client secret").frame(width: 100, alignment: .leading)
+                            SecureField("Client secret", text: $sireneSettings.credentials.clientSecret)
+                        }
+                        HStack {
+                            Text("URL Token").frame(width: 100, alignment: .leading)
+                            TextField("URL Token", text: $sireneSettings.credentials.tokenURL)
+                        }
+                        HStack {
+                            Text("Base API").frame(width: 100, alignment: .leading)
+                            TextField("Base API", text: $sireneSettings.credentials.apiBaseURL)
+                        }
+                        HStack {
+                            Button {
+                                sireneSettings.save()
+                            } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                                .buttonStyle(.borderedProminent)
+                            Button {
+                                sireneTesting = true
+                                sireneMessage = nil
+                                Task {
+                                    do {
+                                        _ = try await SireneService().fetchToken(credentials: sireneSettings.credentials)
+                                        sireneMessage = "Connexion réussie — jeton obtenu."
+                                    } catch {
+                                        sireneMessage = "Échec : \(error.localizedDescription)"
+                                    }
+                                    sireneTesting = false
+                                }
+                            } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
+                                .buttonStyle(.bordered)
+                                .disabled(sireneTesting || !sireneSettings.credentials.isConfigured)
+                            Spacer()
+                        }
+                        if let m = sireneMessage {
+                            Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Création du compte").font(.caption2.bold())
+                            Text("1. Créez un compte sur https://portail-api.insee.fr/".font(.caption2).foregroundStyle(.tertiary))
+                            Text("2. Souscrivez l'API \"Sirene - V3\" (gratuit)").font(.caption2).foregroundStyle(.tertiary)
+                            Text("3. Récupérez client_key / client_secret de votre application").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Token : https://api.insee.fr/token  ·  API : https://api.insee.fr/entreprises/sirene/V3").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }.padding(8)
+                }
                 GroupBox("Annuaire Chorus Pro (PISTE)") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Renseignez les identifiants de votre application PISTE (client_id / client_secret) et le compte technique Chorus Pro requis pour appeler l'API.")
@@ -986,12 +1045,12 @@ struct SettingsView: View {
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Sandbox (tests)").font(.caption2.bold())
-                            Text("Token : https://sandbox-oauth.aife.economie.gouv.fr/api/oauth/token").font(.caption2).foregroundStyle(.tertiary)
-                            Text("API : https://sandbox-api.aife.economie.gouv.fr").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Token : https://sandbox-oauth.piste.gouv.fr/api/oauth/token").font(.caption2).foregroundStyle(.tertiary)
+                            Text("API : https://sandbox-api.piste.gouv.fr").font(.caption2).foregroundStyle(.tertiary)
                             Text("Production").font(.caption2.bold())
-                            Text("Token : https://oauth.aife.economie.gouv.fr/api/oauth/token").font(.caption2).foregroundStyle(.tertiary)
-                            Text("API : https://api.aife.economie.gouv.fr").font(.caption2).foregroundStyle(.tertiary)
-                            Text("Scope par défaut : openid. Créez l'application sur PISTE, souscrivez l'API Chorus Pro, puis créez un compte technique Chorus Pro pour l'en-tête cpro-account.").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Token : https://oauth.piste.gouv.fr/api/oauth/token").font(.caption2).foregroundStyle(.tertiary)
+                            Text("API : https://api.piste.gouv.fr").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Scope par défaut : openid. L'API Annuaire (ppf.annuaire) est réservée aux Plateformes Agréées approuvées — sinon utiliser l'Annuaire web. L'API Structures (cpro.structures) renvoie dénomination + statut sans l'adresse de routage.").font(.caption2).foregroundStyle(.tertiary)
                         }
                     }.padding(8)
                 }
@@ -1111,7 +1170,11 @@ struct ChorusProSearchSheet: View {
 
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
+    @EnvironmentObject var sireneSettings: SireneSettings
     @State private var showChorusSearch = false
+    @State private var showSireneSearch = false
+    @State private var sireneError: String?
+    @State private var sireneLoading = false
 
     private var star: some View { Text(" *").foregroundColor(.red) }
 
@@ -1122,6 +1185,13 @@ struct PartyEditorView: View {
                     Label("Rechercher (API PISTE)", systemImage: "network")
                 }
                 .buttonStyle(.bordered)
+                Button { runSireneLookup() } label: {
+                    if sireneLoading { ProgressView().controlSize(.small) }
+                    else { Label("Rechercher (Sirene INSEE)", systemImage: "magnifyingglass.circle") }
+                }
+                .buttonStyle(.bordered)
+                .disabled(sireneLoading || (party.siren ?? "").filter { $0.isNumber }.isEmpty || !sireneSettings.credentials.isConfigured)
+                .help(sireneSettings.credentials.isConfigured ? "Pré-remplit désignation et adresse depuis le SIREN/SIRET via l'API Sirene INSEE" : "Configurez l'API Sirene dans les Réglages")
                 Button {
                     openWebDirectory()
                 } label: {
@@ -1130,6 +1200,9 @@ struct PartyEditorView: View {
                 .buttonStyle(.bordered)
                 .help("Ouvre l'annuaire public Chorus Pro dans le navigateur")
                 Spacer()
+            }
+            if let err = sireneError {
+                Text(err).font(.caption).foregroundStyle(.red)
             }
             HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
@@ -1161,6 +1234,35 @@ struct PartyEditorView: View {
         .sheet(isPresented: $showChorusSearch) {
             ChorusProSearchSheet(initialQuery: party.siren ?? "") { picked in
                 party = picked
+            }
+        }
+    }
+
+    private func runSireneLookup() {
+        let query = (party.siren ?? "").filter { $0.isNumber }
+        guard !query.isEmpty else {
+            sireneError = "Saisissez un SIREN ou SIRET."
+            return
+        }
+        sireneError = nil
+        sireneLoading = true
+        Task {
+            do {
+                let result = try await SireneService().lookup(siretOrSiren: query, credentials: sireneSettings.credentials)
+                await MainActor.run {
+                    party = result.merged(into: party)
+                    sireneLoading = false
+                }
+            } catch let e as SireneError {
+                await MainActor.run {
+                    sireneError = e.errorDescription
+                    sireneLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    sireneError = error.localizedDescription
+                    sireneLoading = false
+                }
             }
         }
     }
