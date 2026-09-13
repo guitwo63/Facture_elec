@@ -184,7 +184,7 @@ public final class ChorusProService {
         guard !query.isEmpty else { throw ChorusProError.emptyQuery }
         let token = try await fetchToken(credentials: credentials)
         let base = credentials.apiBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let endpoint = base + "/ppf/annuaire/v1/rechercher"
+        let endpoint = base + "/cpro/structures/v1/rechercher"
         guard let url = URL(string: endpoint) else {
             throw ChorusProError.decoding("URL d'API invalide : \(endpoint)")
         }
@@ -197,8 +197,10 @@ public final class ChorusProService {
         }
         let isSiret = query.count >= 14
         let payload: [String: Any] = [
-            "idCriteria": query,
-            "typeRecherche": isSiret ? "SIRET" : "SIREN"
+            "structure": [
+                "typeIdentifiantStructure": isSiret ? "SIRET" : "SIREN",
+                "identifiantStructure": query
+            ]
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, resp) = try await session.data(for: req)
@@ -257,7 +259,8 @@ public final class ChorusProService {
         let city = s("ville") ?? s("commune") ?? s("localite")
         let country = s("pays") ?? s("codePays")
         let hasPlat = b("plateformeAgreerattachee") ?? b("plateformeAgreeRattachee") ?? b("hasPlateforme") ?? b("plateformeAgre")
-        let active = b("adresseActive") ?? b("actif")
+        let statut = s("statut")
+        let active = b("adresseActive") ?? b("actif") ?? (statut.map { $0.uppercased() == "ACTIVE" })
         var raw: [String: String] = [:]
         for (k, v) in dict {
             if let sv = v as? String { raw[k] = sv }
