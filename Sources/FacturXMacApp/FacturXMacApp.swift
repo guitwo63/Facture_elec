@@ -1267,8 +1267,8 @@ struct SireneSearchSheet: View {
                 }
             } catch let e as SireneError {
                 await MainActor.run { error = e.errorDescription; loading = false }
-            } catch {
-                await MainActor.run { error = error.localizedDescription; loading = false }
+            } catch let err {
+                await MainActor.run { error = err.localizedDescription; loading = false }
             }
         }
     }
