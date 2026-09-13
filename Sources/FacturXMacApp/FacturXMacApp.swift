@@ -983,7 +983,7 @@ struct SettingsView: View {
                                 .buttonStyle(.bordered)
                         }
                         Divider()
-                        PartyEditorView(party: $store.myCompany)
+                        PartyEditorView(party: $store.myCompany, showWebButton: false)
                         Button {
                             store.save()
                         } label: { Label("Enregistrer l'émetteur par défaut", systemImage: "checkmark.circle") }
@@ -1215,6 +1215,7 @@ struct ChorusProSearchSheet: View {
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
     @Binding var routingAddresses: [PartyRoutingAddress]
+    var showWebButton: Bool
     @State private var showRoutingEditor = false
     @State private var editingAddress: PartyRoutingAddress?
     @State private var dinumResults: [SireneResult] = []
@@ -1222,8 +1223,9 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, showWebButton: Bool = true) {
         self._party = party
+        self.showWebButton = showWebButton
         if let ra = routingAddresses {
             self._routingAddresses = ra
         } else {
@@ -1240,13 +1242,15 @@ struct PartyEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button {
-                    openWebDirectory()
-                } label: {
-                    Label("Annuaire web", systemImage: "safari")
+                if showWebButton {
+                    Button {
+                        openWebDirectory()
+                    } label: {
+                        Label("Annuaire web", systemImage: "safari")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Ouvre l'annuaire public Chorus Pro dans le navigateur")
                 }
-                .buttonStyle(.bordered)
-                .help("Ouvre l'annuaire public Chorus Pro dans le navigateur")
                 if dinumLoading { ProgressView().controlSize(.small) }
                 Spacer()
             }
