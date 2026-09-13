@@ -704,7 +704,8 @@ struct InvoiceEditorView: View {
                 validation = FacturXValidationResult(
                     isValid: false,
                     errors: postCheck.errors,
-                    warnings: preCheck.warnings + postCheck.warnings
+                    warnings: preCheck.warnings + postCheck.warnings,
+                    businessRules: preCheck.businessRules
                 )
                 showValidation = true
                 exportError = "La conformité du PDF généré a échoué : \(postCheck.errors.count) erreur(s)."
@@ -718,7 +719,8 @@ struct InvoiceEditorView: View {
                 exportedURL = url
                 validation = FacturXValidationResult(
                     isValid: true,
-                    warnings: preCheck.warnings + postCheck.warnings
+                    warnings: preCheck.warnings + postCheck.warnings,
+                    businessRules: preCheck.businessRules
                 )
                 showValidation = true
             }
@@ -789,6 +791,21 @@ struct InvoiceEditorView: View {
                     Text("Avertissements :").font(.caption.bold())
                     ForEach(v.warnings, id: \.self) { w in
                         Text("• \(w)").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                if !v.businessRules.isEmpty {
+                    Divider().padding(.vertical, 2)
+                    Text("Règles métier EN 16931 :").font(.caption.bold())
+                    ForEach(v.businessRules) { br in
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(br.ruleId)
+                                .font(.caption.bold().monospaced())
+                                .foregroundStyle(br.severity == .error ? .red : .orange)
+                                .frame(width: 84, alignment: .leading)
+                            Text(br.message)
+                                .font(.caption)
+                                .foregroundStyle(br.severity == .error ? .red : .orange)
+                        }
                     }
                 }
             }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
