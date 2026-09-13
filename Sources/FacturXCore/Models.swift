@@ -51,6 +51,9 @@ public struct InvoiceParty: Codable, Hashable {
     public var contactPhone: String?
     public var endpointID: String?
     public var endpointSchemeID: String
+    public var iban: String?
+    public var bic: String?
+    public var paymentTerms: String?
 
     public init(
         name: String,
@@ -66,7 +69,10 @@ public struct InvoiceParty: Codable, Hashable {
         contactEmail: String? = nil,
         contactPhone: String? = nil,
         endpointID: String? = nil,
-        endpointSchemeID: String = "0225"
+        endpointSchemeID: String = "0225",
+        iban: String? = nil,
+        bic: String? = nil,
+        paymentTerms: String? = nil
     ) {
         self.name = name
         self.street = street
@@ -82,11 +88,14 @@ public struct InvoiceParty: Codable, Hashable {
         self.contactPhone = contactPhone
         self.endpointID = endpointID
         self.endpointSchemeID = endpointSchemeID
+        self.iban = iban
+        self.bic = bic
+        self.paymentTerms = paymentTerms
     }
 
     private enum CodingKeys: String, CodingKey {
         case name, street, postcode, city, country, vatNumber, siren, siret, legalSchemeID
-        case contactName, contactEmail, contactPhone, endpointID, endpointSchemeID
+        case contactName, contactEmail, contactPhone, endpointID, endpointSchemeID, iban, bic, paymentTerms
     }
 
     public init(from decoder: Decoder) throws {
@@ -105,6 +114,9 @@ public struct InvoiceParty: Codable, Hashable {
         contactPhone = try c.decodeIfPresent(String.self, forKey: .contactPhone)
         endpointID = try c.decodeIfPresent(String.self, forKey: .endpointID)
         endpointSchemeID = try c.decodeIfPresent(String.self, forKey: .endpointSchemeID) ?? "0225"
+        iban = try c.decodeIfPresent(String.self, forKey: .iban)
+        bic = try c.decodeIfPresent(String.self, forKey: .bic)
+        paymentTerms = try c.decodeIfPresent(String.self, forKey: .paymentTerms)
     }
 
     public var fullAddressLine: String {
@@ -283,6 +295,12 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var buyer: InvoiceParty
     public var buyerReference: String?
     public var purchaseOrderRef: String?
+    public var contractRef: String?
+    public var tenderRef: String?
+    public var receivingAdviceRef: String?
+    public var despatchAdviceRef: String?
+    public var precedingInvoiceRef: String?
+    public var precedingInvoiceDate: Date?
     public var lines: [InvoiceLine]
     public var paymentIBAN: String?
     public var paymentBIC: String?
@@ -306,6 +324,12 @@ public struct Invoice: Codable, Hashable, Identifiable {
         buyer: InvoiceParty,
         buyerReference: String? = nil,
         purchaseOrderRef: String? = nil,
+        contractRef: String? = nil,
+        tenderRef: String? = nil,
+        receivingAdviceRef: String? = nil,
+        despatchAdviceRef: String? = nil,
+        precedingInvoiceRef: String? = nil,
+        precedingInvoiceDate: Date? = nil,
         lines: [InvoiceLine] = [],
         paymentIBAN: String? = nil,
         paymentBIC: String? = nil,
@@ -328,6 +352,12 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.buyer = buyer
         self.buyerReference = buyerReference
         self.purchaseOrderRef = purchaseOrderRef
+        self.contractRef = contractRef
+        self.tenderRef = tenderRef
+        self.receivingAdviceRef = receivingAdviceRef
+        self.despatchAdviceRef = despatchAdviceRef
+        self.precedingInvoiceRef = precedingInvoiceRef
+        self.precedingInvoiceDate = precedingInvoiceDate
         self.lines = lines
         self.paymentIBAN = paymentIBAN
         self.paymentBIC = paymentBIC
@@ -341,7 +371,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer
-        case buyerReference, purchaseOrderRef, lines, paymentIBAN, paymentBIC, paymentTerms, notes
+        case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB
     }
 
@@ -359,6 +389,12 @@ public struct Invoice: Codable, Hashable, Identifiable {
         buyer = try c.decodeIfPresent(InvoiceParty.self, forKey: .buyer) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         buyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
         purchaseOrderRef = try c.decodeIfPresent(String.self, forKey: .purchaseOrderRef)
+        contractRef = try c.decodeIfPresent(String.self, forKey: .contractRef)
+        tenderRef = try c.decodeIfPresent(String.self, forKey: .tenderRef)
+        receivingAdviceRef = try c.decodeIfPresent(String.self, forKey: .receivingAdviceRef)
+        despatchAdviceRef = try c.decodeIfPresent(String.self, forKey: .despatchAdviceRef)
+        precedingInvoiceRef = try c.decodeIfPresent(String.self, forKey: .precedingInvoiceRef)
+        precedingInvoiceDate = try c.decodeIfPresent(Date.self, forKey: .precedingInvoiceDate)
         lines = try c.decodeIfPresent([InvoiceLine].self, forKey: .lines) ?? []
         paymentIBAN = try c.decodeIfPresent(String.self, forKey: .paymentIBAN)
         paymentBIC = try c.decodeIfPresent(String.self, forKey: .paymentBIC)

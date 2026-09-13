@@ -25,7 +25,7 @@ public struct CIIXMLGenerator {
         let buyer = xmlParty(invoice.buyer, role: .buyer)
         let agreement = """
         <ram:ApplicableHeaderTradeAgreement>
-\(buyerReferenceXML(invoice))\(purchaseOrderXML(invoice))\(seller)\(buyer)
+\(buyerReferenceXML(invoice))\(seller)\(buyer)\(purchaseOrderXML(invoice))\(contractXML(invoice))\(tenderXML(invoice))
         </ram:ApplicableHeaderTradeAgreement>
 """
         let delivery = """
@@ -35,6 +35,7 @@ public struct CIIXMLGenerator {
               <udt:DateTimeString format="102">\(issue)</udt:DateTimeString>
             </ram:OccurrenceDateTime>
           </ram:ActualDeliverySupplyChainEvent>
+\(receivingAdviceXML(invoice))\(despatchAdviceXML(invoice))
         </ram:ApplicableHeaderTradeDelivery>
 """
         let settlement = xmlSettlement(invoice, issue: issue, due: due)
@@ -72,6 +73,7 @@ public struct CIIXMLGenerator {
         let total = String(format: "%.2f", line.lineTotal)
         let rate = formatRate(line.vatRate)
         let category = "S"
+        let unitCode = line.unit.trimmingCharacters(in: .whitespaces).isEmpty ? "C62" : line.unit
         let desc = line.description.map { """
             <ram:Description>\(escape($0))</ram:Description>
 """ } ?? ""
@@ -87,7 +89,7 @@ public struct CIIXMLGenerator {
             </ram:NetPriceProductTradePrice>
           </ram:SpecifiedLineTradeAgreement>
           <ram:SpecifiedLineTradeDelivery>
-            <ram:BilledQuantity unitCode="\(line.unit)">\(qty)</ram:BilledQuantity>
+            <ram:BilledQuantity unitCode="\(unitCode)">\(qty)</ram:BilledQuantity>
           </ram:SpecifiedLineTradeDelivery>
           <ram:SpecifiedLineTradeSettlement>
             <ram:ApplicableTradeTax>
@@ -210,6 +212,38 @@ public struct CIIXMLGenerator {
       </ram:BuyerOrderReferencedDocument>
 """
     }
+    private func contractXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.contractRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:ContractReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:ContractReferencedDocument>
+"""
+    }
+    private func tenderXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.tenderRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:TendererReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:TendererReferencedDocument>
+"""
+    }
+    private func receivingAdviceXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.receivingAdviceRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:ReceivingAdviceReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:ReceivingAdviceReferencedDocument>
+"""
+    }
+    private func despatchAdviceXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.despatchAdviceRef, !ref.isEmpty else { return "" }
+        return """
+      <ram:DespatchAdviceReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+      </ram:DespatchAdviceReferencedDocument>
+"""
+    }
 
     private func notesXML(_ invoice: Invoice) -> String {
         var notes: [String] = []
@@ -285,7 +319,7 @@ public struct CIIXMLGenerator {
         <ram:TaxTotalAmount currencyID="\(escape(invoice.currency))">\(taxTotal)</ram:TaxTotalAmount>
         <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
         <ram:DuePayableAmount>\(duePay)</ram:DuePayableAmount>
-      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>\(invoiceReferencedXML(invoice))
     </ram:ApplicableHeaderTradeSettlement>
 """
     }
@@ -332,6 +366,27 @@ public struct CIIXMLGenerator {
 """
     }
 
+    private func invoiceReferencedXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.precedingInvoiceRef, !ref.isEmpty else { return "" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
+        let dateStr: String
+        if let d = invoice.precedingInvoiceDate {
+            dateStr = fmt.string(from: d)
+        } else {
+            dateStr = fmt.string(from: invoice.issueDate)
+        }
+        return """
+      <ram:InvoiceReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+        <ram:FormattedIssueDateTime>
+          <qdt:DateTimeString format="102">\(dateStr)</qdt:DateTimeString>
+        </ram:FormattedIssueDateTime>
+      </ram:InvoiceReferencedDocument>
+"""
+    }
     private func formatRate(_ rate: Double) -> String {
         if rate == rate.rounded() {
             return String(format: "%.0f", rate)

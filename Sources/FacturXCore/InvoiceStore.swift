@@ -5,14 +5,17 @@ public final class InvoiceStore: ObservableObject {
 
     @Published public var invoices: [Invoice]
     @Published public var myCompany: InvoiceParty
+    public var defaultSellerEntryID: UUID?
 
     private let defaults = UserDefaults.standard
     private let storageKey = "facturx.invoices.v1"
     private let companyKey = "facturx.mycompany.v1"
+    private let sellerEntryKey = "facturx.defaultseller.entryid.v1"
 
     public init() {
         self.invoices = []
         self.myCompany = InvoiceStore.defaultCompany()
+        self.defaultSellerEntryID = nil
         load()
     }
 
@@ -25,6 +28,7 @@ public final class InvoiceStore: ObservableObject {
            let decoded = try? JSONDecoder().decode(InvoiceParty.self, from: data) {
             myCompany = decoded
         }
+        defaultSellerEntryID = defaults.string(forKey: sellerEntryKey).flatMap { UUID(uuidString: $0) }
     }
 
     public func save() {
@@ -34,6 +38,25 @@ public final class InvoiceStore: ObservableObject {
         if let data = try? JSONEncoder().encode(myCompany) {
             defaults.set(data, forKey: companyKey)
         }
+        if let id = defaultSellerEntryID {
+            defaults.set(id.uuidString, forKey: sellerEntryKey)
+        } else {
+            defaults.removeObject(forKey: sellerEntryKey)
+        }
+    }
+
+    public func resolveDefaultSeller(from directory: PartyDirectory) -> InvoiceParty? {
+        guard let id = defaultSellerEntryID,
+              let entry = directory.entries.first(where: { $0.id == id }) else { return nil }
+        var p = entry.party
+        if let routing = entry.defaultRoutingAddress, routing.isActive {
+            let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+            if !composed.isEmpty {
+                p.endpointID = composed
+                p.endpointSchemeID = "0225"
+            }
+        }
+        return p
     }
 
     public func upsert(_ invoice: Invoice) {
@@ -50,12 +73,17 @@ public final class InvoiceStore: ObservableObject {
         save()
     }
 
-    public func newDraft() -> Invoice {
-        Invoice(
+    public func newDraft(directory: PartyDirectory? = nil) -> Invoice {
+        let dir = directory ?? PartyDirectory.shared
+        let seller = resolveDefaultSeller(from: dir) ?? myCompany
+        return Invoice(
             number: nextNumber(),
-            seller: myCompany,
+            seller: seller,
             buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""),
-            lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)]
+            lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
+            paymentIBAN: seller.iban,
+            paymentBIC: seller.bic,
+            paymentTerms: seller.paymentTerms
         )
     }
 
@@ -67,7 +95,9 @@ public final class InvoiceStore: ObservableObject {
         credit.status = .draft
         credit.issueDate = Date()
         credit.dueDate = Date()
-        credit.purchaseOrderRef = invoice.number
+        credit.purchaseOrderRef = nil
+        credit.precedingInvoiceRef = invoice.number
+        credit.precedingInvoiceDate = invoice.issueDate
         credit.notes = "Avoir relatif à la facture \(invoice.number)"
         credit.lines = invoice.lines.map { line in
             var l = line

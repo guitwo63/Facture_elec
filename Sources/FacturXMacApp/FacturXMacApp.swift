@@ -30,6 +30,12 @@ func hexString(from color: Color) -> String {
     return String(format: "%02X%02X%02X", r, g, b)
 }
 
+extension View {
+    @ViewBuilder
+    func lockable(_ locked: Bool) -> some View {
+        self.allowsHitTesting(!locked)
+    }
+}
 struct InfoBadge: View {
     let text: String
     @State private var isHovering = false
@@ -207,15 +213,31 @@ struct RootView: View {
     }
 }
 
+enum InvoiceTypeFilter: String, CaseIterable, Hashable {
+    case all = "Tous"
+    case invoice = "Factures"
+    case creditNote = "Avoirs"
+}
+
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @Binding var selectedID: UUID?
     @State private var query = ""
+    @State private var typeFilter: InvoiceTypeFilter = .all
 
     var filteredInvoices: [Invoice] {
+        var result = store.invoices
+        switch typeFilter {
+        case .all:
+            break
+        case .invoice:
+            result = result.filter { $0.type != .creditNote }
+        case .creditNote:
+            result = result.filter { $0.type == .creditNote }
+        }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return store.invoices }
-        return store.invoices.filter { invoice in
+        guard !q.isEmpty else { return result }
+        return result.filter { invoice in
             invoice.number.lowercased().contains(q)
                 || invoice.buyer.name.lowercased().contains(q)
                 || (invoice.buyer.siren ?? "").lowercased().contains(q)
@@ -234,6 +256,13 @@ struct InvoicesTabView: View {
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Factures").font(.title2.bold())
+                    Picker("Filtre", selection: $typeFilter) {
+                        ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
+                            Text(f.rawValue).tag(f)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 260)
                     Spacer()
                 }
                 HStack {
@@ -285,8 +314,8 @@ struct InvoicesTabView: View {
                                     .font(.caption2)
                                 Text(invoice.status.label).font(.caption2)
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
-                                Text(invoice.type == .creditNote ? "Avoir" : "")
-                                    .font(.caption2).foregroundStyle(.orange)
+                                Text(invoice.type == .creditNote ? "Avoir" : "Facture")
+                                    .font(.caption2).foregroundStyle(invoice.type == .creditNote ? .orange : .accentColor)
                                 Spacer()
                             }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
@@ -300,6 +329,7 @@ struct InvoicesTabView: View {
                                 store.upsert(credit)
                                 selectedID = credit.id
                             } label: { Label("Créer un avoir", systemImage: "arrow.uturn.backward.circle") }
+                            .disabled(invoice.type == .creditNote)
                             Divider()
                             Button(role: .destructive) {
                                 store.invoices.removeAll { $0.id == invoice.id }
@@ -399,10 +429,8 @@ struct InvoiceEditorView: View {
                     .disabled(isLocked)
                 Button("Exporter XML") { exportXML() }
                     .buttonStyle(.bordered)
-                    .disabled(isLocked)
                 Button("Générer le Factur-X") { export() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isLocked)
             }
             .padding(12)
             Divider()
@@ -443,61 +471,126 @@ struct InvoiceEditorView: View {
 
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            LabeledContent {
-                                TextField("", text: $invoice.number).frame(width: 160)
-                            } label: {
+                        if !linkedCreditNotes.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.uturn.backward.circle.fill")
+                                    .foregroundStyle(.orange)
+                                Text(linkedCreditNotes.count == 1
+                                     ? "Avoir lié : \(linkedCreditNotes[0].number)"
+                                     : "Avoirs liés : \(linkedCreditNotes.map { $0.number }.joined(separator: ", "))")
+                                    .font(.caption.bold())
+                                Spacer()
+                            }
+                            .padding(6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+                        }
+                        HStack(alignment: .top, spacing: 24) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    LabeledContent {
+                                        TextField("", text: $invoice.number).frame(width: 160)
+                                    } label: {
+                                        HStack(spacing: 3) {
+                                            Text("Numéro *").foregroundColor(.red)
+                                            InfoBadge(text: "BT-1 — Numéro unique de la facture. Obligatoire.")
+                                        }
+                                    }
+                                    HStack(spacing: 3) {
+                                        Picker("Type", selection: $invoice.type) {
+                                            ForEach(InvoiceTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
+                                        }.frame(width: 260)
+                                        InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
+                                    }
+                                }
+                                HStack {
+                                    HStack(spacing: 3) {
+                                        DatePicker("Date", selection: $invoice.issueDate, displayedComponents: .date)
+                                        InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                                    }
+                                    HStack(spacing: 3) {
+                                        DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
+                                        InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                    }
+                                }
                                 HStack(spacing: 3) {
-                                    Text("Numéro *").foregroundColor(.red)
-                                    InfoBadge(text: "BT-1 — Numéro unique de la facture. Obligatoire.")
+                                    TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
+                                    InfoBadge(text: "BT-13 — Référence de la commande acheteur. Remontée en haut de la facture.")
                                 }
-                            }
-                            HStack(spacing: 3) {
-                                Picker("Type", selection: $invoice.type) {
-                                    ForEach(InvoiceTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
-                                }.frame(width: 260)
-                                InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
-                            }
-                            Picker("Statut", selection: $invoice.status) {
-                                ForEach(InvoiceStatus.allCases, id: \.self) { s in
-                                    Label(s.label, systemImage: s.systemImage).tag(s)
+                                if invoice.type == .creditNote {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Référence et date de la facture liée :").font(.caption.bold())
+                                        HStack(spacing: 3) {
+                                            TextField("N° facture liée", text: Binding($invoice.precedingInvoiceRef, replacingNilWith: "")).frame(width: 160)
+                                            InfoBadge(text: "BT-25 — Numéro de la facture antérieure référencée par cet avoir. Obligatoire pour un avoir (BR-FR-CO-05).")
+                                            DatePicker("Date facture liée", selection: Binding(
+                                                get: { invoice.precedingInvoiceDate ?? Date() },
+                                                set: { invoice.precedingInvoiceDate = $0 }
+                                            ), displayedComponents: .date)
+                                            InfoBadge(text: "BT-26 — Date d'émission de la facture antérieure référencée.")
+                                        }
+                                    }
                                 }
-                            }.frame(width: 220)
-                        }
-                        HStack {
-                            HStack(spacing: 3) {
-                                DatePicker("Date", selection: $invoice.issueDate, displayedComponents: .date)
-                                InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                                HStack {
+                                    Picker("Profil Factur-X", selection: $invoice.profile) {
+                                        ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                    }
+                                    NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160)
+                                    TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
+                                }
+                                HStack {
+                                    HStack(spacing: 3) {
+                                        Picker("Mode facturation (BT-23)", selection: $invoice.billingMode) {
+                                            ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                                        }.frame(width: 320)
+                                        InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
+                                    }
+                                }
+                                DisclosureGroup("Autres références") {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. contrat (BT-17)", text: Binding($invoice.contractRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "BT-17 — Référence du contrat.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. appel d'offres (BT-18)", text: Binding($invoice.tenderRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "BT-18 — Référence de l'appel d'offres.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. bon de réception (BT-19)", text: Binding($invoice.receivingAdviceRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "BT-19 — Référence de l'avis de réception.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. bon de livraison (BT-20)", text: Binding($invoice.despatchAdviceRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "BT-20 — Référence de l'avis d'expédition.")
+                                        }
+                                    }
+                                }
+                                .font(.caption)
                             }
-                            HStack(spacing: 3) {
-                                DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
-                                InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                            VStack(alignment: .trailing) {
+                                row("Total HT", invoice.lineTotal)
+                                ForEach(invoice.vatBreakdown, id: \.rate) { item in
+                                    row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
+                                }
+                                row("Total TTC", invoice.grandTotal, bold: true)
                             }
-                        }
-                        HStack {
-                            Picker("Profil Factur-X", selection: $invoice.profile) {
-                                ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                            }
-                            NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160)
-                            TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
-                        }
-                        HStack {
-                            HStack(spacing: 3) {
-                                Picker("Mode facturation (BT-23)", selection: $invoice.billingMode) {
-                                    ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                                }.frame(width: 320)
-                                InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
-                            }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                         }
                     }.padding(8)
-                }
+                }.lockable(isLocked)
 
-                GroupBox("Émetteur (vous)") {
-                    PartySection(party: $invoice.seller, role: .seller)
-                }
-
-                GroupBox("Destinataire") {
-                    PartySection(party: $invoice.buyer, role: .buyer)
+                HStack(alignment: .top, spacing: 12) {
+                    GroupBox("Émetteur (vous)") {
+                        PartySection(party: $invoice.seller, role: .seller, onPartyPicked: { p in
+                            invoice.paymentIBAN = p.iban
+                            invoice.paymentBIC = p.bic
+                            if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
+                        })
+                    }.lockable(isLocked)
+                    GroupBox("Destinataire") {
+                        PartySection(party: $invoice.buyer, role: .buyer)
+                    }.lockable(isLocked)
                 }
 
                 GroupBox("Lignes") {
@@ -535,7 +628,7 @@ struct InvoiceEditorView: View {
                             invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: invoice.lines.last?.vatRate ?? 20))
                         } label: { Label("Ajouter une ligne", systemImage: "plus") }
                     }.padding(8)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Paiement") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -550,9 +643,8 @@ struct InvoiceEditorView: View {
                             }
                         }
                         TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
-                        TextField("Référence commande", text: Binding($invoice.purchaseOrderRef, replacingNilWith: ""))
                     }.padding(8)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Mentions légales (FR)") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -564,19 +656,8 @@ struct InvoiceEditorView: View {
                         TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
                         TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
                     }.padding(8)
-                }
-
-                GroupBox("Totaux") {
-                    VStack(alignment: .trailing) {
-                        row("Total HT", invoice.lineTotal)
-                        ForEach(invoice.vatBreakdown, id: \.rate) { item in
-                            row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
-                        }
-                        row("Total TTC", invoice.grandTotal, bold: true)
-                    }.padding(8).frame(maxWidth: .infinity)
-                }
+                }.lockable(isLocked)
             }.padding()
-                .disabled(isLocked)
         }
             .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
                 Button("Annuler", role: .cancel) { }
@@ -595,6 +676,14 @@ struct InvoiceEditorView: View {
                 .font(bold ? .body.bold() : .body)
                 .monospacedDigit()
         }.frame(width: 280)
+    }
+
+    private var linkedCreditNotes: [Invoice] {
+        guard !invoice.number.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        return store.invoices.filter {
+            $0.type == .creditNote
+                && ($0.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces)
+        }
     }
 
     private func export() {
@@ -673,6 +762,19 @@ struct InvoiceEditorView: View {
                             .foregroundStyle(.red)
                     }
                     Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: invoice.status.systemImage)
+                            .foregroundColor(Color(hex: invoice.status.hexColor))
+                            .font(.caption2)
+                        Picker("Statut", selection: $invoice.status) {
+                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                                Label(s.label, systemImage: s.systemImage).tag(s)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                        .help("Statut de la facture (modifiable à tout moment)")
+                    }
                     Button { showValidation = false } label: {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
@@ -703,6 +805,7 @@ struct PartySection: View {
 
     @Binding var party: InvoiceParty
     let role: Role
+    var onPartyPicked: ((InvoiceParty) -> Void)? = nil
     @EnvironmentObject var directory: PartyDirectory
     @State private var showPicker = false
     @State private var showSaveSheet = false
@@ -731,7 +834,7 @@ struct PartySection: View {
                 Spacer()
             }
 
-            PartyEditorView(party: $party)
+            PartyEditorView(party: $party, isFournisseur: role == .seller)
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -745,6 +848,7 @@ struct PartySection: View {
                     }
                 }
                 party = p
+                onPartyPicked?(p)
                 showPicker = false
             }
         }
@@ -1320,7 +1424,7 @@ struct DirectoryEditorView: View {
             }.pickerStyle(.segmented)
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
             }
 
             if !tagStore.tags.isEmpty {
@@ -1449,34 +1553,38 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 DisclosureGroup(isExpanded: $sellerExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Cette entreprise est utilisée comme émetteur par défaut pour chaque nouvelle facture.")
+                        Text("L'émetteur par défaut est un lien vers une fiche fournisseur de l'annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
                             .font(.caption).foregroundStyle(.secondary)
-                        if !store.myCompany.name.trimmingCharacters(in: .whitespaces).isEmpty {
+                        let linkedEntry: DirectoryEntry? = store.defaultSellerEntryID.flatMap { id in directory.entries.first { $0.id == id } }
+                        if let entry = linkedEntry {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.party.name).font(.body.weight(.semibold))
+                                if let s = entry.party.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
+                                if let st = entry.party.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
+                                if let v = entry.party.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+                                if let iban = entry.party.iban, !iban.isEmpty { Text("IBAN : \(iban)").font(.caption).foregroundStyle(.secondary) }
+                                if let bic = entry.party.bic, !bic.isEmpty { Text("BIC : \(bic)").font(.caption).foregroundStyle(.secondary) }
+                                if let pt = entry.party.paymentTerms, !pt.isEmpty { Text("Conditions : \(pt)").font(.caption).foregroundStyle(.secondary) }
+                            }
                             HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(store.myCompany.name).font(.body.weight(.semibold))
-                                    if let s = store.myCompany.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
-                                    if let st = store.myCompany.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
-                                    if let v = store.myCompany.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
-                                }
-                                Spacer()
                                 Button {
                                     showSellerPicker = true
-                                } label: { Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
+                                } label: { Label("Changer", systemImage: "person.crop.circle.badge.plus") }
                                     .buttonStyle(.bordered)
+                                Button(role: .destructive) {
+                                    store.defaultSellerEntryID = nil
+                                    store.save()
+                                } label: { Label("Dissocier", systemImage: "minus.circle") }
+                                    .buttonStyle(.bordered)
+                                Spacer()
                             }
                         } else {
+                            Text("Aucun émetteur par défaut défini.").font(.caption).foregroundStyle(.tertiary)
                             Button {
                                 showSellerPicker = true
-                            } label: { Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
+                            } label: { Label("Choisir un fournisseur dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
                                 .buttonStyle(.bordered)
                         }
-                        Divider()
-                        PartyEditorView(party: $store.myCompany, showWebButton: false)
-                        Button {
-                            store.save()
-                        } label: { Label("Enregistrer l'émetteur par défaut", systemImage: "checkmark.circle") }
-                            .buttonStyle(.borderedProminent)
                     }.padding(8)
                 } label: {
                     Label("Émetteur par défaut", systemImage: "building.2")
@@ -1654,20 +1762,21 @@ struct SettingsView: View {
                         .font(.headline)
                 }
 
+                Divider()
+                HStack {
+                    Text("Facture_elec v0.2.0").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let repo = URL(string: "https://github.com/guitwo63/Facture_elec") {
+                        Link("GitHub", destination: repo).font(.caption)
+                    }
+                }
+
                 Spacer()
             }.padding()
         }
         .sheet(isPresented: $showSellerPicker) {
             PartyPickerSheet(role: .seller) { selected in
-                var p = selected.party
-                if let routing = selected.defaultRoutingAddress, routing.isActive {
-                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
-                    if !composed.isEmpty {
-                        p.endpointID = composed
-                        p.endpointSchemeID = "0225"
-                    }
-                }
-                store.myCompany = p
+                store.defaultSellerEntryID = selected.id
                 store.save()
                 showSellerPicker = false
             }
@@ -1787,6 +1896,7 @@ struct PartyEditorView: View {
     @Binding var party: InvoiceParty
     @Binding var routingAddresses: [PartyRoutingAddress]
     var showWebButton: Bool
+    var isFournisseur: Bool = false
     @State private var showRoutingEditor = false
     @State private var editingAddress: PartyRoutingAddress?
     @State private var dinumResults: [SireneResult] = []
@@ -1794,9 +1904,10 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, showWebButton: Bool = true) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false) {
         self._party = party
         self.showWebButton = showWebButton
+        self.isFournisseur = isFournisseur
         if let ra = routingAddresses {
             self._routingAddresses = ra
         } else {
@@ -1844,7 +1955,10 @@ struct PartyEditorView: View {
                 Text("SIREN").font(.caption); star
                 TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
                     .onChange(of: party.siren) { _ in scheduleDinumSearch() }
-                TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
+                HStack(spacing: 4) {
+                    Text("TVA intra").font(.caption)
+                    TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
+                }
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
@@ -1877,6 +1991,16 @@ struct PartyEditorView: View {
                 Label("Adresses de facturation électronique", systemImage: "envelope.badge")
             }
             .buttonStyle(.bordered)
+            if isFournisseur {
+                DisclosureGroup("Coordonnées bancaires & conditions de paiement") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("IBAN", text: Binding($party.iban, replacingNilWith: ""))
+                        TextField("BIC", text: Binding($party.bic, replacingNilWith: ""))
+                        TextField("Conditions de paiement", text: Binding($party.paymentTerms, replacingNilWith: ""))
+                    }
+                }
+                .font(.caption)
+            }
             if !routingAddresses.isEmpty {
                 ForEach(routingAddresses) { addr in
                     HStack(spacing: 8) {
