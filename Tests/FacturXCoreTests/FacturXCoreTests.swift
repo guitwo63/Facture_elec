@@ -204,6 +204,30 @@ final class FacturXCoreTests: XCTestCase {
         return f.date(from: s)!
     }
 
+    func testBusinessRulesPassOnValidInvoice() {
+        let rules = EN16931BusinessRules.evaluate(invoice: sampleInvoice())
+        let failing = rules.filter { $0.severity == .error }
+        XCTAssertTrue(failing.isEmpty, "BR en erreur inattendues : \(failing.map { $0.message })")
+    }
+
+    func testBusinessRulesCreditNoteRequiresPrecedingRef() {
+        var inv = sampleInvoice()
+        inv.type = .creditNote
+        inv.precedingInvoiceRef = nil
+        inv.precedingInvoiceDate = nil
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-FR-CO-05" && $0.severity == .error },
+                     "BR-FR-CO-05 doit signaler l'absence de référence pour un avoir")
+    }
+
+    func testBusinessRulesTotalsCoherence() {
+        var inv = sampleInvoice()
+        inv.lines.append(InvoiceLine(name: "Ligne test", quantity: 1, unit: "C62", unitPrice: 100, vatRate: 20))
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertFalse(rules.contains { $0.ruleId == "BR-12" && $0.severity == .error },
+                       "BR-12 ne doit pas remonter si la somme des lignes est cohérente")
+    }
+
     func testLuhnValidSiren() {
         XCTAssertTrue(SireneValidator.isValidSiren("732829320"))
         XCTAssertFalse(SireneValidator.isValidSiren("732829321"))

@@ -4,11 +4,13 @@ public struct FacturXValidationResult {
     public let isValid: Bool
     public let errors: [String]
     public let warnings: [String]
+    public let businessRules: [BusinessRuleResult]
 
-    public init(isValid: Bool, errors: [String] = [], warnings: [String] = []) {
+    public init(isValid: Bool, errors: [String] = [], warnings: [String] = [], businessRules: [BusinessRuleResult] = []) {
         self.isValid = isValid
         self.errors = errors
         self.warnings = warnings
+        self.businessRules = businessRules
     }
 }
 
@@ -16,6 +18,7 @@ public struct FacturXValidator {
     public init() {}
 
     public func validate(invoice: Invoice) -> FacturXValidationResult {
+        let rules = EN16931BusinessRules.evaluate(invoice: invoice)
         var errors: [String] = []
         var warnings: [String] = []
 
@@ -117,7 +120,8 @@ public struct FacturXValidator {
         return FacturXValidationResult(
             isValid: errors.isEmpty,
             errors: errors,
-            warnings: warnings
+            warnings: warnings,
+            businessRules: rules
         )
     }
 
@@ -179,7 +183,8 @@ public struct FacturXValidator {
         return FacturXValidationResult(
             isValid: allErrors.isEmpty,
             errors: allErrors,
-            warnings: allWarnings
+            warnings: allWarnings,
+            businessRules: r1.businessRules
         )
     }
 }
