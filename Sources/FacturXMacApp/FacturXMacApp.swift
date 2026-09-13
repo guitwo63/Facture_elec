@@ -80,6 +80,7 @@ struct RootView: View {
                     showSettings = true
                 } label: {
                     Image(systemName: "gearshape")
+                        .font(.title2)
                 }
                 .buttonStyle(.borderless)
                 .help("Réglages")
@@ -94,8 +95,25 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .frame(minWidth: 720, minHeight: 640)
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Réglages").font(.title2.bold())
+                    Spacer()
+                    Button {
+                        showSettings = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Fermer")
+                }
+                .padding(12)
+                Divider()
+                SettingsView()
+                    .frame(minWidth: 720, minHeight: 640)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
@@ -1117,8 +1135,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Réglages").font(.title2.bold())
-
                 DisclosureGroup(isExpanded: $sellerExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Cette entreprise est utilisée comme émetteur par défaut pour chaque nouvelle facture.")
