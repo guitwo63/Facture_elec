@@ -95,6 +95,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+                .frame(minWidth: 720, minHeight: 640)
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
@@ -208,6 +209,25 @@ struct InvoiceEditorView: View {
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
 
+    private var hasMandatoryWarnings: Bool {
+        let s = invoice.seller
+        let b = invoice.buyer
+        let sellerOk = !s.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !s.country.trimmingCharacters(in: .whitespaces).isEmpty
+            && ((s.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
+                || (s.endpointID ?? "").trimmingCharacters(in: .whitespaces).count >= 9)
+        let buyerOk = !b.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !b.country.trimmingCharacters(in: .whitespaces).isEmpty
+            && ((b.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
+                || (b.endpointID ?? "").trimmingCharacters(in: .whitespaces).count >= 9)
+        let headerOk = !invoice.number.trimmingCharacters(in: .whitespaces).isEmpty
+            && !invoice.currency.trimmingCharacters(in: .whitespaces).isEmpty
+        let linesOk = invoice.lines.allSatisfy {
+            !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && $0.quantity > 0 && $0.unitPrice >= 0
+        }
+        return !(sellerOk && buyerOk && headerOk && linesOk)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -224,23 +244,31 @@ struct InvoiceEditorView: View {
 
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
+                        .onChange(of: invoice.number) { _ in exportError = nil }
+                        .onChange(of: invoice.seller.name) { _ in exportError = nil }
+                        .onChange(of: invoice.buyer.name) { _ in exportError = nil }
                 }
                 if let url = exportedURL {
                     Text("Fichier généré : \(url.lastPathComponent)").font(.caption).foregroundStyle(.green)
                     Button("Afficher dans le Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        .onChange(of: invoice.number) { _ in exportedURL = nil }
+                        .onChange(of: invoice.seller.name) { _ in exportedURL = nil }
+                        .onChange(of: invoice.buyer.name) { _ in exportedURL = nil }
                 }
 
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Données obligatoires pour la conformité Factur-X", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption.bold())
-                            .foregroundStyle(.orange)
-                        Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-49/34), n° TVA si applicable.").font(.caption)
-                        Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
-                        Text("En-tête : numéro de facture, date, échéance, devise (EUR), mode de facturation (BT-23).").font(.caption)
-                        Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
-                        Text("Paiement : IBAN et BIC si virement SEPA.").font(.caption)
-                    }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                if hasMandatoryWarnings {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Données obligatoires pour la conformité Factur-X", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption.bold())
+                                .foregroundStyle(.orange)
+                            Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-49/34), n° TVA si applicable.").font(.caption)
+                            Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
+                            Text("En-tête : numéro de facture, date, échéance, devise (EUR), mode de facturation (BT-23).").font(.caption)
+                            Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
+                            Text("Paiement : IBAN et BIC si virement SEPA.").font(.caption)
+                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 if showValidation, let v = validation {
@@ -675,6 +703,7 @@ struct DirectoryView: View {
     @State private var editingEntry: DirectoryEntry?
     @State private var creatingNew = false
     @State private var showArchived = false
+    @State private var selectedEntry: DirectoryEntry?
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -691,70 +720,62 @@ struct DirectoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Annuaire des tiers").font(.title2.bold())
-                Spacer()
-                Toggle(isOn: $showArchived) {
-                    Label("Afficher les archives", systemImage: "archivebox")
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Annuaire des tiers").font(.title2.bold())
+                    Spacer()
+                    Toggle(isOn: $showArchived) {
+                        Label("Archives", systemImage: "archivebox")
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("Afficher les tiers archivés")
+                    Button {
+                        creatingNew = true
+                    } label: { Label("Nouveau tiers", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
                 }
-                .toggleStyle(.checkbox)
-                .help("Afficher les tiers archivés")
-                Button {
-                    creatingNew = true
-                } label: { Label("Nouveau tiers", systemImage: "plus") }
-                    .buttonStyle(.borderedProminent)
+                TextField("Rechercher (nom, SIREN, ville…)", text: $query)
+                    .textFieldStyle(.roundedBorder)
             }
             .padding(12)
 
-            TextField("Rechercher (nom, SIREN, ville…)", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal, 12).padding(.bottom, 8)
-
             Divider()
 
-            if filtered.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "person.2").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("Aucun tiers dans l'annuaire.")
-                        .foregroundStyle(.secondary)
-                    Button("Ajouter un tiers") { creatingNew = true }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(filtered) { entry in
-                        HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack {
-                                    Text(entry.displayName).font(.headline)
-                                    Text(entry.kind.label).font(.caption2)
+            HSplitView {
+                if filtered.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "person.2").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Aucun tiers dans l'annuaire.")
+                            .foregroundStyle(.secondary)
+                        Button("Ajouter un tiers") { creatingNew = true }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(filtered, selection: Binding(
+                        get: { selectedEntry?.id },
+                        set: { id in
+                            selectedEntry = directory.entries.first(where: { $0.id == id })
+                        }
+                    )) { entry in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(entry.displayName).font(.headline)
+                                Text(entry.kind.label).font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(.quaternary, in: Capsule())
+                                if entry.isArchived {
+                                    Label("Archive", systemImage: "archivebox")
+                                        .font(.caption2)
                                         .padding(.horizontal, 6).padding(.vertical, 1)
-                                        .background(.quaternary, in: Capsule())
-                                    if entry.isArchived {
-                                        Label("Archive", systemImage: "archivebox")
-                                            .font(.caption2)
-                                            .padding(.horizontal, 6).padding(.vertical, 1)
-                                            .background(Color.orange.opacity(0.2), in: Capsule())
-                                    }
-                                }
-                                Text(entry.party.fullAddressLine).font(.caption).foregroundStyle(.secondary)
-                                if let sub = entry.subtitle.isEmpty ? nil : entry.subtitle {
-                                    Text(sub).font(.caption2).foregroundStyle(.tertiary)
+                                        .background(Color.orange.opacity(0.2), in: Capsule())
                                 }
                             }
-                            Spacer()
-                            Button {
-                                editingEntry = entry
-                            } label: { Label("Modifier", systemImage: "pencil") }
-                                .labelStyle(.iconOnly)
-                                .buttonStyle(.borderless)
-                                .help("Modifier le tiers")
+                            Text(entry.party.fullAddressLine).font(.caption).foregroundStyle(.secondary)
+                            if let sub = entry.subtitle.isEmpty ? nil : entry.subtitle {
+                                Text(sub).font(.caption2).foregroundStyle(.tertiary)
+                            }
                         }
-                        .padding(.vertical, 2)
-                        .contentShape(Rectangle())
-                        .onTapGesture(count: 2) {
-                            editingEntry = entry
-                        }
+                        .tag(entry.id)
                         .contextMenu {
                             Button {
                                 editingEntry = entry
@@ -771,21 +792,38 @@ struct DirectoryView: View {
                             Divider()
                             Button(role: .destructive) {
                                 directory.delete(entry)
+                                if selectedEntry?.id == entry.id { selectedEntry = nil }
                             } label: { Label("Supprimer", systemImage: "trash") }
                         }
                     }
-                    .onDelete { idx in
-                        for i in idx { directory.delete(filtered[i]) }
-                    }
+                    .frame(minWidth: 280)
                 }
+
+                DirectoryDetailView(
+                    entry: selectedEntry,
+                    onEdit: { entry in editingEntry = entry },
+                    onArchive: { entry in
+                        var e = entry
+                        e.isArchived.toggle()
+                        directory.upsert(e)
+                        selectedEntry = e
+                    },
+                    onDelete: { entry in
+                        directory.delete(entry)
+                        selectedEntry = nil
+                    }
+                )
+                .frame(minWidth: 380)
             }
         }
         .sheet(item: $editingEntry) { entry in
             DirectoryEditorView(entry: entry, onSave: { updated in
                 directory.upsert(updated)
+                selectedEntry = updated
                 editingEntry = nil
             }, onDelete: { toDelete in
                 directory.delete(toDelete)
+                if selectedEntry?.id == toDelete.id { selectedEntry = nil }
                 editingEntry = nil
             })
         }
@@ -798,6 +836,105 @@ struct DirectoryView: View {
     }
 }
 
+struct DirectoryDetailView: View {
+    let entry: DirectoryEntry?
+    let onEdit: (DirectoryEntry) -> Void
+    let onArchive: (DirectoryEntry) -> Void
+    let onDelete: (DirectoryEntry) -> Void
+
+    var body: some View {
+        if let entry = entry {
+            VStack(spacing: 0) {
+                HStack {
+                    Text(entry.displayName).font(.headline)
+                    Spacer()
+                    Button { onEdit(entry) } label: { Label("Modifier", systemImage: "pencil") }
+                        .buttonStyle(.bordered)
+                    Button { onArchive(entry) } label: {
+                        Label(entry.isArchived ? "Désarchiver" : "Archiver",
+                              systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+                    }
+                    .buttonStyle(.bordered)
+                    Button(role: .destructive) { onDelete(entry) } label: { Label("Supprimer", systemImage: "trash") }
+                        .buttonStyle(.bordered)
+                }
+                .padding(12)
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        detailRow("Type", entry.kind.label)
+                        if let s = entry.party.siren, !s.isEmpty { detailRow("SIREN", s) }
+                        if let v = entry.party.vatNumber, !v.isEmpty { detailRow("N° TVA", v) }
+                        if let e = entry.party.endpointID, !e.isEmpty {
+                            detailRow("Ident. élec. (BT-49/34)", e)
+                        }
+                        if !entry.party.street.isEmpty || !entry.party.city.isEmpty {
+                            detailRow("Adresse", entry.party.fullAddressLine)
+                        }
+                        if let cn = entry.party.contactName, !cn.isEmpty { detailRow("Contact", cn) }
+                        if let ce = entry.party.contactEmail, !ce.isEmpty { detailRow("Email", ce) }
+                        if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
+
+                        if !entry.routingAddresses.isEmpty {
+                            Divider()
+                            Text("Adresses de facturation électronique").font(.caption.bold())
+                            ForEach(entry.routingAddresses) { addr in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(addr.format.label).font(.caption.bold())
+                                        Text(addr.composedAddress).font(.system(.caption, design: .monospaced))
+                                        if let lbl = addr.label, !lbl.isEmpty {
+                                            Text(lbl).font(.caption).foregroundColor(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    if addr.isDefault {
+                                        Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Color.accentColor.opacity(0.2), in: Capsule())
+                                    }
+                                    if !addr.isActive {
+                                        Text("inactive").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Color.gray.opacity(0.2), in: Capsule())
+                                    }
+                                }
+                                .padding(6)
+                                .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                            }
+                        }
+
+                        if let note = entry.note, !note.isEmpty {
+                            Divider()
+                            Text("Note").font(.caption.bold())
+                            Text(note).font(.caption).foregroundStyle(.secondary)
+                        }
+
+                        if entry.isArchived {
+                            Label("Tiers archivé", systemImage: "archivebox")
+                                .font(.caption.bold()).foregroundStyle(.orange)
+                        }
+                    }.padding(12)
+                }
+            }
+        } else {
+            VStack(spacing: 8) {
+                Image(systemName: "person.text.rectangle").font(.largeTitle).foregroundStyle(.secondary)
+                Text("Sélectionnez un tiers pour voir le détail.")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label).font(.caption.bold()).frame(width: 140, alignment: .leading)
+            Text(value).font(.caption)
+            Spacer()
+        }
+    }
+}
 struct DirectoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var directory: PartyDirectory
@@ -1022,6 +1159,10 @@ struct SettingsView: View {
 
                 DisclosureGroup(isExpanded: $pisteExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
+                        Label("Non fonctionnel sans statut Plateforme Agréée (PA)", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold()).foregroundStyle(.orange)
+                        Text("L'API Annuaire (ppf.annuaire) est réservée aux Plateformes Agréées approuvées. Sans ce statut, la recherche via PISTE ne renvoie pas d'adresse de routage. Utilisez l'Annuaire web ou l'enrichissement DINUM à la place.")
+                            .font(.caption).foregroundStyle(.secondary)
                         Text("Renseignez les identifiants de votre application PISTE (client_id / client_secret) et le compte technique Chorus Pro requis pour appeler l'API.")
                             .font(.caption).foregroundStyle(.secondary)
                         HStack {
