@@ -186,7 +186,7 @@ struct InvoicesTabView: View {
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Rechercher (num\u00e9ro, client, SIREN\u2026)", text: $query)
+                    TextField("Rechercher (numéro, client, SIREN…)", text: $query)
                         .textFieldStyle(.plain)
                     if !query.isEmpty {
                         Button { query = "" } label: {
@@ -250,7 +250,7 @@ struct InvoicesTabView: View {
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
-                        Text("S\u00e9lectionnez ou cr\u00e9ez une facture")
+                        Text("Sélectionnez ou créez une facture")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
