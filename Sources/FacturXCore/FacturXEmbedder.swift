@@ -68,7 +68,7 @@ public struct FacturXEmbedder {
         let newRoot = PDFObject(
             num: base + 4,
             gen: 0,
-            content: newRootDict.data(using: .ascii)!
+            content: newRootDict.data(using: .isoLatin1) ?? Data()
         )
         newObjects.append(newRoot)
 
