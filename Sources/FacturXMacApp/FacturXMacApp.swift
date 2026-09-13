@@ -8,7 +8,6 @@ struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
-    @StateObject private var sireneSettings = SireneSettings.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -17,7 +16,6 @@ struct FacturXMacApp: App {
                 .environmentObject(store)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
-                .environmentObject(sireneSettings)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -918,68 +916,21 @@ struct RoutingAddressFormView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
-    @EnvironmentObject var sireneSettings: SireneSettings
     @State private var testMessage: String?
     @State private var testing = false
-    @State private var sireneMessage: String?
-    @State private var sireneTesting = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Réglages").font(.title2.bold())
 
-                GroupBox("Annuaire INSEE Sirene (gratuit)") {
+                GroupBox("Recherche entreprises (DINUM — gratuit, sans authentification)") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("L'API Sirene V3 de l'INSEE permet de pré-remplir la désignation et l'adresse postale d'un tiers à partir de son SIREN/SIRET. Gratuite, mais nécessite une application sur le portail api.insee.fr (souscrire \"Sirene - V3\"). Ne donne pas l'adresse de routage PPF.")
+                        Text("L'API recherche-entreprises.api.gouv.fr (DINUM) pré-remplit la désignation et l'adresse postale d'un tiers à partir d'un SIREN, SIRET ou nom. Gratuite, publique, sans compte ni jeton. Ne donne pas l'adresse de routage PPF.")
                             .font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            Text("Client key").frame(width: 100, alignment: .leading)
-                            TextField("Client key", text: $sireneSettings.credentials.clientKey)
-                        }
-                        HStack {
-                            Text("Client secret").frame(width: 100, alignment: .leading)
-                            SecureField("Client secret", text: $sireneSettings.credentials.clientSecret)
-                        }
-                        HStack {
-                            Text("URL Token").frame(width: 100, alignment: .leading)
-                            TextField("URL Token", text: $sireneSettings.credentials.tokenURL)
-                        }
-                        HStack {
-                            Text("Base API").frame(width: 100, alignment: .leading)
-                            TextField("Base API", text: $sireneSettings.credentials.apiBaseURL)
-                        }
-                        HStack {
-                            Button {
-                                sireneSettings.save()
-                            } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
-                                .buttonStyle(.borderedProminent)
-                            Button {
-                                sireneTesting = true
-                                sireneMessage = nil
-                                Task {
-                                    do {
-                                        _ = try await SireneService().fetchToken(credentials: sireneSettings.credentials)
-                                        sireneMessage = "Connexion réussie — jeton obtenu."
-                                    } catch {
-                                        sireneMessage = "Échec : \(error.localizedDescription)"
-                                    }
-                                    sireneTesting = false
-                                }
-                            } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
-                                .buttonStyle(.bordered)
-                                .disabled(sireneTesting || !sireneSettings.credentials.isConfigured)
-                            Spacer()
-                        }
-                        if let m = sireneMessage {
-                            Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
-                        }
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Création du compte").font(.caption2.bold())
-                            Text("1. Créez un compte sur https://portail-api.insee.fr/").font(.caption2).foregroundStyle(.tertiary)
-                            Text("2. Souscrivez l'API \"Sirene - V3\" (gratuit)").font(.caption2).foregroundStyle(.tertiary)
-                            Text("3. Récupérez client_key / client_secret de votre application").font(.caption2).foregroundStyle(.tertiary)
-                            Text("Token : https://api.insee.fr/token  ·  API : https://api.insee.fr/entreprises/sirene/V3").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Endpoint : https://recherche-entreprises.api.gouv.fr/search?q=...").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Formats de requête : q=siren:XXXXXXXXX, q=siret:XXXXXXXXXXXXXX, ou q=nom").font(.caption2).foregroundStyle(.tertiary)
                         }
                     }.padding(8)
                 }
@@ -1170,11 +1121,8 @@ struct ChorusProSearchSheet: View {
 
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
-    @EnvironmentObject var sireneSettings: SireneSettings
     @State private var showChorusSearch = false
     @State private var showSireneSearch = false
-    @State private var sireneError: String?
-    @State private var sireneLoading = false
 
     private var star: some View { Text(" *").foregroundColor(.red) }
 
@@ -1185,13 +1133,11 @@ struct PartyEditorView: View {
                     Label("Rechercher (API PISTE)", systemImage: "network")
                 }
                 .buttonStyle(.bordered)
-                Button { runSireneLookup() } label: {
-                    if sireneLoading { ProgressView().controlSize(.small) }
-                    else { Label("Rechercher (Sirene INSEE)", systemImage: "magnifyingglass.circle") }
+                Button { showSireneSearch = true } label: {
+                    Label("Rechercher (DINUM)", systemImage: "magnifyingglass.circle")
                 }
                 .buttonStyle(.bordered)
-                .disabled(sireneLoading || (party.siren ?? "").filter { $0.isNumber }.isEmpty || !sireneSettings.credentials.isConfigured)
-                .help(sireneSettings.credentials.isConfigured ? "Pré-remplit désignation et adresse depuis le SIREN/SIRET via l'API Sirene INSEE" : "Configurez l'API Sirene dans les Réglages")
+                .help("Pré-remplit désignation, adresse et n° TVA depuis un SIREN, SIRET ou nom via l'API DINUM (gratuit, sans authentification)")
                 Button {
                     openWebDirectory()
                 } label: {
@@ -1200,9 +1146,6 @@ struct PartyEditorView: View {
                 .buttonStyle(.bordered)
                 .help("Ouvre l'annuaire public Chorus Pro dans le navigateur")
                 Spacer()
-            }
-            if let err = sireneError {
-                Text(err).font(.caption).foregroundStyle(.red)
             }
             HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
@@ -1236,33 +1179,10 @@ struct PartyEditorView: View {
                 party = picked
             }
         }
-    }
-
-    private func runSireneLookup() {
-        let query = (party.siren ?? "").filter { $0.isNumber }
-        guard !query.isEmpty else {
-            sireneError = "Saisissez un SIREN ou SIRET."
-            return
-        }
-        sireneError = nil
-        sireneLoading = true
-        Task {
-            do {
-                let result = try await SireneService().lookup(siretOrSiren: query, credentials: sireneSettings.credentials)
-                await MainActor.run {
-                    party = result.merged(into: party)
-                    sireneLoading = false
-                }
-            } catch let e as SireneError {
-                await MainActor.run {
-                    sireneError = e.errorDescription
-                    sireneLoading = false
-                }
-            } catch {
-                await MainActor.run {
-                    sireneError = error.localizedDescription
-                    sireneLoading = false
-                }
+        .sheet(isPresented: $showSireneSearch) {
+            SireneSearchSheet(query: party.siren ?? "") { picked in
+                party = picked.merged(into: party)
+                showSireneSearch = false
             }
         }
     }
@@ -1271,6 +1191,85 @@ struct PartyEditorView: View {
         let base = "https://facturation.chorus-pro.gouv.fr/annuaire/"
         if let url = URL(string: base) {
             NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+struct SireneSearchSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let query: String
+    let onPick: (SireneResult) -> Void
+
+    @State private var searchText: String = ""
+    @State private var results: [SireneResult] = []
+    @State private var loading = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recherche entreprises (DINUM)").font(.headline)
+            Text("SIREN, SIRET ou nom de l'entreprise. Aucune authentification requise.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                TextField("SIREN, SIRET ou nom", text: $searchText)
+                    .onSubmit { runSearch() }
+                Button {
+                    runSearch()
+                } label: { Label("Rechercher", systemImage: "magnifyingglass") }
+                .buttonStyle(.borderedProminent)
+                .disabled(loading || searchText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if loading {
+                ProgressView().controlSize(.small)
+            }
+            if let err = error {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+            List(results, id: \.self) { r in
+                Button {
+                    onPick(r)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r.denomination ?? r.siren).font(.body.weight(.semibold))
+                        HStack(spacing: 8) {
+                            Text("SIREN : \(r.siren)").font(.caption).foregroundStyle(.secondary)
+                            if let s = r.siret { Text("SIRET : \(s)").font(.caption).foregroundStyle(.secondary) }
+                            if let v = r.vatNumber { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+                        }
+                        if let st = r.street, let pc = r.postcode, let c = r.city {
+                            Text("\(st) \(pc) \(c)").font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            HStack {
+                Spacer()
+                Button("Fermer") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+        }.padding(16).frame(minWidth: 480, minHeight: 360)
+        .onAppear { searchText = query }
+    }
+
+    private func runSearch() {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return }
+        error = nil
+        loading = true
+        results = []
+        Task {
+            do {
+                let res = try await SireneService().lookup(query: q)
+                await MainActor.run {
+                    results = res
+                    loading = false
+                    if res.isEmpty { error = "Aucune entreprise trouvée." }
+                }
+            } catch let e as SireneError {
+                await MainActor.run { error = e.errorDescription; loading = false }
+            } catch {
+                await MainActor.run { error = error.localizedDescription; loading = false }
+            }
         }
     }
 }
