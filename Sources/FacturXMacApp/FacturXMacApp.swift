@@ -828,7 +828,7 @@ struct DirectoryView: View {
                             } label: { Label("Supprimer", systemImage: "trash") }
                         }
                     }
-                    .frame(minWidth: 240, idealWidth: 320, maxWidth: 520)
+                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 360)
                 }
 
                 DirectoryDetailView(
