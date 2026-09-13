@@ -350,7 +350,8 @@ public struct CIIXMLGenerator {
         <ram:FormattedIssueDateTime>
           <qdt:DateTimeString format="102">\(dateStr)</qdt:DateTimeString>
         </ram:FormattedIssueDateTime>
-      </ram:InvoiceReferencedDocument>"""
+      </ram:InvoiceReferencedDocument>
+"""
     }
     private func formatRate(_ rate: Double) -> String {
         if rate == rate.rounded() {
