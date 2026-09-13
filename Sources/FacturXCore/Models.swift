@@ -44,6 +44,7 @@ public struct InvoiceParty: Codable, Hashable {
     public var country: String
     public var vatNumber: String?
     public var siren: String?
+    public var siret: String?
     public var legalSchemeID: String
     public var contactName: String?
     public var contactEmail: String?
@@ -59,6 +60,7 @@ public struct InvoiceParty: Codable, Hashable {
         country: String = "FR",
         vatNumber: String? = nil,
         siren: String? = nil,
+        siret: String? = nil,
         legalSchemeID: String = "0002",
         contactName: String? = nil,
         contactEmail: String? = nil,
@@ -73,6 +75,7 @@ public struct InvoiceParty: Codable, Hashable {
         self.country = country
         self.vatNumber = vatNumber
         self.siren = siren
+        self.siret = siret
         self.legalSchemeID = legalSchemeID
         self.contactName = contactName
         self.contactEmail = contactEmail
@@ -82,7 +85,7 @@ public struct InvoiceParty: Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case name, street, postcode, city, country, vatNumber, siren, legalSchemeID
+        case name, street, postcode, city, country, vatNumber, siren, siret, legalSchemeID
         case contactName, contactEmail, contactPhone, endpointID, endpointSchemeID
     }
 
@@ -95,6 +98,7 @@ public struct InvoiceParty: Codable, Hashable {
         country = try c.decodeIfPresent(String.self, forKey: .country) ?? "FR"
         vatNumber = try c.decodeIfPresent(String.self, forKey: .vatNumber)
         siren = try c.decodeIfPresent(String.self, forKey: .siren)
+        siret = try c.decodeIfPresent(String.self, forKey: .siret)
         legalSchemeID = try c.decodeIfPresent(String.self, forKey: .legalSchemeID) ?? "0002"
         contactName = try c.decodeIfPresent(String.self, forKey: .contactName)
         contactEmail = try c.decodeIfPresent(String.self, forKey: .contactEmail)

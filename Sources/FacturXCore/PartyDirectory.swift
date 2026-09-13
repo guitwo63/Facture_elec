@@ -248,6 +248,7 @@ public final class PartyDirectory: ObservableObject {
         let p = entry.party
         let name = p.name.trimmingCharacters(in: .whitespaces).lowercased()
         let siren = (p.siren ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        let siret = (p.siret ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         let vat = (p.vatNumber ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         let endpoint = (p.endpointID ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         let city = p.city.trimmingCharacters(in: .whitespaces).lowercased()
@@ -260,10 +261,12 @@ public final class PartyDirectory: ObservableObject {
             var reasons: [String] = []
             let eName = ep.name.trimmingCharacters(in: .whitespaces).lowercased()
             let eSiren = (ep.siren ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            let eSiret = (ep.siret ?? "").trimmingCharacters(in: .whitespaces).lowercased()
             let eVat = (ep.vatNumber ?? "").trimmingCharacters(in: .whitespaces).lowercased()
             let eEndpoint = (ep.endpointID ?? "").trimmingCharacters(in: .whitespaces).lowercased()
             if !name.isEmpty && name == eName { reasons.append("nom identique") }
             if !siren.isEmpty && siren == eSiren { reasons.append("SIREN identique") }
+            if !siret.isEmpty && siret == eSiret { reasons.append("SIRET identique") }
             if !vat.isEmpty && vat == eVat { reasons.append("n° TVA identique") }
             if !endpoint.isEmpty && endpoint == eEndpoint { reasons.append("identifiant électronique identique") }
             if !postcode.isEmpty && !city.isEmpty

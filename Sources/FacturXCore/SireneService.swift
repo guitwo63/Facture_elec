@@ -56,6 +56,7 @@ public struct SireneResult: Hashable {
         if let pc = postcode, !pc.isEmpty { p.postcode = pc }
         if let c = city, !c.isEmpty { p.city = c }
         p.siren = siren
+        if let st = siret, !st.isEmpty { p.siret = st }
         if let vat = vatNumber, !vat.isEmpty, (party.vatNumber == nil || party.vatNumber?.isEmpty == true) {
             p.vatNumber = vat
         }

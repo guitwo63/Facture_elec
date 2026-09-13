@@ -293,6 +293,7 @@ public extension ChorusProResult {
             country: country ?? "FR",
             vatNumber: nil,
             siren: sirenValue,
+            siret: siret,
             endpointID: sirenValue,
             endpointSchemeID: "0225"
         )

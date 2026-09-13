@@ -733,6 +733,7 @@ struct DirectoryView: View {
         return base.filter {
             $0.displayName.lowercased().contains(q)
                 || ($0.party.siren ?? "").lowercased().contains(q)
+                || ($0.party.siret ?? "").lowercased().contains(q)
                 || ($0.party.vatNumber ?? "").lowercased().contains(q)
                 || $0.party.city.lowercased().contains(q)
         }
@@ -898,6 +899,7 @@ struct DirectoryDetailView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         detailRow("Type", entry.kind.label)
                         if let s = entry.party.siren, !s.isEmpty { detailRow("SIREN", s) }
+                        if let st = entry.party.siret, !st.isEmpty { detailRow("SIRET", st) }
                         if let v = entry.party.vatNumber, !v.isEmpty { detailRow("N° TVA", v) }
                         if let e = entry.party.endpointID, !e.isEmpty {
                             detailRow("Ident. élec. (BT-49/34)", e)
@@ -1147,6 +1149,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(store.myCompany.name).font(.body.weight(.semibold))
                                     if let s = store.myCompany.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
+                                    if let st = store.myCompany.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
                                     if let v = store.myCompany.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
                                 }
                                 Spacer()
@@ -1457,6 +1460,10 @@ struct PartyEditorView: View {
                 TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
                     .onChange(of: party.siren) { _ in scheduleDinumSearch() }
                 TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
+            }
+            HStack {
+                Text("SIRET").font(.caption)
+                TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
             }
             HStack {
                 Text("Ident. élec. (BT-49/34)").font(.caption)
