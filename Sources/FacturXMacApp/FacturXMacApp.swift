@@ -3,11 +3,40 @@ import FacturXCore
 import AppKit
 import UniformTypeIdentifiers
 
+extension Color {
+    init(hex: String) {
+        let cleaned = hex.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "#", with: "")
+        var int: UInt64 = 0
+        Scanner(string: cleaned).scanHexInt64(&int)
+        let r, g, b, a: UInt64
+        switch cleaned.count {
+        case 8:
+            (r, g, b, a) = (int >> 24 & 0xFF, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        case 6:
+            (r, g, b, a) = (int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF, 255)
+        default:
+            (r, g, b, a) = (85, 85, 85, 255)
+        }
+        self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255)
+    }
+}
+
+func hexString(from color: Color) -> String {
+    let nsColor = NSColor(color)
+    let rgb = nsColor.usingColorSpace(.sRGB) ?? nsColor
+    let r = Int((rgb.redComponent * 255).rounded())
+    let g = Int((rgb.greenComponent * 255).rounded())
+    let b = Int((rgb.blueComponent * 255).rounded())
+    return String(format: "%02X%02X%02X", r, g, b)
+}
+
 @main
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
+    @StateObject private var tagStore = TagStore.shared
+    @StateObject private var kindColors = KindColorStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -16,6 +45,8 @@ struct FacturXMacApp: App {
                 .environmentObject(store)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
+                .environmentObject(tagStore)
+                .environmentObject(kindColors)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -720,6 +751,8 @@ struct PartyPickerSheet: View {
 
 struct DirectoryView: View {
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColors: KindColorStore
     @State private var query = ""
     @State private var editingEntry: DirectoryEntry?
     @State private var creatingNew = false
@@ -795,7 +828,14 @@ struct DirectoryView: View {
                                 Text(entry.displayName).font(.headline)
                                 Text(entry.kind.label).font(.caption2)
                                     .padding(.horizontal, 6).padding(.vertical, 1)
-                                    .background(.quaternary, in: Capsule())
+                                    .background(Color(hex: kindColors.hexColor(for: entry.kind)).opacity(0.2), in: Capsule())
+                                    .foregroundColor(Color(hex: kindColors.hexColor(for: entry.kind)))
+                                ForEach(entry.tagIDs.compactMap({ id in tagStore.tags.first(where: { $0.id == id }) }), id: \.id) { tag in
+                                    Text(tag.name).font(.caption2)
+                                        .padding(.horizontal, 6).padding(.vertical, 1)
+                                        .background(Color(hex: tag.hexColor).opacity(0.2), in: Capsule())
+                                        .foregroundColor(Color(hex: tag.hexColor))
+                                }
                                 if entry.isArchived {
                                     Label("Archive", systemImage: "archivebox")
                                         .font(.caption2)
@@ -874,12 +914,18 @@ struct DirectoryDetailView: View {
     let onEdit: (DirectoryEntry) -> Void
     let onArchive: (DirectoryEntry) -> Void
     let onDelete: (DirectoryEntry) -> Void
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColors: KindColorStore
 
     var body: some View {
         if let entry = entry {
             VStack(spacing: 0) {
                 HStack {
                     Text(entry.displayName).font(.headline)
+                    Text(entry.kind.label).font(.caption)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Color(hex: kindColors.hexColor(for: entry.kind)).opacity(0.2), in: Capsule())
+                        .foregroundColor(Color(hex: kindColors.hexColor(for: entry.kind)))
                     Spacer()
                     Button { onEdit(entry) } label: { Label("Modifier", systemImage: "pencil") }
                         .buttonStyle(.bordered)
@@ -900,6 +946,20 @@ struct DirectoryDetailView: View {
                         Text("Identité").font(.headline)
                         detailRow("Type", entry.kind.label)
                         detailRow("Nom", entry.party.name)
+                        if !entry.tagIDs.isEmpty {
+                            HStack(alignment: .top) {
+                                Text("Tags").font(.callout.bold()).frame(width: 160, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(entry.tagIDs.compactMap({ id in tagStore.tags.first(where: { $0.id == id }) }), id: \.id) { tag in
+                                        Text(tag.name).font(.caption)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Color(hex: tag.hexColor).opacity(0.2), in: Capsule())
+                                            .foregroundColor(Color(hex: tag.hexColor))
+                                    }
+                                }
+                                Spacer()
+                            }
+                        }
 
                         Divider()
                         Text("Identifiants").font(.headline)
@@ -1028,6 +1088,7 @@ struct DirectoryDetailView: View {
 struct DirectoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var tagStore: TagStore
     @State private var entry: DirectoryEntry
     private let isEditing: Bool
     let onSave: (DirectoryEntry) -> Void
@@ -1097,6 +1158,27 @@ struct DirectoryEditorView: View {
 
             GroupBox("Identité et adresse") {
                 PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses)
+            }
+
+            if !tagStore.tags.isEmpty {
+                GroupBox("Tags") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(tagStore.tags) { tag in
+                            Toggle(isOn: Binding(
+                                get: { entry.tagIDs.contains(tag.id) },
+                                set: { isOn in
+                                    if isOn { entry.tagIDs.append(tag.id) }
+                                    else { entry.tagIDs.removeAll { $0 == tag.id } }
+                                }
+                            )) {
+                                HStack {
+                                    Text(tag.name)
+                                    Text("●").foregroundColor(Color(hex: tag.hexColor))
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             TextField("Note (optionnel)", text: Binding($entry.note, replacingNilWith: ""))
@@ -1186,12 +1268,18 @@ struct SettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColors: KindColorStore
     @State private var testMessage: String?
     @State private var testing = false
     @State private var dinumExpanded = true
     @State private var pisteExpanded = false
     @State private var sellerExpanded = true
     @State private var showSellerPicker = false
+    @State private var appearanceExpanded = true
+    @State private var tagsExpanded = true
+    @State private var newTagName = ""
+    @State private var newTagHex = "555555"
 
     var body: some View {
         ScrollView {
@@ -1322,6 +1410,84 @@ struct SettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("Annuaire Chorus Pro (PISTE)", systemImage: "network")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $appearanceExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Couleurs des étiquettes de type de tiers (Client / Fournisseur / Client-Fournisseur).")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(DirectoryEntryKind.allCases, id: \.self) { kind in
+                            HStack {
+                                Text(kind.label).frame(width: 140, alignment: .leading)
+                                ColorPicker(selection: Binding(
+                                    get: { Color(hex: kindColors.hexColor(for: kind)) },
+                                    set: { newColor in
+                                        kindColors.colors[kind] = hexString(from: newColor)
+                                        kindColors.save()
+                                    }
+                                )) {
+                                    Text(kind.label)
+                                }
+                                .labelsHidden()
+                                Text(kindColors.hexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
+                                Spacer()
+                            }
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Apparence (couleurs des types)", systemImage: "paintpalette")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $tagsExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Définissez des tags personnalisés pour classifier vos tiers. Chaque tier peut porter plusieurs tags.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if tagStore.tags.isEmpty {
+                            Text("Aucun tag défini.").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(tagStore.tags) { tag in
+                                HStack {
+                                    Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
+                                    TextField("Nom du tag", text: Binding(
+                                        get: { tag.name },
+                                        set: { newName in
+                                            var t = tag; t.name = newName; tagStore.upsert(t)
+                                        }
+                                    )).frame(maxWidth: 200)
+                                    ColorPicker("", selection: Binding(
+                                        get: { Color(hex: tag.hexColor) },
+                                        set: { newColor in
+                                            var t = tag; t.hexColor = hexString(from: newColor); tagStore.upsert(t)
+                                        }
+                                    )).labelsHidden().frame(width: 40)
+                                    Button(role: .destructive) {
+                                        tagStore.delete(tag)
+                                    } label: { Image(systemName: "trash") }
+                                        .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                        Divider()
+                        Text("Ajouter un tag").font(.caption.bold())
+                        HStack {
+                            ColorPicker("", selection: Binding(
+                                get: { Color(hex: newTagHex) },
+                                set: { newTagHex = hexString(from: $0) }
+                            )).labelsHidden().frame(width: 30)
+                            TextField("Nom du nouveau tag", text: $newTagName)
+                            Button {
+                                guard !newTagName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                                tagStore.upsert(PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex))
+                                newTagName = ""
+                                newTagHex = "555555"
+                            } label: { Label("Ajouter", systemImage: "plus.circle.fill") }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Tags personnalisés", systemImage: "tag")
                         .font(.headline)
                 }
 

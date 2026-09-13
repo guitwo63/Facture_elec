@@ -12,6 +12,14 @@ public enum DirectoryEntryKind: String, Codable, CaseIterable {
         case .both: return "Client / Fournisseur"
         }
     }
+
+    public var defaultHexColor: String {
+        switch self {
+        case .client: return "2A6EBB"
+        case .fournisseur: return "2E8B57"
+        case .both: return "8A4FBD"
+        }
+    }
 }
 
 public enum RoutingAddressFormat: String, Codable, CaseIterable {
@@ -119,6 +127,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var note: String?
     public var routingAddresses: [PartyRoutingAddress]
     public var isArchived: Bool
+    public var tagIDs: [UUID]
 
     public init(
         id: UUID = UUID(),
@@ -126,7 +135,8 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         party: InvoiceParty,
         note: String? = nil,
         routingAddresses: [PartyRoutingAddress] = [],
-        isArchived: Bool = false
+        isArchived: Bool = false,
+        tagIDs: [UUID] = []
     ) {
         self.id = id
         self.kind = kind
@@ -134,6 +144,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         self.note = note
         self.routingAddresses = routingAddresses
         self.isArchived = isArchived
+        self.tagIDs = tagIDs
     }
 
     public var displayName: String {
@@ -158,7 +169,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, party, note, routingAddresses, isArchived
+        case id, kind, party, note, routingAddresses, isArchived, tagIDs
     }
 
     public init(from decoder: Decoder) throws {
@@ -170,6 +181,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         note = try c.decodeIfPresent(String.self, forKey: .note)
         routingAddresses = try c.decodeIfPresent([PartyRoutingAddress].self, forKey: .routingAddresses) ?? []
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        tagIDs = try c.decodeIfPresent([UUID].self, forKey: .tagIDs) ?? []
     }
 
     public var defaultRoutingAddress: PartyRoutingAddress? {
@@ -279,5 +291,102 @@ public final class PartyDirectory: ObservableObject {
             }
         }
         return matches
+    }
+}
+
+public struct PartyTag: Codable, Hashable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var hexColor: String
+
+    public init(id: UUID = UUID(), name: String, hexColor: String = "555555") {
+        self.id = id
+        self.name = name
+        self.hexColor = hexColor
+    }
+}
+
+public final class TagStore: ObservableObject {
+    public static let shared = TagStore()
+
+    @Published public var tags: [PartyTag]
+
+    private let defaults = UserDefaults.standard
+    private let storageKey = "facturx.tags.v1"
+
+    public init() {
+        self.tags = []
+        load()
+    }
+
+    public func load() {
+        if let data = defaults.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([PartyTag].self, from: data) {
+            tags = decoded
+        }
+    }
+
+    public func save() {
+        if let data = try? JSONEncoder().encode(tags) {
+            defaults.set(data, forKey: storageKey)
+        }
+    }
+
+    public func upsert(_ tag: PartyTag) {
+        if let idx = tags.firstIndex(where: { $0.id == tag.id }) {
+            tags[idx] = tag
+        } else {
+            tags.append(tag)
+        }
+        save()
+    }
+
+    public func delete(_ tag: PartyTag) {
+        tags.removeAll { $0.id == tag.id }
+        save()
+    }
+}
+
+public final class KindColorStore: ObservableObject {
+    public static let shared = KindColorStore()
+
+    @Published public var colors: [DirectoryEntryKind: String]
+
+    private let defaults = UserDefaults.standard
+    private let storageKey = "facturx.kindcolors.v1"
+
+    public init() {
+        self.colors = [
+            .client: DirectoryEntryKind.client.defaultHexColor,
+            .fournisseur: DirectoryEntryKind.fournisseur.defaultHexColor,
+            .both: DirectoryEntryKind.both.defaultHexColor,
+        ]
+        load()
+    }
+
+    public func load() {
+        if let data = defaults.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
+            colors = [
+                .client: decoded["client"] ?? DirectoryEntryKind.client.defaultHexColor,
+                .fournisseur: decoded["fournisseur"] ?? DirectoryEntryKind.fournisseur.defaultHexColor,
+                .both: decoded["both"] ?? DirectoryEntryKind.both.defaultHexColor,
+            ]
+        }
+    }
+
+    public func save() {
+        let dict = [
+            "client": colors[.client] ?? DirectoryEntryKind.client.defaultHexColor,
+            "fournisseur": colors[.fournisseur] ?? DirectoryEntryKind.fournisseur.defaultHexColor,
+            "both": colors[.both] ?? DirectoryEntryKind.both.defaultHexColor,
+        ]
+        if let data = try? JSONEncoder().encode(dict) {
+            defaults.set(data, forKey: storageKey)
+        }
+    }
+
+    public func hexColor(for kind: DirectoryEntryKind) -> String {
+        colors[kind] ?? kind.defaultHexColor
     }
 }
