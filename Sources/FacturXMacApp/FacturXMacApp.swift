@@ -1532,34 +1532,38 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 DisclosureGroup(isExpanded: $sellerExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Cette entreprise est utilisée comme émetteur par défaut pour chaque nouvelle facture.")
+                        Text("L'émetteur par défaut est un lien vers une fiche fournisseur de l'annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
                             .font(.caption).foregroundStyle(.secondary)
-                        if !store.myCompany.name.trimmingCharacters(in: .whitespaces).isEmpty {
+                        let linkedEntry: DirectoryEntry? = store.defaultSellerEntryID.flatMap { id in directory.entries.first { $0.id == id } }
+                        if let entry = linkedEntry {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.party.name).font(.body.weight(.semibold))
+                                if let s = entry.party.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
+                                if let st = entry.party.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
+                                if let v = entry.party.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+                                if let iban = entry.party.iban, !iban.isEmpty { Text("IBAN : \(iban)").font(.caption).foregroundStyle(.secondary) }
+                                if let bic = entry.party.bic, !bic.isEmpty { Text("BIC : \(bic)").font(.caption).foregroundStyle(.secondary) }
+                                if let pt = entry.party.paymentTerms, !pt.isEmpty { Text("Conditions : \(pt)").font(.caption).foregroundStyle(.secondary) }
+                            }
                             HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(store.myCompany.name).font(.body.weight(.semibold))
-                                    if let s = store.myCompany.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
-                                    if let st = store.myCompany.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
-                                    if let v = store.myCompany.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
-                                }
-                                Spacer()
                                 Button {
                                     showSellerPicker = true
-                                } label: { Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
+                                } label: { Label("Changer", systemImage: "person.crop.circle.badge.plus") }
                                     .buttonStyle(.bordered)
+                                Button(role: .destructive) {
+                                    store.defaultSellerEntryID = nil
+                                    store.save()
+                                } label: { Label("Dissocier", systemImage: "minus.circle") }
+                                    .buttonStyle(.bordered)
+                                Spacer()
                             }
                         } else {
+                            Text("Aucun émetteur par défaut défini.").font(.caption).foregroundStyle(.tertiary)
                             Button {
                                 showSellerPicker = true
-                            } label: { Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
+                            } label: { Label("Choisir un fournisseur dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
                                 .buttonStyle(.bordered)
                         }
-                        Divider()
-                        PartyEditorView(party: $store.myCompany, showWebButton: false, isFournisseur: true)
-                        Button {
-                            store.save()
-                        } label: { Label("Enregistrer l'émetteur par défaut", systemImage: "checkmark.circle") }
-                            .buttonStyle(.borderedProminent)
                     }.padding(8)
                 } label: {
                     Label("Émetteur par défaut", systemImage: "building.2")
@@ -1742,15 +1746,7 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showSellerPicker) {
             PartyPickerSheet(role: .seller) { selected in
-                var p = selected.party
-                if let routing = selected.defaultRoutingAddress, routing.isActive {
-                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
-                    if !composed.isEmpty {
-                        p.endpointID = composed
-                        p.endpointSchemeID = "0225"
-                    }
-                }
-                store.myCompany = p
+                store.defaultSellerEntryID = selected.id
                 store.save()
                 showSellerPicker = false
             }
