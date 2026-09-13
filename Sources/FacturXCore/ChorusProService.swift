@@ -183,8 +183,8 @@ public final class ChorusProService {
         let query = siretOrSiren.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { throw ChorusProError.emptyQuery }
         let token = try await fetchToken(credentials: credentials)
-        let endpoint = credentials.apiBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            + "/chorus-pro/annuaire/v1/rechercher"
+        let base = credentials.apiBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let endpoint = base + "/ppf/annuaire/v1/rechercher"
         guard let url = URL(string: endpoint) else {
             throw ChorusProError.decoding("URL d'API invalide : \(endpoint)")
         }
@@ -195,9 +195,10 @@ public final class ChorusProService {
         if let cpro = credentials.cproAccountHeader {
             req.setValue(cpro, forHTTPHeaderField: "cpro-account")
         }
+        let isSiret = query.count >= 14
         let payload: [String: Any] = [
             "idCriteria": query,
-            "typeRecherche": query.count >= 14 ? "SIRET" : "SIREN"
+            "typeRecherche": isSiret ? "SIRET" : "SIREN"
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, resp) = try await session.data(for: req)
@@ -217,17 +218,24 @@ public final class ChorusProService {
         } catch {
             throw ChorusProError.decoding("\(error)")
         }
-        var items: [[String: Any]] = []
-        if let arr = obj as? [[String: Any]] {
-            items = arr
-        } else if let dict = obj as? [String: Any], let list = dict["resultats"] as? [[String: Any]] {
-            items = list
-        } else if let dict = obj as? [String: Any], let list = dict["listeResultat"] as? [[String: Any]] {
-            items = list
-        } else if let dict = obj as? [String: Any] {
-            items = [dict]
+        if let dict = obj as? [String: Any] {
+            if let code = dict["codeRetour"] as? Int, code != 0 {
+                let lib = dict["libelle"] as? String ?? "erreur inconnue (codeRetour=\(code))"
+                throw ChorusProError.decoding("PISTE/Annuaire : \(lib)")
+            }
+            if let arr = dict["resultats"] as? [[String: Any]] { return arr.map { mapResult($0) } }
+            if let arr = dict["listeResultat"] as? [[String: Any]] { return arr.map { mapResult($0) } }
+            if let arr = dict["listeResultats"] as? [[String: Any]] { return arr.map { mapResult($0) } }
+            if let arr = dict["listeStructures"] as? [[String: Any]] { return arr.map { mapResult($0) } }
+            if let arr = dict["lignesAnnuaire"] as? [[String: Any]] { return arr.map { mapResult($0) } }
+            if let arr = dict["structures"] as? [[String: Any]] { return arr.map { mapResult($0) } }
+            if dict["codeRetour"] != nil || dict["libelle"] != nil { return [] }
+            return [mapResult(dict)]
         }
-        return items.map { mapResult($0) }
+        if let arr = obj as? [[String: Any]] {
+            return arr.map { mapResult($0) }
+        }
+        return []
     }
 
     private func mapResult(_ dict: [String: Any]) -> ChorusProResult {
@@ -241,14 +249,14 @@ public final class ChorusProService {
             if let v = dict[key] as? String { return v.lowercased() == "oui" || v.lowercased() == "true" || v == "1" }
             return nil
         }
-        let denom = s("denomination") ?? s("raisonSociale") ?? s("nom")
-        let siret = s("siret") ?? s("identifiantStructure") ?? s("idStructure")
+        let denom = s("denomination") ?? s("designation") ?? s("designationStructure") ?? s("raisonSociale") ?? s("nom")
+        let siret = s("siret") ?? s("identifiantStructure") ?? s("idStructure") ?? s("identifiant")
         let siren = s("siren")
-        let address = s("adresse") ?? s("adressePostale") ?? s("adresseDestinataire")
+        let address = s("adresse") ?? s("adressePostale") ?? s("adresseDestinataire") ?? s("adressePhysique")
         let postcode = s("codePostal")
         let city = s("ville") ?? s("commune") ?? s("localite")
         let country = s("pays") ?? s("codePays")
-        let hasPlat = b("plateformeAgreerattachee") ?? b("plateformeAgreeRattachee") ?? b("hasPlateforme")
+        let hasPlat = b("plateformeAgreerattachee") ?? b("plateformeAgreeRattachee") ?? b("hasPlateforme") ?? b("plateformeAgre")
         let active = b("adresseActive") ?? b("actif")
         var raw: [String: String] = [:]
         for (k, v) in dict {
