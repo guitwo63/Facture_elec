@@ -722,6 +722,10 @@ struct DirectoryView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 HStack {
+                    Button {
+                        creatingNew = true
+                    } label: { Label("Nouveau tiers", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
                     Text("Annuaire des tiers").font(.title2.bold())
                     Spacer()
                     Toggle(isOn: $showArchived) {
@@ -729,13 +733,20 @@ struct DirectoryView: View {
                     }
                     .toggleStyle(.checkbox)
                     .help("Afficher les tiers archivés")
-                    Button {
-                        creatingNew = true
-                    } label: { Label("Nouveau tiers", systemImage: "plus") }
-                        .buttonStyle(.borderedProminent)
                 }
-                TextField("Rechercher (nom, SIREN, ville…)", text: $query)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Rechercher (nom, SIREN, ville…)", text: $query)
+                        .textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
             }
             .padding(12)
 
