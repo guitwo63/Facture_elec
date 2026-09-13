@@ -233,4 +233,48 @@ public final class PartyDirectory: ObservableObject {
                 || (e.party.city.lowercased()).contains(q)
         }
     }
+
+    public struct DuplicateMatch: Hashable {
+        public var entry: DirectoryEntry
+        public var reasons: [String]
+
+        public init(entry: DirectoryEntry, reasons: [String]) {
+            self.entry = entry
+            self.reasons = reasons
+        }
+    }
+
+    public func findDuplicates(of entry: DirectoryEntry) -> [DuplicateMatch] {
+        let p = entry.party
+        let name = p.name.trimmingCharacters(in: .whitespaces).lowercased()
+        let siren = (p.siren ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        let vat = (p.vatNumber ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        let endpoint = (p.endpointID ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+        let city = p.city.trimmingCharacters(in: .whitespaces).lowercased()
+        let postcode = p.postcode.trimmingCharacters(in: .whitespaces).lowercased()
+
+        var matches: [DuplicateMatch] = []
+        for existing in entries {
+            guard existing.id != entry.id else { continue }
+            let ep = existing.party
+            var reasons: [String] = []
+            let eName = ep.name.trimmingCharacters(in: .whitespaces).lowercased()
+            let eSiren = (ep.siren ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            let eVat = (ep.vatNumber ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            let eEndpoint = (ep.endpointID ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            if !name.isEmpty && name == eName { reasons.append("nom identique") }
+            if !siren.isEmpty && siren == eSiren { reasons.append("SIREN identique") }
+            if !vat.isEmpty && vat == eVat { reasons.append("n° TVA identique") }
+            if !endpoint.isEmpty && endpoint == eEndpoint { reasons.append("identifiant électronique identique") }
+            if !postcode.isEmpty && !city.isEmpty
+                && postcode == ep.postcode.trimmingCharacters(in: .whitespaces).lowercased()
+                && city == ep.city.trimmingCharacters(in: .whitespaces).lowercased() {
+                reasons.append("ville + code postal identiques")
+            }
+            if !reasons.isEmpty {
+                matches.append(DuplicateMatch(entry: existing, reasons: reasons))
+            }
+        }
+        return matches
+    }
 }

@@ -452,6 +452,8 @@ struct PartySection: View {
     @State private var showPicker = false
     @State private var showSaveSheet = false
     @State private var saveName = ""
+    @State private var pendingEntry: DirectoryEntry?
+    @State private var duplicateMatches: [PartyDirectory.DuplicateMatch]?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -502,13 +504,43 @@ struct PartySection: View {
                         var p = party
                         p.name = saveName.trimmingCharacters(in: .whitespaces).isEmpty ? party.name : saveName
                         let entry = DirectoryEntry(kind: role.defaultKind, party: p)
-                        directory.upsert(entry)
-                        showSaveSheet = false
+                        let dup = directory.findDuplicates(of: entry)
+                        if dup.isEmpty {
+                            directory.upsert(entry)
+                            showSaveSheet = false
+                        } else {
+                            pendingEntry = entry
+                            duplicateMatches = dup
+                        }
                     }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                 }
             }.padding(20)
+        }
+        .alert("Tiers potentiellement en doublon", isPresented: Binding(
+            get: { duplicateMatches != nil },
+            set: { if !$0 { duplicateMatches = nil; pendingEntry = nil } }
+        )) {
+            Button("Enregistrer quand même", role: .destructive) {
+                if let entry = pendingEntry {
+                    directory.upsert(entry)
+                }
+                showSaveSheet = false
+                duplicateMatches = nil
+                pendingEntry = nil
+            }
+            Button("Annuler", role: .cancel) {
+                duplicateMatches = nil
+                pendingEntry = nil
+            }
+        } message: {
+            if let matches = duplicateMatches, !matches.isEmpty {
+                let lines = matches.map { m in
+                    "• \(m.entry.displayName) — \(m.reasons.joined(separator: ", "))"
+                }.joined(separator: "\n")
+                Text("Un ou plusieurs tiers existants semblent correspondre :\n\(lines)")
+            }
         }
     }
 }
@@ -756,10 +788,13 @@ struct DirectoryView: View {
 
 struct DirectoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var directory: PartyDirectory
     @State private var entry: DirectoryEntry
     private let isEditing: Bool
     let onSave: (DirectoryEntry) -> Void
     let onDelete: ((DirectoryEntry) -> Void)?
+    @State private var duplicateMatches: [PartyDirectory.DuplicateMatch]?
+    @State private var pendingSave = false
 
     init(entry: DirectoryEntry, onSave: @escaping (DirectoryEntry) -> Void, onDelete: ((DirectoryEntry) -> Void)? = nil) {
         _entry = State(initialValue: entry)
@@ -805,8 +840,13 @@ struct DirectoryEditorView: View {
                 }
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Enregistrer") {
-                    onSave(entry)
-                    dismiss()
+                    let dup = directory.findDuplicates(of: entry)
+                    if dup.isEmpty {
+                        onSave(entry)
+                        dismiss()
+                    } else {
+                        duplicateMatches = dup
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
@@ -824,6 +864,26 @@ struct DirectoryEditorView: View {
         }
         .padding(16)
         .frame(minWidth: 560, minHeight: 560)
+        .alert("Tiers potentiellement en doublon", isPresented: Binding(
+            get: { duplicateMatches != nil },
+            set: { if !$0 { duplicateMatches = nil } }
+        )) {
+            Button("Enregistrer quand même", role: .destructive) {
+                onSave(entry)
+                dismiss()
+                duplicateMatches = nil
+            }
+            Button("Annuler", role: .cancel) {
+                duplicateMatches = nil
+            }
+        } message: {
+            if let matches = duplicateMatches, !matches.isEmpty {
+                let lines = matches.map { m in
+                    "• \(m.entry.displayName) — \(m.reasons.joined(separator: ", "))"
+                }.joined(separator: "\n")
+                Text("Un ou plusieurs tiers existants semblent correspondre :\n\(lines)")
+            }
+        }
     }
 }
 
