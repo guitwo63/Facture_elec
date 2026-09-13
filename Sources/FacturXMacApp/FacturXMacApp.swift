@@ -315,7 +315,7 @@ struct InvoiceEditorView: View {
                             Picker("Profil Factur-X", selection: $invoice.profile) {
                                 ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                             }
-                            TextField("Devise", text: $invoice.currency).frame(width: 60)
+                            NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160)
                             TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
                         }
                         HStack {
@@ -340,7 +340,7 @@ struct InvoiceEditorView: View {
                             HStack {
                                 TextField("Désignation *", text: $line.name).frame(minWidth: 220)
                                 DoubleField("Qté", value: $line.quantity, format: .number)
-                                TextField("Unité", text: $line.unit).frame(width: 50)
+                                NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
                                 DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
                                 DoubleField("TVA %", value: $line.vatRate, format: .number)
                                 Text(String(format: "%.2f", line.lineTotal))
@@ -1450,7 +1450,7 @@ struct PartyEditorView: View {
             }
             HStack {
                 Text("Pays").font(.caption); star
-                TextField("Pays (ex. FR)", text: $party.country).frame(width: 60)
+                NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 200)
             }
             HStack {
                 Text("SIREN").font(.caption); star
@@ -1461,7 +1461,7 @@ struct PartyEditorView: View {
             HStack {
                 Text("Ident. élec. (BT-49/34)").font(.caption)
                 TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
-                TextField("Scheme", text: $party.endpointSchemeID).frame(width: 100)
+                NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
             }
             HStack {
                 TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
@@ -1658,6 +1658,31 @@ struct DoubleField: View {
         HStack {
             Text(label).font(.caption)
             TextField(label, value: $value, format: format).frame(width: 80)
+        }
+    }
+}
+
+struct NormRefPicker: View {
+    let label: String
+    let options: [NormRef]
+    @Binding var code: String
+
+    init(_ label: String, options: [NormRef], code: Binding<String>) {
+        self.label = label
+        self.options = options
+        self._code = code
+    }
+
+    var body: some View {
+        Picker(label, selection: Binding(
+            get: { options.first(where: { $0.code == code })?.id ?? "__custom__" },
+            set: { id in
+                if id == "__custom__" { code = "" }
+                else { code = options.first(where: { $0.id == id })?.code ?? code }
+            }
+        )) {
+            ForEach(options) { ref in Text(ref.label).tag(ref.id as String) }
+            Text("Autre…").tag("__custom__" as String)
         }
     }
 }

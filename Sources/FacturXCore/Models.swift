@@ -324,3 +324,73 @@ public extension Double {
         return value
     }
 }
+
+public struct NormRef: Identifiable, Hashable {
+    public let id: String
+    public let code: String
+    public let label: String
+    public init(_ code: String, _ label: String) { self.id = code; self.code = code; self.label = label }
+}
+
+public enum NormRefs {
+    public static let currencies: [NormRef] = [
+        NormRef("EUR", "Euro (EUR)"),
+        NormRef("USD", "Dollar américain (USD)"),
+        NormRef("GBP", "Livre sterling (GBP)"),
+        NormRef("CHF", "Franc suisse (CHF)"),
+        NormRef("CAD", "Dollar canadien (CAD)"),
+        NormRef("JPY", "Yen japonais (JPY)"),
+        NormRef("CNY", "Yuan chinois (CNY)"),
+    ]
+
+    public static let units: [NormRef] = [
+        NormRef("C62", "Unité (C62)"),
+        NormRef("DAY", "Jour (DAY)"),
+        NormRef("HUR", "Heure (HUR)"),
+        NormRef("MIN", "Minute (MIN)"),
+        NormRef("MON", "Mois (MON)"),
+        NormRef("ANN", "Année (ANN)"),
+        NormRef("KGM", "Kilogramme (KGM)"),
+        NormRef("GRM", "Gramme (GRM)"),
+        NormRef("MTR", "Mètre (MTR)"),
+        NormRef("KTM", "Kilomètre (KTM)"),
+        NormRef("MTQ", "Mètre cube (MTQ)"),
+        NormRef("LTR", "Litre (LTR)"),
+        NormRef("MTK", "Mètre carré (MTK)"),
+        NormRef("SET", "Ensemble (SET)"),
+        NormRef("PCE", "Pièce (PCE)"),
+        NormRef("PR", "Paire (PR)"),
+        NormRef("PCK", "Paquet (PCK)"),
+        NormRef("BX", "Boîte (BX)"),
+        NormRef("ROL", "Rouleau (ROL)"),
+        NormRef("TNE", "Tonne (TNE)"),
+    ]
+
+    public static let countries: [NormRef] = [
+        NormRef("FR", "France (FR)"),
+        NormRef("DE", "Allemagne (DE)"),
+        NormRef("BE", "Belgique (BE)"),
+        NormRef("ES", "Espagne (ES)"),
+        NormRef("IT", "Italie (IT)"),
+        NormRef("NL", "Pays-Bas (NL)"),
+        NormRef("LU", "Luxembourg (LU)"),
+        NormRef("PT", "Portugal (PT)"),
+        NormRef("CH", "Suisse (CH)"),
+        NormRef("GB", "Royaume-Uni (GB)"),
+        NormRef("IE", "Irlande (IE)"),
+        NormRef("US", "États-Unis (US)"),
+        NormRef("CA", "Canada (CA)"),
+        NormRef("MA", "Maroc (MA)"),
+        NormRef("DZ", "Algérie (DZ)"),
+        NormRef("TN", "Tunisie (TN)"),
+        NormRef("SN", "Sénégal (SN)"),
+        NormRef("CI", "Côte d'Ivoire (CI)"),
+    ]
+
+    public static let endpointSchemes: [NormRef] = [
+        NormRef("0225", "SIREN (0225)"),
+        NormRef("0183", "SIRET (0183)"),
+        NormRef("0193", "Code RNA (0193)"),
+        NormRef("0200", "Numéro TVA (0200)"),
+    ]
+}
