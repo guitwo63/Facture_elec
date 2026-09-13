@@ -30,6 +30,32 @@ func hexString(from color: Color) -> String {
     return String(format: "%02X%02X%02X", r, g, b)
 }
 
+struct InfoBadge: View {
+    let text: String
+    var body: some View {
+        Image(systemName: "info.circle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .help(text)
+            .accessibilityLabel(Text(text))
+    }
+}
+
+struct LabeledInfoField<Content: View>: View {
+    let label: String
+    let info: String
+    @ViewBuilder let content: Content
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            HStack(spacing: 3) {
+                Text(label)
+                InfoBadge(text: info)
+            }
+            content
+        }
+    }
+}
+
 @main
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
@@ -227,12 +253,28 @@ struct InvoicesTabView: View {
                                 Text(invoice.issueDate, format: .dateTime.day().month().year())
                                     .font(.caption).foregroundStyle(.secondary)
                             }
+                            HStack(spacing: 6) {
+                                Image(systemName: invoice.status.systemImage)
+                                    .foregroundColor(Color(hex: invoice.status.hexColor))
+                                    .font(.caption2)
+                                Text(invoice.status.label).font(.caption2)
+                                    .foregroundColor(Color(hex: invoice.status.hexColor))
+                                Text(invoice.type == .creditNote ? "Avoir" : "")
+                                    .font(.caption2).foregroundStyle(.orange)
+                                Spacer()
+                            }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text(String(format: "%.2f %@ TTC", invoice.grandTotal, invoice.currency))
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         .contextMenu {
+                            Button {
+                                let credit = store.newCreditNote(from: invoice)
+                                store.upsert(credit)
+                                selectedID = credit.id
+                            } label: { Label("Créer un avoir", systemImage: "arrow.uturn.backward.circle") }
+                            Divider()
                             Button(role: .destructive) {
                                 store.invoices.removeAll { $0.id == invoice.id }
                                 store.save()
@@ -354,15 +396,32 @@ struct InvoiceEditorView: View {
                             LabeledContent {
                                 TextField("", text: $invoice.number).frame(width: 160)
                             } label: {
-                                Text("Numéro *").foregroundColor(.red)
+                                HStack(spacing: 3) {
+                                    Text("Numéro *").foregroundColor(.red)
+                                    InfoBadge(text: "BT-1 — Numéro unique de la facture. Obligatoire.")
+                                }
                             }
-                            Picker("Type", selection: $invoice.type) {
-                                ForEach(InvoiceTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
-                            }.frame(width: 260)
+                            HStack(spacing: 3) {
+                                Picker("Type", selection: $invoice.type) {
+                                    ForEach(InvoiceTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
+                                }.frame(width: 260)
+                                InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
+                            }
+                            Picker("Statut", selection: $invoice.status) {
+                                ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                                    Label(s.label, systemImage: s.systemImage).tag(s)
+                                }
+                            }.frame(width: 220)
                         }
                         HStack {
-                            DatePicker("Date", selection: $invoice.issueDate, displayedComponents: .date)
-                            DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
+                            HStack(spacing: 3) {
+                                DatePicker("Date", selection: $invoice.issueDate, displayedComponents: .date)
+                                InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                            }
+                            HStack(spacing: 3) {
+                                DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
+                                InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                            }
                         }
                         HStack {
                             Picker("Profil Factur-X", selection: $invoice.profile) {
@@ -372,9 +431,12 @@ struct InvoiceEditorView: View {
                             TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
                         }
                         HStack {
-                            Picker("Mode facturation (BT-23)", selection: $invoice.billingMode) {
-                                ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                            }.frame(width: 320)
+                            HStack(spacing: 3) {
+                                Picker("Mode facturation (BT-23)", selection: $invoice.billingMode) {
+                                    ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                                }.frame(width: 320)
+                                InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
+                            }
                         }
                     }.padding(8)
                 }
@@ -391,11 +453,26 @@ struct InvoiceEditorView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach($invoice.lines) { $line in
                             HStack {
-                                TextField("Désignation *", text: $line.name).frame(minWidth: 220)
-                                DoubleField("Qté", value: $line.quantity, format: .number)
-                                NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
-                                DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
-                                DoubleField("TVA %", value: $line.vatRate, format: .number)
+                                HStack(spacing: 2) {
+                                    TextField("Désignation *", text: $line.name).frame(minWidth: 220)
+                                    InfoBadge(text: "BT-153 — Désignation de la ligne. Obligatoire.")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("Qté", value: $line.quantity, format: .number)
+                                    InfoBadge(text: "BT-149 — Quantité. Doit être positive (facture) ou négative (avoir).")
+                                }
+                                HStack(spacing: 2) {
+                                    NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
+                                    InfoBadge(text: "BT-150 — Unité de mesure (UN/ECE Rec 20).")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
+                                    InfoBadge(text: "BT-146 — Prix unitaire HT.")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("TVA %", value: $line.vatRate, format: .number)
+                                    InfoBadge(text: "BT-151 — Taux de TVA appliqué (%).")
+                                }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
                                 Button { invoice.lines.removeAll { $0.id == line.id } } label: {
@@ -412,8 +489,14 @@ struct InvoiceEditorView: View {
                 GroupBox("Paiement") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            TextField("IBAN", text: Binding($invoice.paymentIBAN, replacingNilWith: ""))
-                            TextField("BIC", text: Binding($invoice.paymentBIC, replacingNilWith: ""))
+                            HStack(spacing: 3) {
+                                TextField("IBAN", text: Binding($invoice.paymentIBAN, replacingNilWith: ""))
+                                InfoBadge(text: "BT-84 — IBAN pour le virement SEPA.")
+                            }
+                            HStack(spacing: 3) {
+                                TextField("BIC", text: Binding($invoice.paymentBIC, replacingNilWith: ""))
+                                InfoBadge(text: "BT-85 — BIC de la banque (requis si IBAN hors SEPA).")
+                            }
                         }
                         TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
                         TextField("Référence commande", text: Binding($invoice.purchaseOrderRef, replacingNilWith: ""))

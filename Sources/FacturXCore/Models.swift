@@ -224,10 +224,57 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
     }
 }
 
+public enum InvoiceStatus: String, Codable, CaseIterable {
+    case draft
+    case issued
+    case sentToPDP
+    case accepted
+    case rejected
+    case paid
+    case cancelled
+
+    public var label: String {
+        switch self {
+        case .draft: return "Brouillon"
+        case .issued: return "Émise"
+        case .sentToPDP: return "Transmise au PDP"
+        case .accepted: return "Acceptée par le PDP"
+        case .rejected: return "Rejetée par le PDP"
+        case .paid: return "Payée"
+        case .cancelled: return "Annulée"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .draft: return "doc"
+        case .issued: return "doc.fill"
+        case .sentToPDP: return "paperplane.fill"
+        case .accepted: return "checkmark.seal.fill"
+        case .rejected: return "xmark.octagon.fill"
+        case .paid: return "checkmark.circle.fill"
+        case .cancelled: return "minus.circle.fill"
+        }
+    }
+
+    public var hexColor: String {
+        switch self {
+        case .draft: return "6E6E73"
+        case .issued: return "2A6EBB"
+        case .sentToPDP: return "B07A2A"
+        case .accepted: return "2E8B57"
+        case .rejected: return "C0392B"
+        case .paid: return "1E7E34"
+        case .cancelled: return "8C8C8C"
+        }
+    }
+}
+
 public struct Invoice: Codable, Hashable, Identifiable {
     public var id: UUID
     public var number: String
     public var type: InvoiceTypeCode
+    public var status: InvoiceStatus
     public var issueDate: Date
     public var dueDate: Date
     public var currency: String
@@ -250,6 +297,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         id: UUID = UUID(),
         number: String,
         type: InvoiceTypeCode = .commercialInvoice,
+        status: InvoiceStatus = .draft,
         issueDate: Date = Date(),
         dueDate: Date = Date().addingTimeInterval(30 * 86400),
         currency: String = "EUR",
@@ -271,6 +319,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.id = id
         self.number = number
         self.type = type
+        self.status = status
         self.issueDate = issueDate
         self.dueDate = dueDate
         self.currency = currency
@@ -291,7 +340,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, number, type, issueDate, dueDate, currency, profile, seller, buyer
+        case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer
         case buyerReference, purchaseOrderRef, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB
     }
@@ -301,6 +350,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         number = try c.decodeIfPresent(String.self, forKey: .number) ?? ""
         type = try c.decodeIfPresent(InvoiceTypeCode.self, forKey: .type) ?? .commercialInvoice
+        status = try c.decodeIfPresent(InvoiceStatus.self, forKey: .status) ?? .draft
         issueDate = try c.decodeIfPresent(Date.self, forKey: .issueDate) ?? Date()
         dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate) ?? Date().addingTimeInterval(30 * 86400)
         currency = try c.decodeIfPresent(String.self, forKey: .currency) ?? "EUR"

@@ -59,11 +59,34 @@ public final class InvoiceStore: ObservableObject {
         )
     }
 
-    public func nextNumber() -> String {
-        let year = Calendar.current.component(.year, from: Date())
-        let seq = invoices.filter { $0.number.hasPrefix("\(year)-") }.count + 1
-        return String(format: "%d-%04d", year, seq)
+    public func newCreditNote(from invoice: Invoice) -> Invoice {
+        var credit = invoice
+        credit.id = UUID()
+        credit.number = nextNumber(prefix: "AV")
+        credit.type = .creditNote
+        credit.status = .draft
+        credit.issueDate = Date()
+        credit.dueDate = Date()
+        credit.purchaseOrderRef = invoice.number
+        credit.notes = "Avoir relatif à la facture \(invoice.number)"
+        credit.lines = invoice.lines.map { line in
+            var l = line
+            l.id = UUID()
+            l.quantity = -line.quantity
+            return l
+        }
+        return credit
     }
+
+    public func nextNumber(prefix: String = "") -> String {
+        let year = Calendar.current.component(.year, from: Date())
+        let key = "\(year)-\(prefix)"
+        let seq = invoices.filter { $0.number.hasPrefix(key) }.count + 1
+        let p = prefix.isEmpty ? "" : "\(prefix)"
+        return String(format: "%d-%@%04d", year, p, seq)
+    }
+
+
 
     static func defaultCompany() -> InvoiceParty {
         InvoiceParty(name: "", street: "", postcode: "", city: "")
