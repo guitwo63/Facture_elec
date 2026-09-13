@@ -30,6 +30,12 @@ func hexString(from color: Color) -> String {
     return String(format: "%02X%02X%02X", r, g, b)
 }
 
+extension View {
+    @ViewBuilder
+    func lockable(_ locked: Bool) -> some View {
+        self.allowsHitTesting(!locked)
+    }
+}
 struct InfoBadge: View {
     let text: String
     @State private var isHovering = false
@@ -486,15 +492,15 @@ struct InvoiceEditorView: View {
                             }
                         }
                     }.padding(8)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Émetteur (vous)") {
                     PartySection(party: $invoice.seller, role: .seller)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Destinataire") {
                     PartySection(party: $invoice.buyer, role: .buyer)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Lignes") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -531,7 +537,7 @@ struct InvoiceEditorView: View {
                             invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: invoice.lines.last?.vatRate ?? 20))
                         } label: { Label("Ajouter une ligne", systemImage: "plus") }
                     }.padding(8)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Paiement") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -548,7 +554,7 @@ struct InvoiceEditorView: View {
                         TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
                         TextField("Référence commande", text: Binding($invoice.purchaseOrderRef, replacingNilWith: ""))
                     }.padding(8)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Mentions légales (FR)") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -560,7 +566,7 @@ struct InvoiceEditorView: View {
                         TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
                         TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
                     }.padding(8)
-                }
+                }.lockable(isLocked)
 
                 GroupBox("Totaux") {
                     VStack(alignment: .trailing) {
@@ -570,9 +576,8 @@ struct InvoiceEditorView: View {
                         }
                         row("Total TTC", invoice.grandTotal, bold: true)
                     }.padding(8).frame(maxWidth: .infinity)
-                }
+                }.lockable(isLocked)
             }.padding()
-                .disabled(isLocked)
         }
             .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
                 Button("Annuler", role: .cancel) { }
