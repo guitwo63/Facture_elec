@@ -58,7 +58,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum RootTab: String, CaseIterable, Identifiable {
     case invoices = "Factures"
     case directory = "Annuaire"
-    case settings = "Réglages"
     var id: String { rawValue }
 }
 
@@ -66,13 +65,25 @@ struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
+    @State private var showSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
+            HStack {
+                Picker("", selection: $tab) {
+                    ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                Spacer()
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.borderless)
+                .help("Réglages")
             }
-            .pickerStyle(.segmented)
             .padding(8)
 
             switch tab {
@@ -80,9 +91,10 @@ struct RootView: View {
                 InvoicesTabView(selectedID: $selectedID)
             case .directory:
                 DirectoryView()
-            case .settings:
-                SettingsView()
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
