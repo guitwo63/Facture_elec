@@ -525,7 +525,10 @@ struct PartyPickerSheet: View {
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let active = directory.entries.filter { !$0.isArchived }
+        let roleKind = role.defaultKind
+        let active = directory.entries.filter {
+            !$0.isArchived && ($0.kind == roleKind || $0.kind == .both)
+        }
         let base: [DirectoryEntry]
         if q.isEmpty {
             base = active
