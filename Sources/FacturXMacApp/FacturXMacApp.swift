@@ -213,15 +213,31 @@ struct RootView: View {
     }
 }
 
+enum InvoiceTypeFilter: String, CaseIterable, Hashable {
+    case all = "Tous"
+    case invoice = "Factures"
+    case creditNote = "Avoirs"
+}
+
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @Binding var selectedID: UUID?
     @State private var query = ""
+    @State private var typeFilter: InvoiceTypeFilter = .all
 
     var filteredInvoices: [Invoice] {
+        var result = store.invoices
+        switch typeFilter {
+        case .all:
+            break
+        case .invoice:
+            result = result.filter { $0.type != .creditNote }
+        case .creditNote:
+            result = result.filter { $0.type == .creditNote }
+        }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return store.invoices }
-        return store.invoices.filter { invoice in
+        guard !q.isEmpty else { return result }
+        return result.filter { invoice in
             invoice.number.lowercased().contains(q)
                 || invoice.buyer.name.lowercased().contains(q)
                 || (invoice.buyer.siren ?? "").lowercased().contains(q)
@@ -240,6 +256,13 @@ struct InvoicesTabView: View {
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Factures").font(.title2.bold())
+                    Picker("Filtre", selection: $typeFilter) {
+                        ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
+                            Text(f.rawValue).tag(f)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 260)
                     Spacer()
                 }
                 HStack {
@@ -406,10 +429,8 @@ struct InvoiceEditorView: View {
                     .disabled(isLocked)
                 Button("Exporter XML") { exportXML() }
                     .buttonStyle(.bordered)
-                    .disabled(isLocked)
                 Button("Générer le Factur-X") { export() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isLocked)
             }
             .padding(12)
             Divider()

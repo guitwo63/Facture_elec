@@ -283,6 +283,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var buyer: InvoiceParty
     public var buyerReference: String?
     public var purchaseOrderRef: String?
+    public var precedingInvoiceRef: String?
+    public var precedingInvoiceDate: Date?
     public var lines: [InvoiceLine]
     public var paymentIBAN: String?
     public var paymentBIC: String?
@@ -306,6 +308,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         buyer: InvoiceParty,
         buyerReference: String? = nil,
         purchaseOrderRef: String? = nil,
+        precedingInvoiceRef: String? = nil,
+        precedingInvoiceDate: Date? = nil,
         lines: [InvoiceLine] = [],
         paymentIBAN: String? = nil,
         paymentBIC: String? = nil,
@@ -328,6 +332,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.buyer = buyer
         self.buyerReference = buyerReference
         self.purchaseOrderRef = purchaseOrderRef
+        self.precedingInvoiceRef = precedingInvoiceRef
+        self.precedingInvoiceDate = precedingInvoiceDate
         self.lines = lines
         self.paymentIBAN = paymentIBAN
         self.paymentBIC = paymentBIC
@@ -341,7 +347,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer
-        case buyerReference, purchaseOrderRef, lines, paymentIBAN, paymentBIC, paymentTerms, notes
+        case buyerReference, purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB
     }
 
@@ -359,6 +365,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         buyer = try c.decodeIfPresent(InvoiceParty.self, forKey: .buyer) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         buyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
         purchaseOrderRef = try c.decodeIfPresent(String.self, forKey: .purchaseOrderRef)
+        precedingInvoiceRef = try c.decodeIfPresent(String.self, forKey: .precedingInvoiceRef)
+        precedingInvoiceDate = try c.decodeIfPresent(Date.self, forKey: .precedingInvoiceDate)
         lines = try c.decodeIfPresent([InvoiceLine].self, forKey: .lines) ?? []
         paymentIBAN = try c.decodeIfPresent(String.self, forKey: .paymentIBAN)
         paymentBIC = try c.decodeIfPresent(String.self, forKey: .paymentBIC)

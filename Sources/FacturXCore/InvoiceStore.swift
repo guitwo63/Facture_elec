@@ -67,7 +67,9 @@ public final class InvoiceStore: ObservableObject {
         credit.status = .draft
         credit.issueDate = Date()
         credit.dueDate = Date()
-        credit.purchaseOrderRef = invoice.number
+        credit.purchaseOrderRef = nil
+        credit.precedingInvoiceRef = invoice.number
+        credit.precedingInvoiceDate = invoice.issueDate
         credit.notes = "Avoir relatif à la facture \(invoice.number)"
         credit.lines = invoice.lines.map { line in
             var l = line

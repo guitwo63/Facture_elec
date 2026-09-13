@@ -25,7 +25,7 @@ public struct CIIXMLGenerator {
         let buyer = xmlParty(invoice.buyer, role: .buyer)
         let agreement = """
         <ram:ApplicableHeaderTradeAgreement>
-\(buyerReferenceXML(invoice))\(purchaseOrderXML(invoice))\(seller)\(buyer)
+\(buyerReferenceXML(invoice))\(seller)\(buyer)\(purchaseOrderXML(invoice))
         </ram:ApplicableHeaderTradeAgreement>
 """
         let delivery = """
@@ -285,7 +285,7 @@ public struct CIIXMLGenerator {
         <ram:TaxTotalAmount currencyID="\(escape(invoice.currency))">\(taxTotal)</ram:TaxTotalAmount>
         <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
         <ram:DuePayableAmount>\(duePay)</ram:DuePayableAmount>
-      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>\(invoiceReferencedXML(invoice))
     </ram:ApplicableHeaderTradeSettlement>
 """
     }
@@ -332,6 +332,26 @@ public struct CIIXMLGenerator {
 """
     }
 
+    private func invoiceReferencedXML(_ invoice: Invoice) -> String {
+        guard let ref = invoice.precedingInvoiceRef, !ref.isEmpty else { return "" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
+        let dateStr: String
+        if let d = invoice.precedingInvoiceDate {
+            dateStr = fmt.string(from: d)
+        } else {
+            dateStr = fmt.string(from: invoice.issueDate)
+        }
+        return """
+      <ram:InvoiceReferencedDocument>
+        <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
+        <ram:FormattedIssueDateTime>
+          <qdt:DateTimeString format="102">\(dateStr)</qdt:DateTimeString>
+        </ram:FormattedIssueDateTime>
+      </ram:InvoiceReferencedDocument>"""
+    }
     private func formatRate(_ rate: Double) -> String {
         if rate == rate.rounded() {
             return String(format: "%.0f", rate)
