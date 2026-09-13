@@ -497,6 +497,17 @@ struct InvoiceEditorView: View {
                                 InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
                             }
                         }
+                        if invoice.type == .creditNote {
+                            HStack(spacing: 3) {
+                                TextField("Facture liée", text: Binding($invoice.precedingInvoiceRef, replacingNilWith: "")).frame(width: 160)
+                                InfoBadge(text: "BT-25 — Numéro de la facture antérieure référencée par cet avoir. Obligatoire pour un avoir (BR-FR-CO-05).")
+                                DatePicker("Date facture", selection: Binding(
+                                    get: { invoice.precedingInvoiceDate ?? Date() },
+                                    set: { invoice.precedingInvoiceDate = $0 }
+                                ), displayedComponents: .date)
+                                InfoBadge(text: "BT-26 — Date d'émission de la facture antérieure référencée.")
+                            }
+                        }
                         HStack {
                             Picker("Profil Factur-X", selection: $invoice.profile) {
                                 ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
