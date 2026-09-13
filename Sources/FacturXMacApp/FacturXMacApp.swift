@@ -172,39 +172,54 @@ struct InvoicesTabView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
                 HStack {
                     Button {
                         let draft = store.newDraft()
                         store.upsert(draft)
                         selectedID = draft.id
-                    } label: {
-                        Label("Nouvelle", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
+                    } label: { Label("Nouvelle facture", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                    Text("Factures").font(.title2.bold())
                     Spacer()
                 }
-                .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
-
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Rechercher (numéro, client, SIREN…)", text: $query)
+                    TextField("Rechercher (num\u00e9ro, client, SIREN\u2026)", text: $query)
                         .textFieldStyle(.plain)
-                        .onSubmit { }
                     if !query.isEmpty {
                         Button { query = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderless)
                     }
                 }
-                .padding(8)
-                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+            }
+            .padding(12)
 
-                List(selection: $selectedID) {
-                    ForEach(filteredInvoices) { invoice in
+            Divider()
+
+            HSplitView {
+                if filteredInvoices.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Aucune facture.")
+                            .foregroundStyle(.secondary)
+                        Button("Nouvelle facture") {
+                            let draft = store.newDraft()
+                            store.upsert(draft)
+                            selectedID = draft.id
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(filteredInvoices, selection: Binding(
+                        get: { selectedID },
+                        set: { id in selectedID = id }
+                    )) { invoice in
                         VStack(alignment: .leading) {
                             HStack {
                                 Text(invoice.number).font(.headline)
@@ -217,27 +232,29 @@ struct InvoicesTabView: View {
                             Text(String(format: "%.2f %@ TTC", invoice.grandTotal, invoice.currency))
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
-                        .tag(invoice.id)
-                    }
-                    .onDelete { idx in
-                        let toRemove = idx.compactMap { i in
-                            i < filteredInvoices.count ? filteredInvoices[i] : nil
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                store.invoices.removeAll { $0.id == invoice.id }
+                                store.save()
+                                if selectedID == invoice.id { selectedID = nil }
+                            } label: { Label("Supprimer", systemImage: "trash") }
                         }
-                        for inv in toRemove {
-                            store.invoices.removeAll { $0.id == inv.id }
-                        }
-                        store.save()
                     }
+                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 360)
                 }
-            }
-            .navigationTitle("Factures")
-        } detail: {
-            if let id = selectedID,
-               store.invoices.contains(where: { $0.id == id }) {
-                InvoiceEditorView(invoice: binding(for: id))
-            } else {
-                Text("Sélectionnez ou créez une facture")
-                    .foregroundStyle(.secondary)
+
+                if let id = selectedID,
+                   store.invoices.contains(where: { $0.id == id }) {
+                    InvoiceEditorView(invoice: binding(for: id))
+                        .frame(minWidth: 380)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("S\u00e9lectionnez ou cr\u00e9ez une facture")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
     }
