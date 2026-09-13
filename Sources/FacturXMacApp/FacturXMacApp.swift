@@ -569,7 +569,11 @@ struct InvoiceEditorView: View {
 
                 HStack(alignment: .top, spacing: 12) {
                     GroupBox("Émetteur (vous)") {
-                        PartySection(party: $invoice.seller, role: .seller)
+                        PartySection(party: $invoice.seller, role: .seller, onPartyPicked: { p in
+                            invoice.paymentIBAN = p.iban
+                            invoice.paymentBIC = p.bic
+                            if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
+                        })
                     }.lockable(isLocked)
                     GroupBox("Destinataire") {
                         PartySection(party: $invoice.buyer, role: .buyer)
@@ -780,6 +784,7 @@ struct PartySection: View {
 
     @Binding var party: InvoiceParty
     let role: Role
+    var onPartyPicked: ((InvoiceParty) -> Void)? = nil
     @EnvironmentObject var directory: PartyDirectory
     @State private var showPicker = false
     @State private var showSaveSheet = false
@@ -822,6 +827,7 @@ struct PartySection: View {
                     }
                 }
                 party = p
+                onPartyPicked?(p)
                 showPicker = false
             }
         }

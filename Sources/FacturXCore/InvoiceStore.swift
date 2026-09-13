@@ -55,7 +55,10 @@ public final class InvoiceStore: ObservableObject {
             number: nextNumber(),
             seller: myCompany,
             buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""),
-            lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)]
+            lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
+            paymentIBAN: myCompany.iban,
+            paymentBIC: myCompany.bic,
+            paymentTerms: myCompany.paymentTerms
         )
     }
 
