@@ -205,7 +205,7 @@ public final class ChorusProService {
             throw ChorusProError.decoding("Réponse non HTTP")
         }
         guard (200...299).contains(http.statusCode) else {
-            throw ChorusProError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+            throw ChorusProError.http(status: http.statusCode, body: "URL: \(endpoint)\nBody: \(String(data: data, encoding: .utf8) ?? "")")
         }
         return try parseResults(data: data)
     }
