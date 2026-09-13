@@ -882,15 +882,54 @@ struct RoutingAddressFormView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var directory: PartyDirectory
     @State private var testMessage: String?
     @State private var testing = false
     @State private var dinumExpanded = true
     @State private var pisteExpanded = false
+    @State private var sellerExpanded = true
+    @State private var showSellerPicker = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Réglages").font(.title2.bold())
+
+                DisclosureGroup(isExpanded: $sellerExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Cette entreprise est utilisée comme émetteur par défaut pour chaque nouvelle facture.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if !store.myCompany.name.trimmingCharacters(in: .whitespaces).isEmpty {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(store.myCompany.name).font(.body.weight(.semibold))
+                                    if let s = store.myCompany.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
+                                    if let v = store.myCompany.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                Spacer()
+                                Button {
+                                    showSellerPicker = true
+                                } label: { Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
+                                    .buttonStyle(.bordered)
+                            }
+                        } else {
+                            Button {
+                                showSellerPicker = true
+                            } label: { Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
+                                .buttonStyle(.bordered)
+                        }
+                        Divider()
+                        PartyEditorView(party: $store.myCompany)
+                        Button {
+                            store.save()
+                        } label: { Label("Enregistrer l'émetteur par défaut", systemImage: "checkmark.circle") }
+                            .buttonStyle(.borderedProminent)
+                    }.padding(8)
+                } label: {
+                    Label("Émetteur par défaut", systemImage: "building.2")
+                        .font(.headline)
+                }
 
                 DisclosureGroup(isExpanded: $dinumExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -983,6 +1022,21 @@ struct SettingsView: View {
 
                 Spacer()
             }.padding()
+        }
+        .sheet(isPresented: $showSellerPicker) {
+            PartyPickerSheet(role: .seller) { selected in
+                var p = selected.party
+                if let routing = selected.defaultRoutingAddress, routing.isActive {
+                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+                    if !composed.isEmpty {
+                        p.endpointID = composed
+                        p.endpointSchemeID = "0225"
+                    }
+                }
+                store.myCompany = p
+                store.save()
+                showSellerPicker = false
+            }
         }
     }
 }
