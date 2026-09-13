@@ -51,6 +51,9 @@ public struct InvoiceParty: Codable, Hashable {
     public var contactPhone: String?
     public var endpointID: String?
     public var endpointSchemeID: String
+    public var iban: String?
+    public var bic: String?
+    public var paymentTerms: String?
 
     public init(
         name: String,
@@ -289,6 +292,10 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var buyer: InvoiceParty
     public var buyerReference: String?
     public var purchaseOrderRef: String?
+    public var contractRef: String?
+    public var tenderRef: String?
+    public var receivingAdviceRef: String?
+    public var despatchAdviceRef: String?
     public var precedingInvoiceRef: String?
     public var precedingInvoiceDate: Date?
     public var lines: [InvoiceLine]
