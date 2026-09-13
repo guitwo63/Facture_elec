@@ -231,7 +231,10 @@ public final class PartyDirectory: ObservableObject {
     }
 
     public func delete(at offsets: IndexSet) {
-        entries.remove(atOffsets: offsets)
+        let sorted = offsets.sorted(by: >)
+        for i in sorted where entries.indices.contains(i) {
+            entries.remove(at: i)
+        }
         save()
     }
 
