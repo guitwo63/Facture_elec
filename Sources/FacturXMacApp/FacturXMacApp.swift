@@ -206,7 +206,12 @@ struct InvoicesTabView: View {
                 List(selection: $selectedID) {
                     ForEach(filteredInvoices) { invoice in
                         VStack(alignment: .leading) {
-                            Text(invoice.number).font(.headline)
+                            HStack {
+                                Text(invoice.number).font(.headline)
+                                Spacer()
+                                Text(invoice.issueDate, format: .dateTime.day().month().year())
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text(String(format: "%.2f %@ TTC", invoice.grandTotal, invoice.currency))
