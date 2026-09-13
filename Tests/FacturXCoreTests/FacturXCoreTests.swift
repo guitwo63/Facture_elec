@@ -203,4 +203,18 @@ final class FacturXCoreTests: XCTestCase {
         f.timeZone = TimeZone(secondsFromGMT: 0)
         return f.date(from: s)!
     }
+
+    func testLuhnValidSiren() {
+        XCTAssertTrue(SireneValidator.isValidSiren("732829320"))
+        XCTAssertFalse(SireneValidator.isValidSiren("732829321"))
+        XCTAssertFalse(SireneValidator.isValidSiren("123"))
+        XCTAssertFalse(SireneValidator.isValidSiren(nil))
+    }
+
+    func testLuhnValidSiret() {
+        XCTAssertTrue(SireneValidator.isValidSiret("73282932000074"))
+        XCTAssertFalse(SireneValidator.isValidSiret("73282932000075"))
+        XCTAssertFalse(SireneValidator.isValidSiret("732829320"))
+        XCTAssertFalse(SireneValidator.isValidSiret(nil))
+    }
 }

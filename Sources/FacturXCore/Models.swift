@@ -117,6 +117,39 @@ public struct InvoiceParty: Codable, Hashable {
     }
 }
 
+public enum SireneValidator {
+    public static func luhnCheck(_ digits: String) -> Bool {
+        let numbers = digits.filter { $0.isNumber }
+        guard numbers.count >= 2 else { return false }
+        var sum = 0
+        let reversed = numbers.reversed()
+        var isSecond = false
+        for ch in reversed {
+            guard let v = ch.wholeNumberValue else { return false }
+            var n = v
+            if isSecond {
+                n *= 2
+                if n > 9 { n -= 9 }
+            }
+            sum += n
+            isSecond.toggle()
+        }
+        return sum % 10 == 0
+    }
+
+    public static func isValidSiren(_ value: String?) -> Bool {
+        let numbers = (value ?? "").filter { $0.isNumber }
+        guard numbers.count == 9 else { return false }
+        return luhnCheck(numbers)
+    }
+
+    public static func isValidSiret(_ value: String?) -> Bool {
+        let numbers = (value ?? "").filter { $0.isNumber }
+        guard numbers.count == 14 else { return false }
+        return luhnCheck(numbers)
+    }
+}
+
 public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var id: UUID
     public var name: String
