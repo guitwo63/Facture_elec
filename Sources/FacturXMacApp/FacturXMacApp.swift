@@ -976,7 +976,7 @@ struct SettingsView: View {
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Création du compte").font(.caption2.bold())
-                            Text("1. Créez un compte sur https://portail-api.insee.fr/".font(.caption2).foregroundStyle(.tertiary))
+                            Text("1. Créez un compte sur https://portail-api.insee.fr/").font(.caption2).foregroundStyle(.tertiary)
                             Text("2. Souscrivez l'API \"Sirene - V3\" (gratuit)").font(.caption2).foregroundStyle(.tertiary)
                             Text("3. Récupérez client_key / client_secret de votre application").font(.caption2).foregroundStyle(.tertiary)
                             Text("Token : https://api.insee.fr/token  ·  API : https://api.insee.fr/entreprises/sirene/V3").font(.caption2).foregroundStyle(.tertiary)
