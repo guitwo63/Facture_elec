@@ -285,8 +285,8 @@ struct InvoicesTabView: View {
                                     .font(.caption2)
                                 Text(invoice.status.label).font(.caption2)
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
-                                Text(invoice.type == .creditNote ? "Avoir" : "")
-                                    .font(.caption2).foregroundStyle(.orange)
+                                Text(invoice.type == .creditNote ? "Avoir" : "Facture")
+                                    .font(.caption2).foregroundStyle(invoice.type == .creditNote ? .orange : .accentColor)
                                 Spacer()
                             }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
@@ -300,6 +300,7 @@ struct InvoicesTabView: View {
                                 store.upsert(credit)
                                 selectedID = credit.id
                             } label: { Label("Créer un avoir", systemImage: "arrow.uturn.backward.circle") }
+                            .disabled(invoice.type == .creditNote)
                             Divider()
                             Button(role: .destructive) {
                                 store.invoices.removeAll { $0.id == invoice.id }
@@ -458,11 +459,6 @@ struct InvoiceEditorView: View {
                                 }.frame(width: 260)
                                 InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
                             }
-                            Picker("Statut", selection: $invoice.status) {
-                                ForEach(InvoiceStatus.allCases, id: \.self) { s in
-                                    Label(s.label, systemImage: s.systemImage).tag(s)
-                                }
-                            }.frame(width: 220)
                         }
                         HStack {
                             HStack(spacing: 3) {
@@ -673,6 +669,20 @@ struct InvoiceEditorView: View {
                             .foregroundStyle(.red)
                     }
                     Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: invoice.status.systemImage)
+                            .foregroundColor(Color(hex: invoice.status.hexColor))
+                            .font(.caption2)
+                        Picker("Statut", selection: $invoice.status) {
+                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                                Label(s.label, systemImage: s.systemImage).tag(s)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                        .disabled(!isLocked)
+                        .help(isLocked ? "Statut de la facture (modifiable une fois verrouillée)" : "Verrouillez la facture pour modifier le statut")
+                    }
                     Button { showValidation = false } label: {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
