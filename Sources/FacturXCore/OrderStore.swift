@@ -83,10 +83,29 @@ public final class OrderStore: ObservableObject {
         save()
     }
 
-    public func newDraft(directory: PartyDirectory? = nil) -> SalesOrder {
+    public func newDraft(directory: PartyDirectory? = nil, preferredBuyerEntryID: UUID? = nil) -> SalesOrder {
         let dir = directory ?? PartyDirectory.shared
-        let buyer = resolveDefaultBuyer(from: dir)
-            ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
+        let buyerEntryID = preferredBuyerEntryID ?? defaultBuyerEntryID
+        let buyer: InvoiceParty = {
+            if let id = buyerEntryID, let entry = dir.entries.first(where: { $0.id == id }) {
+                var p = entry.party
+                if let routing = entry.defaultRoutingAddress, routing.isActive {
+                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+                    if !composed.isEmpty {
+                        p.endpointID = composed
+                        p.endpointSchemeID = "0225"
+                    }
+                }
+                if let contact = entry.defaultContact, contact.isActive {
+                    p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+                    p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+                    p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+                }
+                return p
+            }
+            return resolveDefaultBuyer(from: dir)
+                ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
+        }()
         let seller = InvoiceParty(name: "", street: "", postcode: "", city: "")
         return SalesOrder(
             number: nextNumber(),

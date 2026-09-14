@@ -289,7 +289,7 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newOrderRequested)) { _ in
             tab = .orders
-            let draft = orderStore.newDraft()
+            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID)
             orderStore.upsert(draft)
             selectedOrderID = draft.id
         }
@@ -2522,6 +2522,7 @@ struct PartyEditorView: View {
     @Binding var contacts: [PartyContact]
     var showWebButton: Bool
     var isFournisseur: Bool = false
+    var hideEmail: Bool = false
     var isMultiContact: Bool
     var directory: PartyDirectory?
     var onPickContact: ((PartyContact) -> Void)?
@@ -2538,10 +2539,11 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false, hideEmail: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
         self.isFournisseur = isFournisseur
+        self.hideEmail = hideEmail
         self.isMultiContact = contacts != nil
         self.directory = directory
         self.onPickContact = onPickContact
@@ -2705,7 +2707,7 @@ struct PartyEditorView: View {
                             .help("Choisir ou créer un contact depuis la fiche tiers")
                     }
                     let name = party.contactName?.trimmingCharacters(in: .whitespaces) ?? ""
-                    let email = party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? ""
+                    let email = hideEmail ? "" : (party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? "")
                     let phone = party.contactPhone?.trimmingCharacters(in: .whitespaces) ?? ""
                     if name.isEmpty && email.isEmpty && phone.isEmpty {
                         Text("Aucun contact").font(.caption).foregroundStyle(.secondary)
@@ -2723,7 +2725,9 @@ struct PartyEditorView: View {
             } else {
                 HStack {
                     TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
-                    TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
+                    if !hideEmail {
+                        TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
+                    }
                     TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
                 }
             }
@@ -3026,7 +3030,7 @@ struct OrderPartySection: View {
                 Spacer()
             }
 
-            PartyEditorView(party: $party, isFournisseur: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isFournisseur: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -3074,6 +3078,7 @@ struct OrderPartySection: View {
 
 struct OrdersTabView: View {
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var auth: AuthStore
     @Binding var selectedID: UUID?
     @State private var query = ""
 
@@ -3094,7 +3099,7 @@ struct OrdersTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let draft = orderStore.newDraft()
+                        let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID)
                         orderStore.upsert(draft)
                         selectedID = draft.id
                     } label: { Label("Nouvelle commande", systemImage: "plus") }
@@ -3127,7 +3132,7 @@ struct OrdersTabView: View {
                         Text("Aucune commande.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle commande") {
-                            let draft = orderStore.newDraft()
+                            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID)
                             orderStore.upsert(draft)
                             selectedID = draft.id
                         }
