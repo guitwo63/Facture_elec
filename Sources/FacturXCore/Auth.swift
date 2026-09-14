@@ -76,41 +76,6 @@ public struct User: Codable, Hashable, Identifiable {
     }
 }
 
-public struct Society: Codable, Hashable, Identifiable {
-    public var id: UUID
-    public var name: String
-    public var siren: String?
-    public var entryID: UUID?
-
-    public init(
-        id: UUID = UUID(),
-        name: String,
-        siren: String? = nil,
-        entryID: UUID? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.siren = siren
-        self.entryID = entryID
-    }
-
-    public var displayName: String {
-        name.trimmingCharacters(in: .whitespaces).isEmpty ? "(société sans nom)" : name
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, name, siren, entryID
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
-        siren = try c.decodeIfPresent(String.self, forKey: .siren)
-        entryID = try c.decodeIfPresent(UUID.self, forKey: .entryID)
-    }
-}
-
 public enum PasswordHasher {
     public static let iterations = 12_000
 
@@ -153,6 +118,7 @@ public enum AuthError: Error, LocalizedError {
     case inactiveUser
     case duplicateUsername
     case emptyPassword
+    case missingSociety
 
     public var errorDescription: String? {
         switch self {
@@ -161,6 +127,7 @@ public enum AuthError: Error, LocalizedError {
         case .inactiveUser: return "Ce compte est désactivé."
         case .duplicateUsername: return "Cet identifiant existe déjà."
         case .emptyPassword: return "Le mot de passe ne peut pas être vide."
+        case .missingSociety: return "Un comptable doit être associé à au moins une société (fiche fournisseur de l'annuaire)."
         }
     }
 }
@@ -169,22 +136,25 @@ public final class AuthStore: ObservableObject {
     public static let shared = AuthStore()
 
     @Published public var users: [User]
-    @Published public var societies: [Society]
     @Published public var currentUser: User?
+
+    public weak var directory: PartyDirectory?
 
     private let defaults = UserDefaults.standard
     private let usersKey = "facturx.users.v1"
-    private let societiesKey = "facturx.societies.v1"
     private let sessionKey = "facturx.session.userid.v1"
     private let seededKey = "facturx.auth.seeded.v1"
 
     public init() {
         self.users = []
-        self.societies = []
         self.currentUser = nil
         load()
         seedDefaultAdminIfEmpty()
         restoreSession()
+    }
+
+    public func attachDirectory(_ directory: PartyDirectory) {
+        self.directory = directory
     }
 
     public func load() {
@@ -192,18 +162,11 @@ public final class AuthStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([User].self, from: data) {
             users = decoded
         }
-        if let data = defaults.data(forKey: societiesKey),
-           let decoded = try? JSONDecoder().decode([Society].self, from: data) {
-            societies = decoded
-        }
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(users) {
             defaults.set(data, forKey: usersKey)
-        }
-        if let data = try? JSONEncoder().encode(societies) {
-            defaults.set(data, forKey: societiesKey)
         }
         if let id = currentUser?.id {
             defaults.set(id.uuidString, forKey: sessionKey)
@@ -274,6 +237,9 @@ public final class AuthStore: ObservableObject {
         guard !users.contains(where: { $0.username.lowercased() == trimmedName.lowercased() }) else {
             throw AuthError.duplicateUsername
         }
+        if role == .comptable, societyIDs.isEmpty {
+            throw AuthError.missingSociety
+        }
         let salt = PasswordHasher.generateSalt()
         let hash = PasswordHasher.hash(password: password, salt: salt)
         let user = User(
@@ -317,30 +283,28 @@ public final class AuthStore: ObservableObject {
         save()
     }
 
-    public func upsert(_ society: Society) {
-        if let idx = societies.firstIndex(where: { $0.id == society.id }) {
-            societies[idx] = society
-        } else {
-            societies.append(society)
-        }
-        save()
+    // MARK: - Périmètre basé sur l'annuaire (DirectoryEntry)
+
+    private func allSocietyEntries(in directory: PartyDirectory) -> [DirectoryEntry] {
+        directory.entries.filter { $0.kind == .fournisseur || $0.kind == .both }
     }
 
-    public func delete(_ society: Society) {
-        societies.removeAll { $0.id == society.id }
-        for i in users.indices {
-            users[i].societyIDs.removeAll { $0 == society.id }
-        }
-        if currentUser?.societyIDs.contains(society.id) == true, var cu = currentUser {
-            cu.societyIDs.removeAll { $0 == society.id }
-            currentUser = cu
-        }
-        save()
+    public func availableSocieties() -> [DirectoryEntry] {
+        let dir = directory ?? PartyDirectory.shared
+        return allSocietyEntries(in: dir)
     }
 
-    public func society(forID id: UUID?) -> Society? {
+    public func visibleSocieties(for user: User?) -> [DirectoryEntry] {
+        guard let user = user else { return [] }
+        let all = availableSocieties()
+        if user.role == .admin { return all }
+        let scope = Set(user.societyIDs)
+        return all.filter { scope.contains($0.id) }
+    }
+
+    public func societyEntry(forID id: UUID?) -> DirectoryEntry? {
         guard let id = id else { return nil }
-        return societies.first(where: { $0.id == id })
+        return availableSocieties().first(where: { $0.id == id })
     }
 
     public func userCanAccessSociety(_ user: User?, societyID: UUID?) -> Bool {
@@ -350,13 +314,13 @@ public final class AuthStore: ObservableObject {
         return user.societyIDs.contains(sid)
     }
 
-    public func visibleSocieties(for user: User?) -> [Society] {
-        guard let user = user else { return [] }
-        if user.role == .admin { return societies }
-        return societies.filter { user.societyIDs.contains($0.id) }
+    public func visibleInvoiceCompanyIDs(for user: User?) -> Set<UUID>? {
+        guard let user = user else { return nil }
+        if user.role == .admin { return nil }
+        return Set(user.societyIDs)
     }
 
-    public func visibleInvoiceCompanyIDs(for user: User?) -> Set<UUID>? {
+    public func visibleDirectoryEntryIDs(for user: User?) -> Set<UUID>? {
         guard let user = user else { return nil }
         if user.role == .admin { return nil }
         return Set(user.societyIDs)

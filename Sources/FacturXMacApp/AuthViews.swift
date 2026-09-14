@@ -66,12 +66,11 @@ struct LoginView: View {
 
 struct AdministrationView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var directory: PartyDirectory
     @State private var selectedUserID: UUID?
-    @State private var selectedSocietyID: UUID?
+    @State private var selectedEntryID: UUID?
     @State private var editingUser: User?
     @State private var creatingUser = false
-    @State private var editingSociety: Society?
-    @State private var creatingSociety = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,7 +82,7 @@ struct AdministrationView: View {
                 HStack(alignment: .top, spacing: 16) {
                     usersSection
                         .frame(maxWidth: .infinity)
-                    societiesSection
+                    companiesSection
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -93,8 +92,8 @@ struct AdministrationView: View {
                 UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
                                onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw) })
                     .padding(12)
-            } else if let id = selectedSocietyID, let society = auth.societies.first(where: { $0.id == id }) {
-                SocietyDetailCard(society: society)
+            } else if let id = selectedEntryID, let entry = directory.entries.first(where: { $0.id == id }) {
+                CompanyDetailCard(entry: entry)
                     .padding(12)
             } else {
                 VStack(spacing: 6) {
@@ -130,22 +129,6 @@ struct AdministrationView: View {
                 editingUser = nil
             }
         }
-        .sheet(isPresented: $creatingSociety) {
-            SocietyEditorSheet { name, siren, entryID in
-                auth.upsert(Society(name: name, siren: siren, entryID: entryID))
-                creatingSociety = false
-            }
-        }
-        .sheet(item: $editingSociety) { society in
-            SocietyEditorSheet(existing: society) { name, siren, entryID in
-                var s = society
-                s.name = name
-                s.siren = siren
-                s.entryID = entryID
-                auth.upsert(s)
-                editingSociety = nil
-            }
-        }
     }
 
     private var usersSection: some View {
@@ -158,7 +141,7 @@ struct AdministrationView: View {
             }
             List(auth.users, selection: Binding(
                 get: { selectedUserID },
-                set: { selectedUserID = $0; selectedSocietyID = nil }
+                set: { selectedUserID = $0; selectedEntryID = nil }
             )) { user in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -197,37 +180,36 @@ struct AdministrationView: View {
         }
     }
 
-    private var societiesSection: some View {
+    private var companiesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Sociétés (périmètre)").font(.headline)
+                Text("Sociétés (annuaire)").font(.headline)
                 Spacer()
-                Button { creatingSociety = true } label: { Label("Nouveau", systemImage: "plus") }
-                    .buttonStyle(.bordered)
+                Text("Fournisseurs de l'annuaire").font(.caption2).foregroundStyle(.secondary)
             }
-            List(auth.societies, selection: Binding(
-                get: { selectedSocietyID },
-                set: { selectedSocietyID = $0; selectedUserID = nil }
-            )) { society in
+            List(availableSocieties, selection: Binding(
+                get: { selectedEntryID },
+                set: { selectedEntryID = $0; selectedUserID = nil }
+            )) { entry in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(society.displayName).font(.body.weight(.medium))
-                    if let s = society.siren, !s.isEmpty {
+                    Text(entry.displayName).font(.body.weight(.medium))
+                    if let s = entry.party.siren, !s.isEmpty {
                         Text("SIREN : \(s)").font(.caption2).foregroundStyle(.secondary)
                     }
-                    Text("\(auth.users.filter { $0.societyIDs.contains(society.id) }.count) utilisateur(s)")
+                    Text("\(auth.users.filter { $0.societyIDs.contains(entry.id) }.count) utilisateur(s)")
                         .font(.caption2).foregroundStyle(.tertiary)
-                }
-                .contextMenu {
-                    Button { editingSociety = society } label: { Label("Modifier", systemImage: "pencil") }
-                    Divider()
-                    Button(role: .destructive) {
-                        auth.delete(society)
-                        if selectedSocietyID == society.id { selectedSocietyID = nil }
-                    } label: { Label("Supprimer", systemImage: "trash") }
                 }
             }
             .frame(minHeight: 240)
+            if availableSocieties.isEmpty {
+                Text("Aucune société. Créez une fiche fournisseur dans l'onglet Annuaire pour la proposer comme périmètre.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.top, 4)
+            }
         }
+    }
+
+    private var availableSocieties: [DirectoryEntry] {
+        directory.entries.filter { !$0.isArchived && ($0.kind == .fournisseur || $0.kind == .both) }
     }
 }
 
@@ -251,11 +233,11 @@ struct UserDetailCard: View {
                 Text("Sociétés du périmètre").font(.headline)
                 if user.role == .admin {
                     Text("L'administrateur accède à toutes les sociétés.").font(.caption).foregroundStyle(.secondary)
-                } else if auth.societies.isEmpty {
-                    Text("Aucune société définie.").font(.caption).foregroundStyle(.secondary)
+                } else if auth.availableSocieties().isEmpty {
+                    Text("Aucune société (fiche fournisseur) définie dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(auth.societies) { s in
+                        ForEach(auth.availableSocieties()) { s in
                             Toggle(isOn: Binding(
                                 get: { user.societyIDs.contains(s.id) },
                                 set: { checked in
@@ -288,21 +270,21 @@ struct UserDetailCard: View {
     }
 }
 
-struct SocietyDetailCard: View {
-    let society: Society
+struct CompanyDetailCard: View {
+    let entry: DirectoryEntry
 
     var body: some View {
-        GroupBox("Société : \(society.displayName)") {
+        GroupBox("Société : \(entry.displayName)") {
             VStack(alignment: .leading, spacing: 8) {
-                LabeledContent("Nom") { Text(society.displayName) }
-                if let s = society.siren, !s.isEmpty {
+                LabeledContent("Nom") { Text(entry.displayName) }
+                if let s = entry.party.siren, !s.isEmpty {
                     LabeledContent("SIREN") { Text(s) }
                 } else {
                     LabeledContent("SIREN") { Text("—").foregroundStyle(.secondary) }
                 }
-                LabeledContent("Lien annuaire") {
-                    Text(society.entryID.map { "Fiche \($0.uuidString.prefix(8))" } ?? "Aucun")
-                        .foregroundStyle(.secondary)
+                LabeledContent("Type") { Text(entry.kind.label) }
+                if let city = entry.party.city.trimmingCharacters(in: .whitespaces) as String?, !city.isEmpty {
+                    LabeledContent("Ville") { Text(city) }
                 }
             }
             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
@@ -314,6 +296,7 @@ struct UserEditorSheet: View {
     var existing: User?
     let onSave: (String, String, String, UserRole, [UUID]) -> Void
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var directory: PartyDirectory
     @Environment(\.dismiss) private var dismiss
 
     @State private var username = ""
@@ -321,7 +304,6 @@ struct UserEditorSheet: View {
     @State private var password = ""
     @State private var role: UserRole = .comptable
     @State private var societyIDs: Set<UUID> = []
-    @State private var error: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -333,33 +315,33 @@ struct UserEditorSheet: View {
             }
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Identifiant").frame(width: 130, alignment: .leading)
+                    Text("Identifiant").frame(width: 140, alignment: .leading)
                     TextField("identifiant", text: $username).textFieldStyle(.roundedBorder)
                 }
                 HStack {
-                    Text("Nom affiché").frame(width: 130, alignment: .leading)
+                    Text("Nom affiché").frame(width: 140, alignment: .leading)
                     TextField("Nom affiché", text: $displayName).textFieldStyle(.roundedBorder)
                 }
                 HStack {
                     Text(existing == nil ? "Mot de passe" : "Nouveau mot de passe (optionnel)")
-                        .frame(width: 130, alignment: .leading)
+                        .frame(width: 140, alignment: .leading)
                     SecureField("mot de passe", text: $password).textFieldStyle(.roundedBorder)
                 }
                 HStack {
-                    Text("Rôle").frame(width: 130, alignment: .leading)
+                    Text("Rôle").frame(width: 140, alignment: .leading)
                     Picker("Rôle", selection: $role) {
                         ForEach(UserRole.allCases, id: \.self) { r in Text(r.label).tag(r) }
-                    }.pickerStyle(.segmented).frame(width: 280)
+                    }.pickerStyle(.segmented).frame(width: 300)
                 }
                 if role == .comptable {
                     Divider()
-                    Text("Sociétés du périmètre").font(.headline)
-                    if auth.societies.isEmpty {
-                        Text("Aucune société définie. Créez-en d'abord dans la section Sociétés.")
+                    Text("Sociétés du périmètre (fiches fournisseurs de l'annuaire)").font(.headline)
+                    if availableSocieties.isEmpty {
+                        Text("Aucune société disponible. Créez d'abord une fiche fournisseur dans l'onglet Annuaire.")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(auth.societies) { s in
+                            ForEach(availableSocieties) { s in
                                 Toggle(isOn: Binding(
                                     get: { societyIDs.contains(s.id) },
                                     set: { checked in
@@ -371,25 +353,25 @@ struct UserEditorSheet: View {
                                 }
                             }
                         }
+                        if societyIDs.isEmpty {
+                            Text("Au moins une société est requise pour un comptable.")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
                     }
-                }
-                if let error = error {
-                    Text(error).font(.caption).foregroundStyle(.red)
                 }
             }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    let pw = existing == nil ? password : password
-                    onSave(username, displayName, pw, role, Array(societyIDs))
+                    onSave(username, displayName, password, role, Array(societyIDs))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(username.trimmingCharacters(in: .whitespaces).isEmpty || (existing == nil && password.isEmpty))
+                .disabled(!canSave)
             }
         }
         .padding()
-        .frame(width: 560, height: 460)
+        .frame(width: 580, height: 480)
         .onAppear {
             if let u = existing {
                 username = u.username
@@ -399,74 +381,15 @@ struct UserEditorSheet: View {
             }
         }
     }
-}
 
-struct SocietyEditorSheet: View {
-    var existing: Society?
-    let onSave: (String, String?, UUID?) -> Void
-    @EnvironmentObject var auth: AuthStore
-    @EnvironmentObject var directory: PartyDirectory
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var name = ""
-    @State private var siren = ""
-    @State private var entryID: UUID?
-
-    var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text(existing == nil ? "Nouvelle société" : "Modifier la société")
-                    .font(.title3.bold())
-                Spacer()
-                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Nom").frame(width: 130, alignment: .leading)
-                    TextField("Nom de la société", text: $name).textFieldStyle(.roundedBorder)
-                }
-                HStack {
-                    Text("SIREN").frame(width: 130, alignment: .leading)
-                    TextField("SIREN", text: $siren).textFieldStyle(.roundedBorder).frame(width: 200)
-                }
-                Divider()
-                Text("Fiche fournisseur de l'annuaire (émetteur)").font(.headline)
-                Text("Liez cette société à une fiche fournisseur de l'annuaire pour réutiliser ses coordonnées comme émetteur par défaut.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Picker("Fiche annuaire", selection: Binding(
-                    get: { entryID ?? Self.noneSentinel },
-                    set: { entryID = $0 }
-                )) {
-                    Text("Aucune").tag(Self.noneSentinel)
-                    ForEach(directory.entries.filter { $0.kind == .fournisseur || $0.kind == .both }) { e in
-                        Text(e.displayName).tag(e.id)
-                    }
-                }
-            }
-            HStack {
-                Spacer()
-                Button("Enregistrer") {
-                    let trimmedSiren = siren.trimmingCharacters(in: .whitespaces)
-                    let linked = entryID == nil || entryID == Self.noneSentinel ? nil : entryID
-                    onSave(name, trimmedSiren.isEmpty ? nil : trimmedSiren, linked)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding()
-        .frame(width: 520, height: 380)
-        .onAppear {
-            if let s = existing {
-                name = s.name
-                siren = s.siren ?? ""
-                entryID = s.entryID ?? Self.noneSentinel
-            } else {
-                entryID = Self.noneSentinel
-            }
-        }
+    private var availableSocieties: [DirectoryEntry] {
+        directory.entries.filter { !$0.isArchived && ($0.kind == .fournisseur || $0.kind == .both) }
     }
 
-    static let noneSentinel = UUID()
+    private var canSave: Bool {
+        let nameOK = !username.trimmingCharacters(in: .whitespaces).isEmpty
+        let pwOK = existing != nil || !password.isEmpty
+        let scopeOK = role == .admin || !societyIDs.isEmpty
+        return nameOK && pwOK && scopeOK
+    }
 }

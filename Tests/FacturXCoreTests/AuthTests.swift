@@ -63,13 +63,13 @@ final class AuthTests: XCTestCase {
     func testCreateUserDuplicateRejected() throws {
         let store = AuthStore()
         store.users = []
-        _ = try store.createUser(username: "alice", password: "pw", role: .comptable)
-        XCTAssertThrowsError(try store.createUser(username: "alice", password: "pw")) { error in
+        _ = try store.createUser(username: "alice", password: "pw", role: .admin)
+        XCTAssertThrowsError(try store.createUser(username: "alice", password: "pw", role: .admin)) { error in
             guard case AuthError.duplicateUsername = error else {
                 return XCTFail("Attendu AuthError.duplicateUsername, eu \(error)")
             }
         }
-        XCTAssertThrowsError(try store.createUser(username: "bob", password: "")) { error in
+        XCTAssertThrowsError(try store.createUser(username: "bob", password: "", role: .admin)) { error in
             guard case AuthError.emptyPassword = error else {
                 return XCTFail("Attendu AuthError.emptyPassword, eu \(error)")
             }
@@ -79,7 +79,7 @@ final class AuthTests: XCTestCase {
     func testUpdatePasswordRehashes() throws {
         let store = AuthStore()
         store.users = []
-        let user = try store.createUser(username: "jo", password: "oldpw")
+        let user = try store.createUser(username: "jo", password: "oldpw", role: .admin)
         let oldHash = store.users.first(where: { $0.id == user.id })?.passwordHash
         try store.updatePassword(user, newPassword: "newpw")
         let updated = store.users.first(where: { $0.id == user.id })
@@ -89,11 +89,22 @@ final class AuthTests: XCTestCase {
         XCTAssertEqual(logged.id, user.id)
     }
 
-    func testPerimeterFiltering() {
+    private func makeDirectoryStore() -> (AuthStore, PartyDirectory, [DirectoryEntry]) {
         let store = AuthStore()
-        let s1 = Society(name: "Société A")
-        let s2 = Society(name: "Société B")
-        store.societies = [s1, s2]
+        store.users = []
+        let dir = PartyDirectory()
+        dir.entries = []
+        store.attachDirectory(dir)
+        let e1 = DirectoryEntry(kind: .fournisseur, party: InvoiceParty(name: "Société A", street: "", postcode: "", city: ""))
+        let e2 = DirectoryEntry(kind: .fournisseur, party: InvoiceParty(name: "Société B", street: "", postcode: "", city: ""))
+        let client = DirectoryEntry(kind: .client, party: InvoiceParty(name: "Client X", street: "", postcode: "", city: ""))
+        dir.entries = [e1, e2, client]
+        return (store, dir, [e1, e2, client])
+    }
+
+    func testPerimeterFiltering() {
+        let (store, _, entries) = makeDirectoryStore()
+        let s1 = entries[0]; let s2 = entries[1]
 
         let admin = User(username: "admin", role: .admin, societyIDs: [])
         let comptable = User(username: "compta", role: .comptable, societyIDs: [s1.id])
@@ -110,28 +121,24 @@ final class AuthTests: XCTestCase {
     }
 
     func testVisibleSocietiesScopedForComptable() {
-        let store = AuthStore()
-        let s1 = Society(name: "A")
-        let s2 = Society(name: "B")
-        let s3 = Society(name: "C")
-        store.societies = [s1, s2, s3]
+        let (store, _, entries) = makeDirectoryStore()
+        let s1 = entries[0]; let s2 = entries[1]
         let admin = User(username: "admin", role: .admin, societyIDs: [])
-        let comptable = User(username: "compta", role: .comptable, societyIDs: [s2.id, s3.id])
-        XCTAssertEqual(Set(store.visibleSocieties(for: admin).map(\.name)), Set(["A", "B", "C"]))
-        XCTAssertEqual(Set(store.visibleSocieties(for: comptable).map(\.name)), Set(["B", "C"]))
+        let comptable = User(username: "compta", role: .comptable, societyIDs: [s2.id])
+        XCTAssertEqual(Set(store.visibleSocieties(for: admin).map(\.displayName)), Set(["Société A", "Société B"]))
+        XCTAssertEqual(Set(store.visibleSocieties(for: comptable).map(\.displayName)), Set(["Société B"]))
         XCTAssertTrue(store.visibleSocieties(for: nil).isEmpty)
+        XCTAssertEqual(Set(store.availableSocieties().map(\.displayName)), Set(["Société A", "Société B"]),
+                     "availableSocieties ne doit renvoyer que les fiches fournisseurs")
     }
 
-    func testDeleteSocietyCleansPerimeters() {
-        let store = AuthStore()
-        let s1 = Society(name: "A")
-        store.societies = [s1]
-        let user = User(username: "u", role: .comptable, societyIDs: [s1.id])
-        store.users = [user]
-        store.currentUser = user
-        store.delete(s1)
-        XCTAssertTrue(store.societies.isEmpty)
-        XCTAssertTrue(store.users.first(where: { $0.id == user.id })?.societyIDs.isEmpty ?? false)
+    func testCreateComptableRequiresSociety() throws {
+        let (store, _, _) = makeDirectoryStore()
+        XCTAssertThrowsError(try store.createUser(username: "c", password: "pw", role: .comptable, societyIDs: [])) { error in
+            guard case AuthError.missingSociety = error else {
+                return XCTFail("Attendu AuthError.missingSociety, eu \(error)")
+            }
+        }
     }
 
     func testInvoiceCompanyIDRetrocompatibility() throws {

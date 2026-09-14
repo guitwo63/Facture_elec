@@ -109,6 +109,7 @@ struct FacturXMacApp: App {
                 .environmentObject(auth)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
+                    auth.attachDirectory(directory)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -766,9 +767,13 @@ struct InvoiceEditorView: View {
 
     private var linkedCreditNotes: [Invoice] {
         guard !invoice.number.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return store.invoices.filter {
-            $0.type == .creditNote
-                && ($0.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces)
+        let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
+        return store.invoices.filter { inv in
+            guard inv.type == .creditNote
+                && (inv.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces) else { return false }
+            if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
+            if scope != nil && inv.companyID == nil { return false }
+            return true
         }
     }
 
@@ -1037,6 +1042,7 @@ struct PartyPickerSheet: View {
     let onPick: (DirectoryEntry) -> Void
 
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var auth: AuthStore
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var creatingNew = false
@@ -1045,8 +1051,11 @@ struct PartyPickerSheet: View {
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         let roleKind = role.defaultKind
-        let active = directory.entries.filter {
+        var active = directory.entries.filter {
             !$0.isArchived && ($0.kind == roleKind || $0.kind == .both)
+        }
+        if role == .seller, let scope = auth.visibleDirectoryEntryIDs(for: auth.currentUser) {
+            active = active.filter { scope.contains($0.id) }
         }
         let base: [DirectoryEntry]
         if q.isEmpty {
