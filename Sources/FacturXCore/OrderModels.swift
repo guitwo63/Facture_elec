@@ -268,6 +268,17 @@ public final class OrderStatusStore: ObservableObject {
         defaults.removeObject(forKey: storageKey)
     }
 
+    public func remove(at idx: Int) {
+        guard overrides.indices.contains(idx) else { return }
+        overrides.remove(at: idx)
+        save()
+    }
+
+    public func append(_ override: OrderStatusOverride) {
+        overrides.append(override)
+        save()
+    }
+
     public func override(for status: OrderStatus) -> OrderStatusOverride {
         overrides.first { $0.id == status.rawValue } ?? OrderStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
     }

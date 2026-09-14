@@ -2183,7 +2183,6 @@ struct SettingsTabView: View {
 
 struct OrderStatusSettingsView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
-    @State private var hexInput: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2191,14 +2190,13 @@ struct OrderStatusSettingsView: View {
                 Text("Statuts des commandes").font(.title2.bold())
                 Spacer()
                 Button {
-                    statusStore.reset()
                     statusStore.save()
-                } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
-                    .buttonStyle(.bordered)
+                } label: { Label("Enregistrer", systemImage: "square.and.arrow.down") }
+                    .buttonStyle(.borderedProminent)
             }
             .padding(12)
             Divider()
-            Text("Personnalisez le libellé, l'icône SF Symbol et la couleur (hex sans #) de chaque statut de commande.")
+            Text("Personnalisez le libellé, l'icône SF Symbol et la couleur de chaque statut de commande.")
                 .font(.caption).foregroundStyle(.secondary).padding(12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -2215,12 +2213,9 @@ struct OrderStatusSettingsView: View {
     private func statusRow(_ idx: Int) -> some View {
         let binding = Binding<OrderStatusOverride>(
             get: { statusStore.overrides[idx] },
-            set: { statusStore.overrides[idx] = $0; statusStore.save() }
+            set: { statusStore.overrides[idx] = $0 }
         )
         return HStack(spacing: 12) {
-            Circle()
-                .fill(Color(hex: binding.wrappedValue.hexColor))
-                .frame(width: 14, height: 14)
             Image(systemName: binding.wrappedValue.systemImage)
                 .frame(width: 22)
                 .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
@@ -2228,14 +2223,23 @@ struct OrderStatusSettingsView: View {
                 .frame(minWidth: 180)
             TextField("Icône SF", text: binding.systemImage)
                 .frame(width: 120)
-            HStack(spacing: 4) {
-                Text("#").font(.caption).foregroundStyle(.secondary)
-                TextField("Couleur", text: Binding(
-                    get: { binding.wrappedValue.hexColor.uppercased() },
-                    set: { binding.wrappedValue.hexColor = $0.uppercased() }
-                ))
-                .frame(width: 80)
+            ColorPicker(selection: Binding(
+                get: { Color(hex: binding.wrappedValue.hexColor) },
+                set: { newColor in
+                    statusStore.overrides[idx].hexColor = hexString(from: newColor)
+                }
+            )) {
+                Text("Couleur")
             }
+            .labelsHidden()
+            Spacer()
+            Button(role: .destructive) {
+                statusStore.remove(at: idx)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .help("Supprimer ce statut")
         }
     }
 }
