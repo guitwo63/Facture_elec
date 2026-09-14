@@ -2667,9 +2667,10 @@ struct SettingsTabView: View {
             Picker("", selection: $settingsTab) {
                 Text("Profil").tag(0)
                 if auth.currentUser?.isAdmin == true {
-                    Text("Commandes").tag(1)
-                    Text("Application").tag(2)
-                    Text("Journal").tag(3)
+                    Text("Tables").tag(1)
+                    Text("Commandes").tag(2)
+                    Text("Application").tag(3)
+                    Text("Journal").tag(4)
                 }
             }
             .pickerStyle(.segmented)
@@ -2679,8 +2680,10 @@ struct SettingsTabView: View {
             case 0:
                 ProfileSettingsView()
             case 1:
+                ValueTablesView()
+            case 2:
                 OrderStatusSettingsView()
-            case 3:
+            case 4:
                 AuditLogView()
             default:
                 ApplicationSettingsView()
@@ -2999,6 +3002,304 @@ struct ApplicationSettingsView: View {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
         return nil
+    }
+}
+
+// MARK: - Tables de valeurs paramétrées
+
+enum ValueTable: String, CaseIterable, Identifiable {
+    case orderStatuses
+    case tags
+    case kindColors
+    case currencies
+    case units
+    case countries
+    case endpointSchemes
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .orderStatuses: return "Statuts des commandes"
+        case .tags: return "Tags des tiers"
+        case .kindColors: return "Couleurs des types de tiers"
+        case .currencies: return "Devises"
+        case .units: return "Unités"
+        case .countries: return "Pays"
+        case .endpointSchemes: return "Schémas d'identifiant"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .orderStatuses: return "list.bullet.rectangle"
+        case .tags: return "tag"
+        case .kindColors: return "paintpalette"
+        case .currencies: return "dollarsign.circle"
+        case .units: return "ruler"
+        case .countries: return "globe"
+        case .endpointSchemes: return "number"
+        }
+    }
+
+    var isEditable: Bool {
+        switch self {
+        case .orderStatuses, .tags, .kindColors: return true
+        default: return false
+        }
+    }
+}
+
+struct ValueTablesView: View {
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColors: KindColorStore
+    @State private var selectedTable: ValueTable = .orderStatuses
+    @State private var searchQuery = ""
+    @State private var newTagName = ""
+    @State private var newTagHex = "555555"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Filtrer les tables et les valeurs", text: $searchQuery)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(10)
+            Divider()
+            HStack(alignment: .top, spacing: 0) {
+                tablesList
+                    .frame(width: 220)
+                Divider()
+                valuesPanel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var filteredTables: [ValueTable] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return ValueTable.allCases }
+        return ValueTable.allCases.filter { $0.label.lowercased().contains(q) }
+    }
+
+    private var tablesList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(filteredTables) { table in
+                    Button {
+                        selectedTable = table
+                    } label: {
+                        HStack {
+                            Image(systemName: table.systemImage)
+                                .foregroundStyle(selectedTable == table ? Color.accentColor : .secondary)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(table.label).font(.body.weight(selectedTable == table ? .semibold : .regular))
+                                Text(table.isEditable ? "modifiable" : "lecture seule")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            if selectedTable == table {
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(selectedTable == table ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private var valuesPanel: some View {
+        switch selectedTable {
+        case .orderStatuses: orderStatusesPanel
+        case .tags: tagsPanel
+        case .kindColors: kindColorsPanel
+        case .currencies: refPanel(NormRefs.currencies)
+        case .units: refPanel(NormRefs.units)
+        case .countries: refPanel(NormRefs.countries)
+        case .endpointSchemes: refPanel(NormRefs.endpointSchemes)
+        }
+    }
+
+    private var orderStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des commandes").font(.title3.bold())
+                Spacer()
+                Button {
+                    let id = "custom-\(UUID().uuidString.prefix(8))"
+                    statusStore.append(OrderStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
+                } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(filteredStatuses) { override in
+                        statusRow(override)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private var filteredStatuses: [OrderStatusOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return statusStore.overrides }
+        return statusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    private func statusRow(_ override: OrderStatusOverride) -> some View {
+        let idx = statusStore.overrides.firstIndex(where: { $0.id == override.id }) ?? 0
+        let binding = Binding<OrderStatusOverride>(
+            get: { statusStore.overrides[idx] },
+            set: { statusStore.overrides[idx] = $0; statusStore.save() }
+        )
+        return HStack(spacing: 12) {
+            Image(systemName: binding.wrappedValue.systemImage)
+                .frame(width: 22)
+                .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
+            TextField("Libellé", text: binding.label)
+                .frame(minWidth: 180)
+            TextField("Icône SF", text: binding.systemImage)
+                .frame(width: 120)
+            ColorPicker(selection: Binding(
+                get: { Color(hex: binding.wrappedValue.hexColor) },
+                set: { newColor in statusStore.overrides[idx].hexColor = hexString(from: newColor); statusStore.save() }
+            )) { Text("Couleur") }
+            .labelsHidden()
+            Spacer()
+            Button(role: .destructive) {
+                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    statusStore.remove(at: i)
+                }
+            } label: { Image(systemName: "minus.circle.fill") }
+                .buttonStyle(.borderless)
+                .help("Supprimer ce statut")
+        }
+    }
+
+    private var tagsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Tags des tiers").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(filteredTags) { tag in
+                        HStack {
+                            Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
+                            TextField("Nom du tag", text: Binding(
+                                get: { tag.name },
+                                set: { newName in var t = tag; t.name = newName; tagStore.upsert(t) }
+                            )).frame(maxWidth: 220)
+                            ColorPicker("", selection: Binding(
+                                get: { Color(hex: tag.hexColor) },
+                                set: { newColor in var t = tag; t.hexColor = hexString(from: newColor); tagStore.upsert(t) }
+                            )).labelsHidden().frame(width: 40)
+                            Spacer()
+                            Button(role: .destructive) { tagStore.delete(tag) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    Divider()
+                    Text("Ajouter un tag").font(.caption.bold())
+                    HStack {
+                        ColorPicker("", selection: Binding(
+                            get: { Color(hex: newTagHex) },
+                            set: { newTagHex = hexString(from: $0) }
+                        )).labelsHidden().frame(width: 30)
+                        TextField("Nom du nouveau tag", text: $newTagName)
+                        Button {
+                            guard !newTagName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                            tagStore.upsert(PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex))
+                            newTagName = ""
+                            newTagHex = "555555"
+                        } label: { Label("Ajouter", systemImage: "plus.circle.fill") }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private var filteredTags: [PartyTag] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return tagStore.tags }
+        return tagStore.tags.filter { $0.name.lowercased().contains(q) }
+    }
+
+    private var kindColorsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Couleurs des types de tiers").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(DirectoryEntryKind.allCases, id: \.self) { kind in
+                        HStack {
+                            Text(kind.label).frame(width: 200, alignment: .leading)
+                            ColorPicker(selection: Binding(
+                                get: { Color(hex: kindColors.hexColor(for: kind)) },
+                                set: { newColor in kindColors.colors[kind] = hexString(from: newColor); kindColors.save() }
+                            )) { Text(kind.label) }
+                            .labelsHidden()
+                            Text(kindColors.hexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func refPanel(_ refs: [NormRef]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(selectedTable.label).font(.title3.bold())
+                Spacer()
+                Text("Lecture seule (référentiel normatif)").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(filteredRefs(refs)) { ref in
+                        HStack {
+                            Text(ref.code).font(.body.monospaced()).frame(width: 100, alignment: .leading)
+                            Text(ref.label).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func filteredRefs(_ refs: [NormRef]) -> [NormRef] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return refs }
+        return refs.filter { $0.code.lowercased().contains(q) || $0.label.lowercased().contains(q) }
     }
 }
 
