@@ -214,6 +214,30 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         if rate == 0 { return "Z" }
         return "S"
     }
+
+    public func toInvoice(number: String) -> Invoice {
+        return Invoice(
+            number: number,
+            type: .commercialInvoice,
+            status: .draft,
+            issueDate: Date(),
+            dueDate: Date().addingTimeInterval(30 * 86400),
+            currency: currency,
+            profile: .en16931,
+            seller: buyer,
+            buyer: seller,
+            companyID: companyID,
+            buyerReference: buyerReference,
+            purchaseOrderRef: quotationRef,
+            contractRef: contractRef,
+            lines: lines,
+            paymentIBAN: buyer.iban,
+            paymentBIC: buyer.bic,
+            paymentTerms: buyer.paymentTerms,
+            notes: notes,
+            billingMode: .m1
+        )
+    }
 }
 
 public struct OrderStatusOverride: Codable, Hashable, Identifiable {

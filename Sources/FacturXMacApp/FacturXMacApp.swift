@@ -3315,12 +3315,15 @@ struct OrderEditorView: View {
     @Binding var order: SalesOrder
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
     @State private var isLocked = false
     @State private var showUnlockAlert = false
+    @State private var createdInvoiceNumber: String?
 
     private var hasMandatoryWarnings: Bool {
         let b = order.buyer
@@ -3373,6 +3376,8 @@ struct OrderEditorView: View {
                     .buttonStyle(.bordered)
                 Button("Générer l'Order-X") { export() }
                     .buttonStyle(.borderedProminent)
+                Button("Créer la facture") { createInvoice() }
+                    .buttonStyle(.bordered)
             }
             .padding(12)
             Divider()
@@ -3390,6 +3395,10 @@ struct OrderEditorView: View {
                         .onChange(of: order.number) { _ in exportedURL = nil }
                         .onChange(of: order.seller.name) { _ in exportedURL = nil }
                         .onChange(of: order.buyer.name) { _ in exportedURL = nil }
+                }
+                if let n = createdInvoiceNumber {
+                    Text("Facture créée : \(n)").font(.caption).foregroundStyle(.green)
+                        .onChange(of: order.number) { _ in createdInvoiceNumber = nil }
                 }
 
                 if hasMandatoryWarnings {
@@ -3604,6 +3613,13 @@ struct OrderEditorView: View {
     private func runValidation() {
         validation = OrderXValidator().validate(order: order)
         showValidation = true
+    }
+
+    private func createInvoice() {
+        let number = store.nextNumber(companyID: order.companyID)
+        let invoice = order.toInvoice(number: number)
+        store.upsert(invoice)
+        createdInvoiceNumber = number
     }
 
     private func exportXML() {
