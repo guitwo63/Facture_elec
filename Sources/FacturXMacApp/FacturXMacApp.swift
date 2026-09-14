@@ -324,7 +324,7 @@ struct RootView: View {
         let name = auth.currentUser?.username ?? "system"
         store.actorName = name
         orderStore.actorName = name
-        directory.actorName = name
+        PartyDirectory.shared.actorName = name
     }
 
     private func defaultDraftCompanyID() -> UUID? {
