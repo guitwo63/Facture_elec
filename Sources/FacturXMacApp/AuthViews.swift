@@ -7,6 +7,10 @@ struct LoginView: View {
     @State private var password = ""
     @State private var errorMessage: String?
     @State private var attempting = false
+    @State private var mustChangePasswordUser: User?
+    @State private var newPassword = ""
+    @State private var newPasswordConfirm = ""
+    @State private var newPasswordError: String?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -51,17 +55,99 @@ struct LoginView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        .sheet(item: $mustChangePasswordUser) { user in
+            VStack(spacing: 16) {
+                Text("Changer le mot de passe").font(.title3.bold())
+                Text("Vous devez définir un nouveau mot de passe avant de continuer.")
+                    .font(.caption).foregroundStyle(.secondary)
+                SecureField("Nouveau mot de passe", text: $newPassword)
+                    .textFieldStyle(.roundedBorder).frame(width: 300)
+                SecureField("Confirmer", text: $newPasswordConfirm)
+                    .textFieldStyle(.roundedBorder).frame(width: 300)
+                if let err = newPasswordError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+                HStack {
+                    Button("Annuler") {
+                        auth.logout()
+                        mustChangePasswordUser = nil
+                        newPassword = ""; newPasswordConfirm = ""; newPasswordError = nil
+                    }.keyboardShortcut(.cancelAction)
+                    Button("Enregistrer") {
+                        newPasswordError = nil
+                        guard !newPassword.isEmpty, newPassword == newPasswordConfirm else {
+                            newPasswordError = "Les mots de passe ne correspondent pas."
+                            return
+                        }
+                        do {
+                            try auth.updatePassword(user, newPassword: newPassword)
+                            mustChangePasswordUser = nil
+                            newPassword = ""; newPasswordConfirm = ""
+                        } catch {
+                            newPasswordError = error.localizedDescription
+                        }
+                    }.buttonStyle(.borderedProminent)
+                }
+            }.padding(40)
+        }
     }
 
     private func attemptLogin() {
         attempting = true
         errorMessage = nil
         do {
-            _ = try auth.login(username: username, password: password)
+            let user = try auth.login(username: username, password: password)
+            if user.mustChangePassword && !auth.testBypassSecurity {
+                mustChangePasswordUser = user
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
         attempting = false
+    }
+}
+
+// MARK: - Journal d'audit (B1)
+
+struct AuditLogView: View {
+    @EnvironmentObject var auth: AuthStore
+    @State private var query = ""
+
+    var filtered: [AuditLogEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return auth.audit.entries }
+        return auth.audit.entries.filter {
+            $0.actor.lowercased().contains(q) || $0.action.lowercased().contains(q)
+            || $0.target.lowercased().contains(q) || $0.details.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Journal d'audit").font(.title2.bold())
+                Spacer()
+                Text("\(auth.audit.entries.count) / \(auth.audit.maxEntries)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button(role: .destructive) {
+                    auth.audit.clear()
+                } label: { Label("Vider", systemImage: "trash") }
+                    .buttonStyle(.bordered)
+            }.padding(10)
+            TextField("Rechercher", text: $query)
+                .textFieldStyle(.roundedBorder).padding(.horizontal, 10)
+            Divider()
+            Table(filtered) {
+                TableColumn("Date") { e in
+                    Text(e.timestamp, format: .dateTime.day().month().year().hour().minute())
+                        .font(.caption.monospacedDigit())
+                }.width(140)
+                TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(140)
+                TableColumn("Action") { e in Text(e.action).font(.caption) }.width(120)
+                TableColumn("Cible") { e in Text(e.target).font(.caption) }.width(140)
+                TableColumn("Détails") { e in Text(e.details).font(.caption) }
+            }
+        }
     }
 }
 
@@ -91,7 +177,7 @@ struct UserManagementView: View {
             Divider()
             if let id = selectedUserID, let user = auth.users.first(where: { $0.id == id }) {
                 UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
-                               onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw) })
+                               onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw, forceChange: true) })
                     .padding(12)
             } else if let id = selectedEntryID, let entry = directory.entries.first(where: { $0.id == id }) {
                 CompanyDetailCard(entry: entry)
@@ -127,7 +213,7 @@ struct UserManagementView: View {
                 updated.defaultSellerEntryID = defaultSeller
                 auth.upsert(updated)
                 if !password.isEmpty {
-                    try? auth.updatePassword(updated, newPassword: password)
+                    try? auth.updatePassword(updated, newPassword: password, forceChange: true)
                 }
                 editingUser = nil
             }
@@ -348,7 +434,7 @@ struct UserEditorSheet: View {
                         ForEach(UserRole.allCases, id: \.self) { r in Text(r.label).tag(r) }
                     }.pickerStyle(.segmented).frame(width: 300)
                 }
-                if role == .comptable {
+                if role == .comptable || role == .acheteur {
                     Divider()
                     Text("Sociétés du périmètre (fiches fournisseurs de l'annuaire)").font(.headline)
                     if availableSocieties.isEmpty {
@@ -470,7 +556,7 @@ struct ProfileSettingsView: View {
                                     .padding(.horizontal, 6).padding(.vertical, 1)
                                     .background(.quaternary, in: Capsule())
                             }
-                            if user.role == .comptable, !user.societyIDs.isEmpty {
+                            if user.role == .comptable || user.role == .acheteur, !user.societyIDs.isEmpty {
                                 Divider()
                                 Text("Sociétés du périmètre").font(.caption.bold())
                                 ForEach(auth.visibleSocieties(for: user)) { s in

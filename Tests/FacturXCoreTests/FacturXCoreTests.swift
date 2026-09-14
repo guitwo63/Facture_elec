@@ -52,6 +52,78 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertEqual(inv.grandTotal, 1620.00, accuracy: 0.001)
     }
 
+    func testExportInvoiceCSVContainsHeaderAndData() {
+        let csv = ExportGenerator().invoiceCSV([sampleInvoice()])
+        XCTAssertTrue(csv.contains("Numéro;Type;Statut"))
+        XCTAssertTrue(csv.contains("2026-0001"))
+        XCTAssertTrue(csv.contains("Mon Entreprise SARL"))
+        XCTAssertTrue(csv.contains("Client Exemple SAS"))
+        XCTAssertTrue(csv.contains("1620.00"))
+    }
+
+    func testExportInvoiceLinesCSVContainsLines() {
+        let csv = ExportGenerator().invoiceLinesCSV([sampleInvoice()])
+        XCTAssertTrue(csv.contains("N° facture;Type"))
+        XCTAssertTrue(csv.contains("Prestation de conseil"))
+        XCTAssertTrue(csv.contains("Frais de déplacement"))
+    }
+
+    func testExportWriteCSVBeginsWithBOM() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("export-bom-\(UUID().uuidString).csv")
+        try ExportGenerator().writeCSV("Numéro;Type\r\nA;B", to: tmp)
+        let data = try Data(contentsOf: tmp)
+        XCTAssertEqual(data.prefix(3), Data([0xEF, 0xBB, 0xBF]))
+        try? FileManager.default.removeItem(at: tmp)
+    }
+
+    func testExportOrderCSVContainsHeaderAndData() {
+        let order = SalesOrder(
+            number: "CMD-001",
+            buyer: InvoiceParty(name: "Acheteur SARL", street: "1 rue A", postcode: "75001", city: "Paris", country: "FR"),
+            seller: InvoiceParty(name: "Client SAS", street: "2 rue B", postcode: "75002", city: "Paris", country: "FR"),
+            lines: [InvoiceLine(name: "Article A", quantity: 3, unitPrice: 100, vatRate: 20)]
+        )
+        let csv = ExportGenerator().orderCSV([order])
+        XCTAssertTrue(csv.contains("Numéro;Type;Statut"))
+        XCTAssertTrue(csv.contains("CMD-001"))
+        XCTAssertTrue(csv.contains("Acheteur SARL"))
+        XCTAssertTrue(csv.contains("Client SAS"))
+        XCTAssertTrue(csv.contains("360.00"))
+    }
+
+    func testExportDirectoryCSVContainsEntry() {
+        let entry = DirectoryEntry(
+            kind: .client,
+            party: InvoiceParty(name: "Test SARL", street: "1 rue X", postcode: "75001", city: "Paris", country: "FR", vatNumber: "FR11111111111", siren: "111111111"),
+            note: "note test",
+            contacts: [PartyContact(name: "Jean", email: "j@x.fr", phone: "0102", isActive: true, isDefault: true)]
+        )
+        let csv = ExportGenerator().directoryCSV([entry])
+        XCTAssertTrue(csv.contains("Raison sociale;Type;SIREN"))
+        XCTAssertTrue(csv.contains("Test SARL"))
+        XCTAssertTrue(csv.contains("111111111"))
+        XCTAssertTrue(csv.contains("Jean"))
+    }
+
+    func testImportDirectoryCSVParsesEntries() {
+        let csv = "Raison sociale;SIREN;Ville;Contact (email)\r\nAlpha SARL;222222222;Lyon;a@x.fr\r\nBeta;333333333;Nice;\r\n;444444444;Paris;\r\n"
+        let res = ExportGenerator().parseDirectoryCSV(csv)
+        XCTAssertEqual(res.entries.count, 2)
+        XCTAssertEqual(res.entries[0].party.name, "Alpha SARL")
+        XCTAssertEqual(res.entries[0].party.siren, "222222222")
+        XCTAssertEqual(res.entries[0].party.city, "Lyon")
+        XCTAssertEqual(res.entries[0].defaultContact?.email, "a@x.fr")
+        XCTAssertEqual(res.entries[1].party.name, "Beta")
+        XCTAssertEqual(res.errors.count, 1)
+    }
+
+    func testImportDirectoryCSVMissingColumns() {
+        let csv = "Nom;Ville\r\nAlpha;Lyon\r\n"
+        let res = ExportGenerator().parseDirectoryCSV(csv)
+        XCTAssertTrue(res.entries.isEmpty)
+        XCTAssertFalse(res.errors.isEmpty)
+    }
+
     func testXMLContainsEN16931URN() throws {
         let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
         let s = String(data: xml, encoding: .utf8) ?? ""

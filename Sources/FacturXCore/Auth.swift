@@ -4,11 +4,13 @@ import CryptoKit
 public enum UserRole: String, Codable, CaseIterable {
     case admin
     case comptable
+    case acheteur
 
     public var label: String {
         switch self {
         case .admin: return "Administrateur"
         case .comptable: return "Comptable client"
+        case .acheteur: return "Acheteur"
         }
     }
 
@@ -16,6 +18,7 @@ public enum UserRole: String, Codable, CaseIterable {
         switch self {
         case .admin: return "person.badge.shield.checkmark"
         case .comptable: return "person.crop.rectangle.stack"
+        case .acheteur: return "cart"
         }
     }
 }
@@ -31,6 +34,10 @@ public struct User: Codable, Hashable, Identifiable {
     public var defaultSellerEntryID: UUID?
     public var isActive: Bool
     public var createdAt: Date
+    public var mustChangePassword: Bool
+    public var failedLoginAttempts: Int
+    public var lockUntil: Date?
+    public var lastActivityAt: Date?
 
     public init(
         id: UUID = UUID(),
@@ -42,7 +49,11 @@ public struct User: Codable, Hashable, Identifiable {
         societyIDs: [UUID] = [],
         defaultSellerEntryID: UUID? = nil,
         isActive: Bool = true,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        mustChangePassword: Bool = false,
+        failedLoginAttempts: Int = 0,
+        lockUntil: Date? = nil,
+        lastActivityAt: Date? = nil
     ) {
         self.id = id
         self.username = username
@@ -54,6 +65,10 @@ public struct User: Codable, Hashable, Identifiable {
         self.defaultSellerEntryID = defaultSellerEntryID
         self.isActive = isActive
         self.createdAt = createdAt
+        self.mustChangePassword = mustChangePassword
+        self.failedLoginAttempts = failedLoginAttempts
+        self.lockUntil = lockUntil
+        self.lastActivityAt = lastActivityAt
     }
 
     public var effectiveDisplayName: String {
@@ -63,6 +78,7 @@ public struct User: Codable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, username, displayName, role, passwordHash, salt, societyIDs, defaultSellerEntryID, isActive, createdAt
+        case mustChangePassword, failedLoginAttempts, lockUntil, lastActivityAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -77,6 +93,10 @@ public struct User: Codable, Hashable, Identifiable {
         defaultSellerEntryID = try c.decodeIfPresent(UUID.self, forKey: .defaultSellerEntryID)
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        mustChangePassword = try c.decodeIfPresent(Bool.self, forKey: .mustChangePassword) ?? false
+        failedLoginAttempts = try c.decodeIfPresent(Int.self, forKey: .failedLoginAttempts) ?? 0
+        lockUntil = try c.decodeIfPresent(Date.self, forKey: .lockUntil)
+        lastActivityAt = try c.decodeIfPresent(Date.self, forKey: .lastActivityAt)
     }
 }
 
@@ -116,6 +136,52 @@ public enum PasswordHasher {
     }
 }
 
+// MARK: - Politique de mot de passe (A4)
+
+public enum PasswordPolicy {
+    public static let minLength = 10
+    public static let maxFailedAttempts = 5
+    public static let lockDurationSeconds: TimeInterval = 15 * 60
+    public static let sessionMaxInactivitySeconds: TimeInterval = 8 * 3600
+
+    private static let trivialPasswords: Set<String> = [
+        "admin", "password", "motdepasse", "12345678", "123456789",
+        "azertyuiop", "qwertyuiop", "abcd1234", "password1", "admin123"
+    ]
+
+    public enum Violation: Error, Equatable {
+        case tooShort
+        case tooWeak
+        case trivial
+        case reused
+
+        public var message: String {
+            switch self {
+            case .tooShort: return "Le mot de passe doit faire au moins \(minLength) caractères."
+            case .tooWeak: return "Le mot de passe doit contenir au moins 3 des 4 classes : minuscules, majuscules, chiffres, caractères spéciaux."
+            case .trivial: return "Ce mot de passe est trop courant. Choisissez-en un plus original."
+            case .reused: return "Le nouveau mot de passe doit être différent de l'ancien."
+            }
+        }
+    }
+
+    public static func validate(_ password: String, currentHash: String? = nil, salt: String? = nil) -> Violation? {
+        guard password.count >= minLength else { return .tooShort }
+        if trivialPasswords.contains(password.lowercased()) { return .trivial }
+        var classes = 0
+        if password.rangeOfCharacter(from: .lowercaseLetters) != nil { classes += 1 }
+        if password.rangeOfCharacter(from: .uppercaseLetters) != nil { classes += 1 }
+        if password.rangeOfCharacter(from: .decimalDigits) != nil { classes += 1 }
+        if password.rangeOfCharacter(from: CharacterSet(charactersIn: "!@#$%^&*()_+-=[]{};':\"\\|,.<>/?`~ ")) != nil { classes += 1 }
+        guard classes >= 3 else { return .tooWeak }
+        if let currentHash = currentHash, let salt = salt {
+            let newHash = PasswordHasher.hash(password: password, salt: salt)
+            if PasswordHasher.constantTimeEquals(newHash, currentHash) { return .reused }
+        }
+        return nil
+    }
+}
+
 public enum AuthError: Error, LocalizedError {
     case unknownUser
     case wrongPassword
@@ -124,6 +190,9 @@ public enum AuthError: Error, LocalizedError {
     case emptyPassword
     case missingSociety
     case invalidEmail
+    case lockedOut(retryAt: Date)
+    case passwordPolicy(PasswordPolicy.Violation)
+    case mustChangePassword
 
     public var errorDescription: String? {
         switch self {
@@ -132,8 +201,15 @@ public enum AuthError: Error, LocalizedError {
         case .inactiveUser: return "Ce compte est désactivé."
         case .duplicateUsername: return "Cet identifiant existe déjà."
         case .emptyPassword: return "Le mot de passe ne peut pas être vide."
-        case .missingSociety: return "Un comptable doit être associé à au moins une société (fiche fournisseur de l'annuaire)."
+        case .missingSociety: return "Un utilisateur non-administrateur doit être associé à au moins une société (fiche fournisseur de l'annuaire)."
         case .invalidEmail: return "L'identifiant doit être une adresse e-mail valide."
+        case .lockedOut(let retryAt):
+            let f = DateFormatter()
+            f.dateStyle = .none
+            f.timeStyle = .short
+            return "Compte temporairement verrouillé suite à des échecs. Réessayez après \(f.string(from: retryAt))."
+        case .passwordPolicy(let v): return v.message
+        case .mustChangePassword: return "Vous devez changer votre mot de passe à la première connexion."
         }
     }
 }
@@ -153,6 +229,60 @@ public enum EmailValidator {
     }
 }
 
+// MARK: - Journal d'audit (B1)
+
+public struct AuditLogEntry: Codable, Identifiable, Hashable {
+    public var id: UUID
+    public var timestamp: Date
+    public var actor: String
+    public var action: String
+    public var target: String
+    public var details: String
+
+    public init(id: UUID = UUID(), timestamp: Date = Date(), actor: String, action: String, target: String, details: String = "") {
+        self.id = id
+        self.timestamp = timestamp
+        self.actor = actor
+        self.action = action
+        self.target = target
+        self.details = details
+    }
+}
+
+public final class AuditStore: ObservableObject {
+    public static let shared = AuditStore()
+    @Published public var entries: [AuditLogEntry] = []
+    private let defaults = UserDefaults.standard
+    private let key = "facturx.audit.v1"
+    public var maxEntries = 500
+
+    public init() { load() }
+
+    public func load() {
+        if let data = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([AuditLogEntry].self, from: data) {
+            entries = decoded
+        }
+    }
+
+    public func save() {
+        if let data = try? JSONEncoder().encode(entries) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    public func record(actor: String, action: String, target: String, details: String = "") {
+        entries.insert(AuditLogEntry(actor: actor, action: action, target: target, details: details), at: 0)
+        if entries.count > maxEntries { entries.removeLast(entries.count - maxEntries) }
+        save()
+    }
+
+    public func clear() {
+        entries = []
+        save()
+    }
+}
+
 public final class AuthStore: ObservableObject {
     public static let shared = AuthStore()
 
@@ -161,10 +291,18 @@ public final class AuthStore: ObservableObject {
 
     public weak var directory: PartyDirectory?
 
+    /// By-pass de test : désactive la politique de mot de passe, le verrouillage de compte
+    /// et l'expiration de session pour permettre une connexion directe en tests.
+    /// À retirer avant la mise en production.
+    public var testBypassSecurity = false
+
+    public let audit = AuditStore.shared
+
     private let defaults = UserDefaults.standard
     private let usersKey = "facturx.users.v1"
     private let sessionKey = "facturx.session.userid.v1"
     private let seededKey = "facturx.auth.seeded.v1"
+    private let sessionExpiresKey = "facturx.session.expires.v1"
 
     public init() {
         self.users = []
@@ -191,23 +329,23 @@ public final class AuthStore: ObservableObject {
         }
         if let id = currentUser?.id {
             defaults.set(id.uuidString, forKey: sessionKey)
+            defaults.set(Date().addingTimeInterval(PasswordPolicy.sessionMaxInactivitySeconds).timeIntervalSince1970, forKey: sessionExpiresKey)
         } else {
             defaults.removeObject(forKey: sessionKey)
+            defaults.removeObject(forKey: sessionExpiresKey)
         }
     }
 
     private static let defaultAdminUsername = "admin@facturx.local"
     private static let defaultAdminPassword = "admin"
 
+    /// A1 : ne crée l'admin par défaut qu'au tout premier seeding. Si l'admin existe déjà,
+    /// son mot de passe n'est JAMAIS réinitialisé au lancement. L'admin créé est marqué
+    /// mustChangePassword = true pour forcer le changement à la première connexion.
     public func seedDefaultAdminIfEmpty() {
-        if let idx = users.firstIndex(where: { $0.username.lowercased() == Self.defaultAdminUsername.lowercased() }) {
-            // Réinitialise le mot de passe de l'admin par défaut à chaque lancement
-            // pour garantir un accès de secours reproductible.
-            let salt = PasswordHasher.generateSalt()
-            users[idx].salt = salt
-            users[idx].passwordHash = PasswordHasher.hash(password: Self.defaultAdminPassword, salt: salt)
-            users[idx].isActive = true
-            save()
+        guard !defaults.bool(forKey: seededKey) else { return }
+        if users.contains(where: { $0.username.lowercased() == Self.defaultAdminUsername.lowercased() }) {
+            defaults.set(true, forKey: seededKey)
             return
         }
         let salt = PasswordHasher.generateSalt()
@@ -219,22 +357,54 @@ public final class AuthStore: ObservableObject {
             passwordHash: hash,
             salt: salt,
             societyIDs: [],
-            isActive: true
+            isActive: true,
+            mustChangePassword: true
         )
-        if let idx = users.firstIndex(where: { $0.id == admin.id }) {
-            users[idx] = admin
-        } else {
-            users.append(admin)
-        }
+        users.append(admin)
         save()
         defaults.set(true, forKey: seededKey)
+        audit.record(actor: "system", action: "seed_admin", target: Self.defaultAdminUsername)
     }
 
     private func restoreSession() {
         guard let raw = defaults.string(forKey: sessionKey),
               let id = UUID(uuidString: raw),
               let user = users.first(where: { $0.id == id && $0.isActive }) else { return }
+        // A6 : expiration de session par inactivité
+        if !testBypassSecurity {
+            let expiresAt = defaults.double(forKey: sessionExpiresKey)
+            if expiresAt > 0, Date().timeIntervalSince1970 > expiresAt {
+                defaults.removeObject(forKey: sessionKey)
+                defaults.removeObject(forKey: sessionExpiresKey)
+                audit.record(actor: user.username, action: "session_expired", target: "")
+                return
+            }
+        }
         currentUser = user
+        touchActivity()
+    }
+
+    /// A6 : rafraîchit l'horodatage de dernière activité (appelé sur interaction / login).
+    public func touchActivity() {
+        guard let idx = users.firstIndex(where: { $0.id == currentUser?.id }) else { return }
+        users[idx].lastActivityAt = Date()
+        currentUser = users[idx]
+        save()
+    }
+
+    /// A6 : déconnecte si la session a expiré par inactivité. Retourne true si déconnecté.
+    @discardableResult
+    public func validateSession() -> Bool {
+        guard let user = currentUser, !testBypassSecurity else { return false }
+        if let last = user.lastActivityAt {
+            if Date().timeIntervalSince(last) > PasswordPolicy.sessionMaxInactivitySeconds {
+                audit.record(actor: user.username, action: "session_expired", target: "")
+                logout()
+                return true
+            }
+        }
+        touchActivity()
+        return false
     }
 
     @discardableResult
@@ -242,18 +412,48 @@ public final class AuthStore: ObservableObject {
         guard let user = users.first(where: {
             $0.username.lowercased() == username.trimmingCharacters(in: .whitespaces).lowercased()
         }) else {
+            audit.record(actor: username, action: "login_failed", target: "unknown", details: "utilisateur introuvable")
             throw AuthError.unknownUser
         }
         guard user.isActive else { throw AuthError.inactiveUser }
+
+        // A5 : verrouillage de compte après échecs
+        if !testBypassSecurity, let lockUntil = user.lockUntil, lockUntil > Date() {
+            audit.record(actor: user.username, action: "login_blocked", target: "", details: "compte verrouillé")
+            throw AuthError.lockedOut(retryAt: lockUntil)
+        }
         guard PasswordHasher.verify(password: password, salt: user.salt, expectedHash: user.passwordHash) else {
+            registerFailedAttempt(user)
             throw AuthError.wrongPassword
         }
+        // Succès : raz des compteurs d'échec
+        if let idx = users.firstIndex(where: { $0.id == user.id }) {
+            users[idx].failedLoginAttempts = 0
+            users[idx].lockUntil = nil
+        }
         currentUser = user
+        touchActivity()
         save()
+        audit.record(actor: user.username, action: "login_success", target: "")
         return user
     }
 
+    private func registerFailedAttempt(_ user: User) {
+        guard let idx = users.firstIndex(where: { $0.id == user.id }) else { return }
+        let attempts = user.failedLoginAttempts + 1
+        users[idx].failedLoginAttempts = attempts
+        if !testBypassSecurity && attempts >= PasswordPolicy.maxFailedAttempts {
+            let until = Date().addingTimeInterval(PasswordPolicy.lockDurationSeconds)
+            users[idx].lockUntil = until
+            audit.record(actor: user.username, action: "account_locked", target: "", details: "après \(attempts) échecs")
+        } else {
+            audit.record(actor: user.username, action: "login_failed", target: "", details: "tentative \(attempts)")
+        }
+        save()
+    }
+
     public func logout() {
+        if let u = currentUser { audit.record(actor: u.username, action: "logout", target: "") }
         currentUser = nil
         save()
     }
@@ -265,16 +465,21 @@ public final class AuthStore: ObservableObject {
         displayName: String = "",
         role: UserRole = .comptable,
         societyIDs: [UUID] = [],
-        defaultSellerEntryID: UUID? = nil
+        defaultSellerEntryID: UUID? = nil,
+        mustChangePassword: Bool = false
     ) throws -> User {
         let trimmedName = username.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { throw AuthError.unknownUser }
         guard EmailValidator.isValid(trimmedName) else { throw AuthError.invalidEmail }
         guard !password.isEmpty else { throw AuthError.emptyPassword }
+        // A4 : politique de mot de passe (sauf by-pass)
+        if !testBypassSecurity, let v = PasswordPolicy.validate(password) {
+            throw AuthError.passwordPolicy(v)
+        }
         guard !users.contains(where: { $0.username.lowercased() == trimmedName.lowercased() }) else {
             throw AuthError.duplicateUsername
         }
-        if role == .comptable, societyIDs.isEmpty {
+        if role == .comptable || role == .acheteur, societyIDs.isEmpty {
             throw AuthError.missingSociety
         }
         let salt = PasswordHasher.generateSalt()
@@ -287,24 +492,39 @@ public final class AuthStore: ObservableObject {
             salt: salt,
             societyIDs: societyIDs,
             defaultSellerEntryID: defaultSellerEntryID,
-            isActive: true
+            isActive: true,
+            mustChangePassword: mustChangePassword
         )
         users.append(user)
         save()
+        audit.record(actor: currentUser?.username ?? "system", action: "user_created", target: trimmedName, details: role.label)
         return user
     }
 
-    public func updatePassword(_ user: User, newPassword: String) throws {
+    public func updatePassword(_ user: User, newPassword: String, forceChange: Bool = false) throws {
         guard !newPassword.isEmpty else { throw AuthError.emptyPassword }
+        // A4 : politique de mot de passe (sauf by-pass ou changement forcé par admin reset)
+        if !testBypassSecurity, !forceChange, let v = PasswordPolicy.validate(newPassword, currentHash: user.passwordHash, salt: user.salt) {
+            throw AuthError.passwordPolicy(v)
+        }
         guard let idx = users.firstIndex(where: { $0.id == user.id }) else { return }
         let salt = PasswordHasher.generateSalt()
         users[idx].salt = salt
         users[idx].passwordHash = PasswordHasher.hash(password: newPassword, salt: salt)
+        users[idx].mustChangePassword = false
+        // raz du verrouillage en cas de reset par admin
+        if forceChange {
+            users[idx].failedLoginAttempts = 0
+            users[idx].lockUntil = nil
+        }
         if currentUser?.id == user.id { currentUser = users[idx] }
         save()
+        audit.record(actor: currentUser?.username ?? "system", action: "password_changed", target: user.username)
     }
 
     public func upsert(_ user: User) {
+        let wasRole = users.first(where: { $0.id == user.id })?.role
+        let wasScope = users.first(where: { $0.id == user.id })?.societyIDs
         if let idx = users.firstIndex(where: { $0.id == user.id }) {
             users[idx] = user
         } else {
@@ -312,6 +532,15 @@ public final class AuthStore: ObservableObject {
         }
         if currentUser?.id == user.id { currentUser = user }
         save()
+        // B1 : trace des modifications de rôle / périmètre
+        if wasRole != user.role {
+            audit.record(actor: currentUser?.username ?? "system", action: "role_changed",
+                         target: user.username, details: "\(wasRole?.label ?? "—") → \(user.role.label)")
+        }
+        if wasScope != nil, wasScope != user.societyIDs {
+            audit.record(actor: currentUser?.username ?? "system", action: "scope_changed",
+                         target: user.username, details: "\(user.societyIDs.count) société(s)")
+        }
     }
 
     public func delete(_ user: User) {
@@ -319,6 +548,7 @@ public final class AuthStore: ObservableObject {
         users.removeAll { $0.id == user.id }
         if currentUser?.id == user.id { currentUser = nil }
         save()
+        audit.record(actor: currentUser?.username ?? "system", action: "user_deleted", target: user.username)
     }
 
     // MARK: - Périmètre basé sur l'annuaire (DirectoryEntry)
@@ -353,6 +583,12 @@ public final class AuthStore: ObservableObject {
     }
 
     public func visibleInvoiceCompanyIDs(for user: User?) -> Set<UUID>? {
+        guard let user = user else { return nil }
+        if user.role == .admin { return nil }
+        return Set(user.societyIDs)
+    }
+
+    public func visibleOrderCompanyIDs(for user: User?) -> Set<UUID>? {
         guard let user = user else { return nil }
         if user.role == .admin { return nil }
         return Set(user.societyIDs)

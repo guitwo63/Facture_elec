@@ -34,6 +34,7 @@ final class AuthTests: XCTestCase {
 
     func testLoginSuccessAndWrongPassword() throws {
         let store = AuthStore()
+        store.testBypassSecurity = true
         store.users = []
         let salt = PasswordHasher.generateSalt()
         let hash = PasswordHasher.hash(password: "pw1234", salt: salt)
@@ -59,6 +60,7 @@ final class AuthTests: XCTestCase {
 
     func testInactiveUserCannotLogin() throws {
         let store = AuthStore()
+        store.testBypassSecurity = true
         let salt = PasswordHasher.generateSalt()
         let hash = PasswordHasher.hash(password: "pw", salt: salt)
         let user = User(username: "off", role: .comptable, passwordHash: hash, salt: salt, isActive: false)
@@ -74,6 +76,7 @@ final class AuthTests: XCTestCase {
 
     func testCreateUserDuplicateRejected() throws {
         let store = AuthStore()
+        store.testBypassSecurity = true
         store.users = []
         _ = try store.createUser(username: "dup@exemple.fr", password: "pw", role: .admin)
         XCTAssertThrowsError(try store.createUser(username: "dup@exemple.fr", password: "pw", role: .admin)) { error in
@@ -95,6 +98,7 @@ final class AuthTests: XCTestCase {
 
     func testUpdatePasswordRehashes() throws {
         let store = AuthStore()
+        store.testBypassSecurity = true
         store.users = []
         let user = try store.createUser(username: "rehash@exemple.fr", password: "oldpw", role: .admin)
         let oldHash = store.users.first(where: { $0.id == user.id })?.passwordHash
@@ -108,6 +112,7 @@ final class AuthTests: XCTestCase {
 
     private func makeDirectoryStore() -> (AuthStore, PartyDirectory, [DirectoryEntry]) {
         let store = AuthStore()
+        store.testBypassSecurity = true
         store.users = []
         let dir = PartyDirectory()
         dir.entries = []
@@ -224,6 +229,7 @@ final class AuthTests: XCTestCase {
 
     func testCreateUserWithDefaultSeller() throws {
         let store = AuthStore()
+        store.testBypassSecurity = true
         store.users = []
         let sid = UUID()
         let user = try store.createUser(username: "compta2@exemple.fr", password: "pw",
@@ -233,6 +239,135 @@ final class AuthTests: XCTestCase {
         let data = try JSONEncoder().encode(user)
         let decoded = try JSONDecoder().decode(User.self, from: data)
         XCTAssertEqual(decoded.defaultSellerEntryID, sid)
+    }
+
+    // MARK: - Sécurité (A1, A4, A5, A6, B1)
+
+    func testPasswordPolicyRejectsWeak() {
+        XCTAssertNotNil(PasswordPolicy.validate("cour"), "trop court")
+        XCTAssertNotNil(PasswordPolicy.validate("admin"), "trivial")
+        XCTAssertNotNil(PasswordPolicy.validate("password1"), "trivial")
+        XCTAssertNotNil(PasswordPolicy.validate("abcdefghij"), "aucune classe diversifiée")
+        XCTAssertNil(PasswordPolicy.validate("Abcdef1!xyz"), "valide")
+        XCTAssertNil(PasswordPolicy.validate("Secur3Pass!"), "valide")
+    }
+
+    func testPasswordPolicyRejectsReusedPassword() throws {
+        let store = AuthStore()
+        store.testBypassSecurity = true
+        store.users = []
+        let user = try store.createUser(username: "policy@exemple.fr", password: "pw", role: .admin)
+        let strong = "Secur3Pass!"
+        try store.updatePassword(user, newPassword: strong, forceChange: true)
+        // Récupère l'utilisateur à jour (sel/hash régénérés par forceChange)
+        let current = store.users.first(where: { $0.id == user.id })!
+        store.testBypassSecurity = false
+        // Le même mot de passe doit être refusé comme « réutilisé »
+        XCTAssertThrowsError(try store.updatePassword(current, newPassword: strong)) { error in
+            guard case AuthError.passwordPolicy(.reused) = error else {
+                return XCTFail("Attendu .reused, eu \(error)")
+            }
+        }
+    }
+
+    func testCreateUserEnforcesPolicyWithoutBypass() throws {
+        let store = AuthStore()
+        store.testBypassSecurity = true
+        store.users = []
+        store.testBypassSecurity = false
+        XCTAssertThrowsError(try store.createUser(username: "weak@exemple.fr", password: "pw", role: .admin)) { error in
+            guard case AuthError.passwordPolicy(.tooShort) = error else {
+                return XCTFail("Attendu .tooShort, eu \(error)")
+            }
+        }
+        XCTAssertThrowsError(try store.createUser(username: "weak2@exemple.fr", password: "admin", role: .admin)) { error in
+            guard case AuthError.passwordPolicy = error else {
+                return XCTFail("Attendu .passwordPolicy, eu \(error)")
+            }
+        }
+        let ok = try store.createUser(username: "strong@exemple.fr", password: "Secur3Pass!", role: .admin)
+        XCTAssertTrue(ok.mustChangePassword == false, "sans mustChangePassword explicite = false")
+    }
+
+    func testAccountLockoutAfterFailedAttempts() throws {
+        let store = AuthStore()
+        store.testBypassSecurity = true
+        store.users = []
+        let user = try store.createUser(username: "lock@exemple.fr", password: "pw", role: .admin)
+        store.testBypassSecurity = false
+        // 4 échecs : pas encore verrouillé
+        for _ in 0..<4 {
+            XCTAssertThrowsError(try store.login(username: "lock@exemple.fr", password: "bad"))
+        }
+        let after4 = store.users.first(where: { $0.id == user.id })!
+        XCTAssertEqual(after4.failedLoginAttempts, 4)
+        XCTAssertNil(after4.lockUntil)
+        // 5e échec : verrouillage
+        XCTAssertThrowsError(try store.login(username: "lock@exemple.fr", password: "bad"))
+        let after5 = store.users.first(where: { $0.id == user.id })!
+        XCTAssertNotNil(after5.lockUntil, "le compte doit être verrouillé après 5 échecs")
+        // Login même avec le bon mot de passe doit échouer tant que verrouillé
+        XCTAssertThrowsError(try store.login(username: "lock@exemple.fr", password: "pw")) { error in
+            guard case AuthError.lockedOut = error else {
+                return XCTFail("Attendu .lockedOut, eu \(error)")
+            }
+        }
+        // forceChange par admin déverrouille
+        try store.updatePassword(user, newPassword: "NewSecur3!", forceChange: true)
+        store.testBypassSecurity = true
+        let logged = try store.login(username: "lock@exemple.fr", password: "NewSecur3!")
+        XCTAssertEqual(logged.id, user.id)
+        XCTAssertNil(store.users.first(where: { $0.id == user.id })?.lockUntil)
+    }
+
+    func testSeedingOnlyOnce() {
+        let store = AuthStore()
+        store.testBypassSecurity = true
+        store.users = []
+        UserDefaults.standard.removeObject(forKey: "facturx.auth.seeded.v1")
+        // Premier seeding
+        store.seedDefaultAdminIfEmpty()
+        XCTAssertTrue(store.users.first?.mustChangePassword == true)
+        // Modification du hash (simule un changement par l'admin)
+        var admin = store.users.first!
+        admin.passwordHash = "CHANGED"
+        admin.mustChangePassword = false
+        store.users[0] = admin
+        store.save()
+        // Re-seeding : ne doit PAS réinitialiser le mot de passe
+        store.seedDefaultAdminIfEmpty()
+        XCTAssertEqual(store.users.first?.passwordHash, "CHANGED", "Le mot de passe admin ne doit pas être réinitialisé au redémarrage")
+        XCTAssertEqual(store.users.first?.mustChangePassword, false)
+    }
+
+    func testSessionExpiration() throws {
+        let store = AuthStore()
+        store.testBypassSecurity = true
+        store.users = []
+        let user = try store.createUser(username: "session@exemple.fr", password: "pw", role: .admin)
+        _ = try store.login(username: "session@exemple.fr", password: "pw")
+        XCTAssertEqual(store.currentUser?.id, user.id)
+        // Simule une dernière activité ancienne au-delà du délai
+        if let idx = store.users.firstIndex(where: { $0.id == user.id }) {
+            store.users[idx].lastActivityAt = Date().addingTimeInterval(-PasswordPolicy.sessionMaxInactivitySeconds - 1)
+            store.currentUser = store.users[idx]
+        }
+        store.testBypassSecurity = false
+        XCTAssertTrue(store.validateSession(), "La session doit expirer après inactivité")
+        XCTAssertNil(store.currentUser, "L'utilisateur doit être déconnecté après expiration")
+    }
+
+    func testAuditLogRecordsActions() throws {
+        let store = AuthStore()
+        store.testBypassSecurity = true
+        store.users = []
+        store.audit.clear()
+        _ = try store.createUser(username: "audit@exemple.fr", password: "pw", role: .admin)
+        XCTAssertTrue(store.audit.entries.contains(where: { $0.action == "user_created" && $0.target == "audit@exemple.fr" }))
+        _ = try store.login(username: "audit@exemple.fr", password: "pw")
+        XCTAssertTrue(store.audit.entries.contains(where: { $0.action == "login_success" }))
+        store.logout()
+        XCTAssertTrue(store.audit.entries.contains(where: { $0.action == "logout" }))
     }
 
     func testInvoiceNumberingIsPerCompany() {

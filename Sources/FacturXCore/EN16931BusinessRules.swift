@@ -132,7 +132,7 @@ public enum EN16931BusinessRules {
                 message: "BR-13 : Le total TTC (BT-112) ≠ total HT + total TVA."))
         }
 
-        if invoice.type == .creditNote {
+        if invoice.type.isCreditNote {
             let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces)
             if ref.isEmpty {
                 results.append(BusinessRuleResult(ruleId: "BR-FR-CO-05", severity: .error,

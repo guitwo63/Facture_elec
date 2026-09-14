@@ -170,6 +170,7 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var unit: String
     public var unitPrice: Double
     public var vatRate: Double
+    public var orderReference: String?
 
     public init(
         id: UUID = UUID(),
@@ -178,7 +179,8 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         quantity: Double,
         unit: String = "C62",
         unitPrice: Double,
-        vatRate: Double = 20.0
+        vatRate: Double = 20.0,
+        orderReference: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -187,6 +189,7 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         self.unit = unit
         self.unitPrice = unitPrice
         self.vatRate = vatRate
+        self.orderReference = orderReference
     }
 
     public var lineTotal: Double {
@@ -226,13 +229,23 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
     case commercialInvoice = "380"
     case correction = "384"
     case creditNote = "381"
+    case internalCreditNote = "INT"
 
     public var label: String {
         switch self {
         case .commercialInvoice: return "Facture commerciale (380)"
         case .correction: return "Facture rectificative (384)"
         case .creditNote: return "Avoir (381)"
+        case .internalCreditNote: return "Avoir interne (INT)"
         }
+    }
+
+    public var isCreditNote: Bool {
+        self == .creditNote || self == .internalCreditNote
+    }
+
+    public var isInternalCreditNote: Bool {
+        self == .internalCreditNote
     }
 }
 

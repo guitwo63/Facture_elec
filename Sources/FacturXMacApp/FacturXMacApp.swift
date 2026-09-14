@@ -91,10 +91,12 @@ struct LabeledInfoField<Content: View>: View {
 @main
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
+    @StateObject private var orderStore = OrderStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
+    @StateObject private var statusStore = OrderStatusStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -102,14 +104,17 @@ struct FacturXMacApp: App {
         WindowGroup("Factur-X") {
             RootView()
                 .environmentObject(store)
+                .environmentObject(orderStore)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
+                .environmentObject(statusStore)
                 .environmentObject(auth)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     auth.attachDirectory(directory)
+                    auth.testBypassSecurity = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -124,6 +129,10 @@ struct FacturXMacApp: App {
                     NotificationCenter.default.post(name: .newInvoiceRequested, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
+                Button("Nouvelle commande") {
+                    NotificationCenter.default.post(name: .newOrderRequested, object: nil)
+                }
+                .keyboardShortcut("o", modifiers: .command)
             }
         }
     }
@@ -131,6 +140,7 @@ struct FacturXMacApp: App {
 
 extension Notification.Name {
     static let newInvoiceRequested = Notification.Name("newInvoiceRequested")
+    static let newOrderRequested = Notification.Name("newOrderRequested")
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -149,15 +159,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum RootTab: String, CaseIterable, Identifiable {
     case invoices = "Factures"
+    case orders = "Commandes"
     case directory = "Annuaire"
     var id: String { rawValue }
+
+    static func visible(for role: UserRole?) -> [RootTab] {
+        switch role {
+        case .acheteur:
+            return [.orders]
+        default:
+            return allCases
+        }
+    }
 }
 
 struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var orderStore: OrderStore
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
+    @State private var selectedOrderID: UUID?
     @State private var showSettings = false
     @State private var showUserManagement = false
 
@@ -175,10 +197,10 @@ struct RootView: View {
         VStack(spacing: 0) {
             HStack {
                 Picker("", selection: $tab) {
-                    ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(RootTab.visible(for: auth.currentUser?.role)) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 200)
+                .frame(width: 300)
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {
@@ -222,6 +244,8 @@ struct RootView: View {
             switch tab {
             case .invoices:
                 InvoicesTabView(selectedID: $selectedID)
+            case .orders:
+                OrdersTabView(selectedID: $selectedOrderID)
             case .directory:
                 DirectoryView()
             }
@@ -275,6 +299,17 @@ struct RootView: View {
             store.upsert(draft)
             selectedID = draft.id
         }
+        .onReceive(NotificationCenter.default.publisher(for: .newOrderRequested)) { _ in
+            tab = .orders
+            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultDraftCompanyID())
+            orderStore.upsert(draft)
+            selectedOrderID = draft.id
+        }
+        .onAppear {
+            if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur).contains(tab) {
+                tab = .orders
+            }
+        }
     }
 
     private func defaultDraftCompanyID() -> UUID? {
@@ -290,12 +325,304 @@ enum InvoiceTypeFilter: String, CaseIterable, Hashable {
     case creditNote = "Avoirs"
 }
 
+struct ExportSheet: View {
+    let invoices: [Invoice]
+    let orders: [SalesOrder]
+    @Binding var isPresented: Bool
+
+    enum ExportKind: String, CaseIterable, Hashable {
+        case invoices = "Factures"
+        case orders = "Commandes"
+    }
+
+    enum ExportFormat: String, CaseIterable, Hashable {
+        case csvList = "Liste (CSV/Excel)"
+        case csvLines = "Détail des lignes (CSV/Excel)"
+        case electronic = "Fichiers électroniques (Factur-X / Order-X)"
+    }
+
+    @State private var kind: ExportKind = .invoices
+    @State private var format: ExportFormat = .csvList
+    @State private var query = ""
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var exportLog: String = ""
+
+    private var baseList: [(id: UUID, number: String, date: Date, label: String, amount: Double)] {
+        switch kind {
+        case .invoices:
+            return invoices.map { ($0.id, $0.number, $0.issueDate, $0.type.label, $0.grandTotal) }
+        case .orders:
+            return orders.map { ($0.id, $0.number, $0.issueDate, $0.type.label, $0.grandTotal) }
+        }
+    }
+
+    private var filteredList: [(id: UUID, number: String, date: Date, label: String, amount: Double)] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return baseList }
+        return baseList.filter { $0.number.lowercased().contains(q) || $0.label.lowercased().contains(q) }
+    }
+
+    private var selectedInvoices: [Invoice] {
+        invoices.filter { selectedIDs.contains($0.id) }
+    }
+
+    private var selectedOrders: [SalesOrder] {
+        orders.filter { selectedIDs.contains($0.id) }
+    }
+
+    private let df: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "dd/MM/yyyy"
+        return f
+    }()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Export des documents").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Type").font(.caption.bold())
+                    Picker("Type", selection: $kind) {
+                        ForEach(ExportKind.allCases, id: \.self) { k in Text(k.rawValue).tag(k) }
+                    }.labelsHidden().pickerStyle(.segmented)
+                    Text("Format").font(.caption.bold())
+                    Picker("Format", selection: $format) {
+                        ForEach(ExportFormat.allCases, id: \.self) { f in Text(f.rawValue).tag(f) }
+                    }.labelsHidden()
+                    HStack {
+                        Button("Tout sélectionner") {
+                            selectedIDs = Set(filteredList.map { $0.id })
+                        }
+                        Button("Tout désélectionner") {
+                            selectedIDs = []
+                        }
+                    }.font(.caption)
+                }
+                Spacer()
+            }
+            .padding(12)
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, type…)", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            List(Array(filteredList.enumerated()), id: \.element.id) { _, item in
+                HStack {
+                    Image(systemName: selectedIDs.contains(item.id) ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(selectedIDs.contains(item.id) ? Color.accentColor : Color.secondary)
+                        .onTapGesture {
+                            if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
+                            else { selectedIDs.insert(item.id) }
+                        }
+                    VStack(alignment: .leading) {
+                        Text(item.number).font(.headline)
+                        Text(item.label).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(String(format: "%.2f", item.amount))
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    Text(df.string(from: item.date)).font(.caption).foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
+                    else { selectedIDs.insert(item.id) }
+                }
+            }
+            Divider()
+            HStack {
+                Button("Fermer") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                if !exportLog.isEmpty {
+                    Text(exportLog).font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Exporter") { runExport() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedIDs.isEmpty)
+            }
+            .padding(12)
+        }
+        .frame(width: 640, height: 480)
+    }
+
+    private func runExport() {
+        exportLog = ""
+        switch (kind, format) {
+        case (.invoices, .csvList):
+            saveCSV(ExportGenerator().invoiceCSV(selectedInvoices), filename: "factures")
+        case (.invoices, .csvLines):
+            saveCSV(ExportGenerator().invoiceLinesCSV(selectedInvoices), filename: "factures-lignes")
+        case (.invoices, .electronic):
+            exportElectronicInvoices()
+        case (.orders, .csvList):
+            saveCSV(ExportGenerator().orderCSV(selectedOrders), filename: "commandes")
+        case (.orders, .csvLines):
+            saveCSV(ExportGenerator().orderLinesCSV(selectedOrders), filename: "commandes-lignes")
+        case (.orders, .electronic):
+            exportElectronicOrders()
+        }
+    }
+
+    private func saveCSV(_ csv: String, filename: String) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "\(filename).csv"
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try ExportGenerator().writeCSV(csv, to: url)
+                exportLog = "Exporté : \(url.lastPathComponent)"
+            } catch {
+                exportLog = "Erreur : \(error)"
+            }
+        }
+    }
+
+    private func exportElectronicInvoices() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Exporter ici"
+        if panel.runModal() != .OK, panel.url == nil { return }
+        guard let dir = panel.url else { return }
+        var ok = 0
+        var failed = 0
+        var skipped = 0
+        let gen = FacturXGenerator()
+        for inv in selectedInvoices {
+            if inv.type.isInternalCreditNote {
+                skipped += 1
+                continue
+            }
+            do {
+                let data = try gen.generate(invoice: inv)
+                let name = inv.type.isCreditNote ? "avoir-\(inv.number).pdf" : "facture-\(inv.number).pdf"
+                try data.write(to: dir.appendingPathComponent(name))
+                ok += 1
+            } catch {
+                failed += 1
+            }
+        }
+        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
+    }
+
+    private func exportElectronicOrders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Exporter ici"
+        if panel.runModal() != .OK, panel.url == nil { return }
+        guard let dir = panel.url else { return }
+        var ok = 0
+        var failed = 0
+        let gen = OrderXGenerator()
+        for order in selectedOrders {
+            do {
+                let data = try gen.generate(order: order)
+                let name = "commande-\(order.number).pdf"
+                try data.write(to: dir.appendingPathComponent(name))
+                ok += 1
+            } catch {
+                failed += 1
+            }
+        }
+        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
+    }
+}
+
+struct OrderToInvoiceSheet: View {
+    let orders: [SalesOrder]
+    let onCreate: (SalesOrder) -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var selectedOrderID: UUID?
+
+    private var filteredOrders: [SalesOrder] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return orders }
+        return orders.filter { order in
+            order.number.lowercased().contains(q)
+                || order.buyer.name.lowercased().contains(q)
+                || order.seller.name.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Créer une facture depuis une commande").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, acheteur, client…)", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filteredOrders.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "cart").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucune commande disponible dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(Array(filteredOrders.enumerated()), id: \.element.id) { _, order in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(order.number).font(.headline)
+                            Text("\(order.seller.name.isEmpty ? "Sans client" : order.seller.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(order.issueDate, format: .dateTime.day().month().year())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedOrderID = order.id }
+                    .background(selectedOrderID == order.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Créer la facture") {
+                    if let order = filteredOrders.first(where: { $0.id == selectedOrderID }) {
+                        onCreate(order)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedOrderID == nil)
+            }
+            .padding(12)
+        }
+        .frame(width: 520, height: 420)
+    }
+}
+
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var orderStore: OrderStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
+    @State private var showOrderPicker = false
+    @State private var showExport = false
 
     var filteredInvoices: [Invoice] {
         var result = store.invoices
@@ -309,9 +636,9 @@ struct InvoicesTabView: View {
         case .all:
             break
         case .invoice:
-            result = result.filter { $0.type != .creditNote }
+            result = result.filter { !$0.type.isCreditNote }
         case .creditNote:
-            result = result.filter { $0.type == .creditNote }
+            result = result.filter { $0.type.isCreditNote }
         }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
@@ -327,11 +654,16 @@ struct InvoicesTabView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 HStack {
-                    Button {
-                        let draft = store.newDraft(companyID: defaultCompanyID(),
-                                                   preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
-                        store.upsert(draft)
-                        selectedID = draft.id
+                    Menu {
+                        Button {
+                            let draft = store.newDraft(companyID: defaultCompanyID(),
+                                                       preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
+                            store.upsert(draft)
+                            selectedID = draft.id
+                        } label: { Label("Facture vierge", systemImage: "doc") }
+                        Button {
+                            showOrderPicker = true
+                        } label: { Label("Facture depuis une commande", systemImage: "cart") }
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Factures").font(.title2.bold())
@@ -343,6 +675,8 @@ struct InvoicesTabView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 260)
                     Spacer()
+                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                        .buttonStyle(.bordered)
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -393,8 +727,8 @@ struct InvoicesTabView: View {
                                     .font(.caption2)
                                 Text(invoice.status.label).font(.caption2)
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
-                                Text(invoice.type == .creditNote ? "Avoir" : "Facture")
-                                    .font(.caption2).foregroundStyle(invoice.type == .creditNote ? .orange : .accentColor)
+                                Text(invoice.type == .creditNote ? "Avoir" : invoice.type.isInternalCreditNote ? "Avoir interne" : "Facture")
+                                    .font(.caption2).foregroundStyle(invoice.type.isCreditNote ? Color.orange : Color.accentColor)
                                 Spacer()
                             }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
@@ -408,7 +742,7 @@ struct InvoicesTabView: View {
                                 store.upsert(credit)
                                 selectedID = credit.id
                             } label: { Label("Créer un avoir", systemImage: "arrow.uturn.backward.circle") }
-                            .disabled(invoice.type == .creditNote)
+                            .disabled(invoice.type.isCreditNote)
                             Divider()
                             Button(role: .destructive) {
                                 store.invoices.removeAll { $0.id == invoice.id }
@@ -434,6 +768,48 @@ struct InvoicesTabView: View {
                 }
             }
         }
+        .sheet(isPresented: $showOrderPicker) {
+            OrderToInvoiceSheet(
+                orders: scopedOrders,
+                onCreate: { order in
+                    let number = store.nextNumber(companyID: order.companyID)
+                    let invoice = order.toInvoice(number: number)
+                    store.upsert(invoice)
+                    selectedID = invoice.id
+                    showOrderPicker = false
+                },
+                onCancel: { showOrderPicker = false }
+            )
+        }
+        .sheet(isPresented: $showExport) {
+            ExportSheet(
+                invoices: scopedInvoices,
+                orders: scopedOrders,
+                isPresented: $showExport
+            )
+        }
+    }
+
+    private var scopedOrders: [SalesOrder] {
+        var result = orderStore.orders
+        if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
+            result = result.filter { order in
+                if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private var scopedInvoices: [Invoice] {
+        var result = store.invoices
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { inv in
+                if let cid = inv.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
     }
 
     private func binding(for id: UUID) -> Binding<Invoice> {
@@ -513,10 +889,15 @@ struct InvoiceEditorView: View {
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(isLocked)
-                Button("Exporter XML") { exportXML() }
-                    .buttonStyle(.bordered)
-                Button("Générer le Factur-X") { export() }
-                    .buttonStyle(.borderedProminent)
+                if invoice.type.isInternalCreditNote {
+                    Button("Exporter PDF") { exportPlainPDF() }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Exporter XML") { exportXML() }
+                        .buttonStyle(.bordered)
+                    Button("Générer le Factur-X") { export() }
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .padding(12)
             Divider()
@@ -602,7 +983,7 @@ struct InvoiceEditorView: View {
                                     TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
                                     InfoBadge(text: "BT-13 — Référence de la commande acheteur. Remontée en haut de la facture.")
                                 }
-                                if invoice.type == .creditNote {
+                                if invoice.type == .creditNote || invoice.type.isInternalCreditNote {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Référence et date de la facture liée :").font(.caption.bold())
                                         HStack(spacing: 3) {
@@ -687,6 +1068,11 @@ struct InvoiceEditorView: View {
                                 HStack(spacing: 2) {
                                     TextField("Désignation *", text: $line.name).frame(minWidth: 220)
                                     InfoBadge(text: "BT-153 — Désignation de la ligne. Obligatoire.")
+                                }
+                                HStack(spacing: 2) {
+                                    TextField("Commande", text: Binding($line.orderReference, replacingNilWith: ""))
+                                        .frame(width: 140)
+                                    InfoBadge(text: "BT-132 — Référence de commande liée à la ligne.")
                                 }
                                 HStack(spacing: 2) {
                                     DoubleField("Qté", value: $line.quantity, format: .number)
@@ -793,7 +1179,7 @@ struct InvoiceEditorView: View {
         guard !invoice.number.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
         let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
         return store.invoices.filter { inv in
-            guard inv.type == .creditNote
+            guard inv.type.isCreditNote
                 && (inv.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces) else { return false }
             if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
             if scope != nil && inv.companyID == nil { return false }
@@ -847,6 +1233,24 @@ struct InvoiceEditorView: View {
     private func runValidation() {
         validation = FacturXValidator().validate(invoice: invoice)
         showValidation = true
+    }
+
+    private func exportPlainPDF() {
+        exportError = nil
+        exportedURL = nil
+        store.upsert(invoice)
+        let data = FacturXGenerator().generateVisiblePDF(invoice: invoice)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = "avoir-interne-\(invoice.number).pdf"
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try data.write(to: url)
+                exportedURL = url
+            } catch {
+                exportError = "\(error)"
+            }
+        }
     }
 
     private func exportXML() {
@@ -1184,6 +1588,122 @@ struct PartyPickerSheet: View {
     }
 }
 
+struct PartyExportSheet: View {
+    let entries: [DirectoryEntry]
+    @Binding var isPresented: Bool
+    @State private var exportLog = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Export des tiers").font(.headline)
+                Spacer()
+            }.padding(12)
+            Divider()
+            VStack(alignment: .leading, spacing: 12) {
+                Text("\(entries.count) tier(s) à exporter (selon le filtre et le périmètre).")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Format : CSV compatible Excel (UTF-8, séparateur ;). Toutes les données : raison sociale, type, SIREN, SIRET, TVA, adresse, contact, endpoint, IBAN/BIC, conditions de paiement, note, archive.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(12)
+            Spacer()
+            Divider()
+            HStack {
+                Button("Fermer") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                if !exportLog.isEmpty {
+                    Text(exportLog).font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Exporter") { runExport() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(entries.isEmpty)
+            }.padding(12)
+        }
+        .frame(width: 520, height: 280)
+    }
+
+    private func runExport() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "tiers.csv"
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try ExportGenerator().writeCSV(ExportGenerator().directoryCSV(entries), to: url)
+                exportLog = "Exporté : \(url.lastPathComponent)"
+            } catch {
+                exportLog = "Erreur : \(error)"
+            }
+        }
+    }
+}
+
+struct PartyImportSheet: View {
+    @Binding var isPresented: Bool
+    let onImport: ([DirectoryEntry]) -> Void
+    @State private var fileURL: URL?
+    @State private var result: ExportGenerator.PartyImportResult?
+    @State private var importLog = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Import des tiers").font(.headline)
+                Spacer()
+            }.padding(12)
+            Divider()
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Sélectionnez un fichier CSV. Colonnes obligatoires : Raison sociale, SIREN. Toutes les autres colonnes sont optionnelles (Type, SIRET, TVA, Rue, Code postal, Ville, Pays, Contact (nom), Contact (email), Contact (tél.), Endpoint ID, Schéma endpoint, IBAN, BIC, Conditions paiement, Note).")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.commaSeparatedText]
+                    if panel.runModal() == .OK, let url = panel.url {
+                        do {
+                            let raw = try String(contentsOf: url, encoding: .utf8)
+                            let res = ExportGenerator().parseDirectoryCSV(raw)
+                            fileURL = url
+                            result = res
+                            importLog = "\(res.entries.count) tier(s) à importer\(res.errors.isEmpty ? "" : ", \(res.errors.count) avertissement(s)")"
+                        } catch {
+                            importLog = "Erreur de lecture : \(error)"
+                        }
+                    }
+                } label: { Label("Choisir un fichier CSV…", systemImage: "doc") }
+                    .buttonStyle(.bordered)
+                if let r = result {
+                    if !r.errors.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Avertissements :").font(.caption.bold())
+                            ForEach(Array(r.errors.enumerated()), id: \.offset) { _, msg in
+                                Text("• \(msg)").font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                    if !r.entries.isEmpty {
+                        Text(importLog).font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if !importLog.isEmpty {
+                    Text(importLog).font(.caption).foregroundStyle(.red)
+                }
+            }.padding(12)
+            Spacer()
+            Divider()
+            HStack {
+                Button("Fermer") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Importer") {
+                    if let r = result { onImport(r.entries) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(result?.entries.isEmpty ?? true)
+            }.padding(12)
+        }
+        .frame(width: 560, height: 420)
+    }
+}
+
 struct DirectoryView: View {
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
@@ -1194,6 +1714,9 @@ struct DirectoryView: View {
     @State private var creatingNew = false
     @State private var showArchived = false
     @State private var selectedEntry: DirectoryEntry?
+    @State private var showExport = false
+    @State private var showImport = false
+    @State private var importResult: ExportGenerator.PartyImportResult?
 
     private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
 
@@ -1231,6 +1754,10 @@ struct DirectoryView: View {
                         .buttonStyle(.borderedProminent)
                     Text("Annuaire des tiers").font(.title2.bold())
                     Spacer()
+                    Button { showImport = true } label: { Label("Importer", systemImage: "square.and.arrow.down") }
+                        .buttonStyle(.bordered)
+                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                        .buttonStyle(.bordered)
                     Toggle(isOn: $showArchived) {
                         Label("Archives", systemImage: "archivebox")
                     }
@@ -1360,6 +1887,18 @@ struct DirectoryView: View {
                 directory.upsert(newEntry)
                 creatingNew = false
             }
+        }
+        .sheet(isPresented: $showExport) {
+            PartyExportSheet(entries: filtered, isPresented: $showExport)
+        }
+        .sheet(isPresented: $showImport) {
+            PartyImportSheet(
+                isPresented: $showImport,
+                onImport: { newEntries in
+                    for e in newEntries { directory.upsert(e) }
+                    showImport = false
+                }
+            )
         }
     }
 
@@ -2128,7 +2667,9 @@ struct SettingsTabView: View {
             Picker("", selection: $settingsTab) {
                 Text("Profil").tag(0)
                 if auth.currentUser?.role == .admin {
-                    Text("Application").tag(1)
+                    Text("Commandes").tag(1)
+                    Text("Application").tag(2)
+                    Text("Journal").tag(3)
                 }
             }
             .pickerStyle(.segmented)
@@ -2137,9 +2678,80 @@ struct SettingsTabView: View {
             switch settingsTab {
             case 0:
                 ProfileSettingsView()
+            case 1:
+                OrderStatusSettingsView()
+            case 3:
+                AuditLogView()
             default:
                 ApplicationSettingsView()
             }
+        }
+    }
+}
+
+struct OrderStatusSettingsView: View {
+    @EnvironmentObject var statusStore: OrderStatusStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des commandes").font(.title2.bold())
+                Spacer()
+                Button {
+                    let id = "custom-\(UUID().uuidString.prefix(8))"
+                    statusStore.append(OrderStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
+                } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            Text("Personnalisez le libellé, l'icône SF Symbol et la couleur de chaque statut de commande.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(statusStore.overrides) { override in
+                        statusRow(override)
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .frame(minWidth: 480, minHeight: 420)
+    }
+
+    private func statusRow(_ override: OrderStatusOverride) -> some View {
+        let idx = statusStore.overrides.firstIndex(where: { $0.id == override.id }) ?? 0
+        let binding = Binding<OrderStatusOverride>(
+            get: { statusStore.overrides[idx] },
+            set: { statusStore.overrides[idx] = $0 }
+        )
+        return HStack(spacing: 12) {
+            Image(systemName: binding.wrappedValue.systemImage)
+                .frame(width: 22)
+                .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
+            TextField("Libellé", text: binding.label)
+                .frame(minWidth: 180)
+            TextField("Icône SF", text: binding.systemImage)
+                .frame(width: 120)
+            ColorPicker(selection: Binding(
+                get: { Color(hex: binding.wrappedValue.hexColor) },
+                set: { newColor in
+                    statusStore.overrides[idx].hexColor = hexString(from: newColor)
+                }
+            )) {
+                Text("Couleur")
+            }
+            .labelsHidden()
+            Spacer()
+            Button(role: .destructive) {
+                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    statusStore.remove(at: i)
+                }
+            } label: {
+                Image(systemName: "minus.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .help("Supprimer ce statut")
         }
     }
 }
@@ -2504,6 +3116,7 @@ struct PartyEditorView: View {
     @Binding var contacts: [PartyContact]
     var showWebButton: Bool
     var isFournisseur: Bool = false
+    var hideEmail: Bool = false
     var isMultiContact: Bool
     var directory: PartyDirectory?
     var onPickContact: ((PartyContact) -> Void)?
@@ -2520,10 +3133,11 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false, hideEmail: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
         self.isFournisseur = isFournisseur
+        self.hideEmail = hideEmail
         self.isMultiContact = contacts != nil
         self.directory = directory
         self.onPickContact = onPickContact
@@ -2687,7 +3301,7 @@ struct PartyEditorView: View {
                             .help("Choisir ou créer un contact depuis la fiche tiers")
                     }
                     let name = party.contactName?.trimmingCharacters(in: .whitespaces) ?? ""
-                    let email = party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? ""
+                    let email = hideEmail ? "" : (party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? "")
                     let phone = party.contactPhone?.trimmingCharacters(in: .whitespaces) ?? ""
                     if name.isEmpty && email.isEmpty && phone.isEmpty {
                         Text("Aucun contact").font(.caption).foregroundStyle(.secondary)
@@ -2705,7 +3319,9 @@ struct PartyEditorView: View {
             } else {
                 HStack {
                     TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
-                    TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
+                    if !hideEmail {
+                        TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
+                    }
                     TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
                 }
             }
@@ -2979,6 +3595,686 @@ struct NormRefPicker: View {
         )) {
             ForEach(options) { ref in Text(ref.label).tag(ref.id as String) }
             Text("Autre…").tag("__custom__" as String)
+        }
+    }
+}
+
+struct OrderPartySection: View {
+    enum Role {
+        case buyer, seller
+        var title: String { self == .buyer ? "Acheteur" : "Fournisseur" }
+        var defaultKind: DirectoryEntryKind { self == .buyer ? .client : .fournisseur }
+    }
+
+    @Binding var party: InvoiceParty
+    let role: Role
+    var onPartyPicked: ((InvoiceParty) -> Void)? = nil
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var showPicker = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button {
+                    showPicker = true
+                } label: {
+                    Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+            }
+
+            PartyEditorView(party: $party, isFournisseur: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+        }
+        .padding(8)
+        .sheet(isPresented: $showPicker) {
+            PartyPickerSheet(role: role == .buyer ? .buyer : .seller) { selected in
+                var p = selected.party
+                if let routing = selected.defaultRoutingAddress, routing.isActive {
+                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+                    if !composed.isEmpty {
+                        p.endpointID = composed
+                        p.endpointSchemeID = "0225"
+                    }
+                }
+                if let contact = selected.defaultContact, contact.isActive {
+                    p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+                    p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+                    p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+                }
+                party = p
+                onPartyPicked?(p)
+                showPicker = false
+            }
+        }
+    }
+
+    private func updatePartyFromContact(_ contact: PartyContact) {
+        var p = party
+        p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+        p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+        p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+        party = p
+        onPartyPicked?(p)
+    }
+
+    private func updatePartyFromRouting(_ routing: PartyRoutingAddress) {
+        var p = party
+        let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+        if !composed.isEmpty {
+            p.endpointID = composed
+            p.endpointSchemeID = "0225"
+        }
+        party = p
+        onPartyPicked?(p)
+    }
+}
+
+struct OrdersTabView: View {
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var store: InvoiceStore
+    @Binding var selectedID: UUID?
+    @State private var query = ""
+    @State private var showExport = false
+
+    var filteredOrders: [SalesOrder] {
+        var result = orderStore.orders
+        if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
+            result = result.filter { order in
+                if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return result }
+        return result.filter { order in
+            order.number.lowercased().contains(q)
+                || order.seller.name.lowercased().contains(q)
+                || (order.seller.siren ?? "").lowercased().contains(q)
+                || order.buyer.name.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                HStack {
+                    Button {
+                        let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
+                        orderStore.upsert(draft)
+                        selectedID = draft.id
+                    } label: { Label("Nouvelle commande", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                    Text("Commandes").font(.title2.bold())
+                    Spacer()
+                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                        .buttonStyle(.bordered)
+                }
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Rechercher (numéro, client…)", text: $query)
+                        .textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+            }
+            .padding(12)
+
+            Divider()
+
+            HSplitView {
+                if filteredOrders.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "cart").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Aucune commande.")
+                            .foregroundStyle(.secondary)
+                        Button("Nouvelle commande") {
+                            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
+                            orderStore.upsert(draft)
+                            selectedID = draft.id
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(filteredOrders.enumerated()), id: \.element.id) { _, order in
+                                VStack(alignment: .leading) {
+                                    HStack {
+                                        Text(order.number).font(.headline)
+                                        Spacer()
+                                        Text(order.issueDate, format: .dateTime.day().month().year())
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    HStack(spacing: 6) {
+                                        let so = statusStore.override(for: order)
+                                        Image(systemName: so.systemImage)
+                                            .foregroundColor(Color(hex: so.hexColor))
+                                            .font(.caption2)
+                                        Text(so.label).font(.caption2)
+                                            .foregroundColor(Color(hex: so.hexColor))
+                                        Text(order.type.label)
+                                            .font(.caption2).foregroundStyle(Color.accentColor)
+                                        Spacer()
+                                    }
+                                    Text("\(order.seller.name.isEmpty ? "Sans client" : order.seller.name)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 6).padding(.horizontal, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .background(selectedID == order.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                                .onTapGesture { selectedID = order.id }
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        orderStore.orders.removeAll { $0.id == order.id }
+                                        orderStore.save()
+                                        if selectedID == order.id { selectedID = nil }
+                                    } label: { Label("Supprimer", systemImage: "trash") }
+                                }
+                            }
+                        }
+                    }
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
+                }
+
+                if let id = selectedID,
+                   orderStore.orders.contains(where: { $0.id == id }) {
+                    OrderEditorView(order: binding(for: id))
+                        .frame(minWidth: 380)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "cart.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Sélectionnez ou créez une commande")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .sheet(isPresented: $showExport) {
+            ExportSheet(
+                invoices: scopedInvoices,
+                orders: scopedOrders,
+                isPresented: $showExport
+            )
+        }
+    }
+
+    private var scopedOrders: [SalesOrder] {
+        var result = orderStore.orders
+        if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
+            result = result.filter { order in
+                if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private var scopedInvoices: [Invoice] {
+        var result = store.invoices
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { inv in
+                if let cid = inv.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private func defaultOrderCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
+    }
+
+    private func binding(for id: UUID) -> Binding<SalesOrder> {
+        Binding(
+            get: { orderStore.orders.first(where: { $0.id == id }) ?? SalesOrder(number: "", buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""), seller: InvoiceParty(name: "", street: "", postcode: "", city: "")) },
+            set: { newValue in
+                if let idx = orderStore.orders.firstIndex(where: { $0.id == id }) {
+                    orderStore.orders[idx] = newValue
+                    orderStore.save()
+                }
+            }
+        )
+    }
+}
+
+struct OrderEditorView: View {
+    @Binding var order: SalesOrder
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
+    @State private var exportError: String?
+    @State private var exportedURL: URL?
+    @State private var validation: FacturXValidationResult?
+    @State private var showValidation = false
+    @State private var isLocked = false
+    @State private var showUnlockAlert = false
+    @State private var createdInvoiceNumber: String?
+
+    private var hasMandatoryWarnings: Bool {
+        let b = order.buyer
+        let s = order.seller
+        let buyerOk = !b.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !b.country.trimmingCharacters(in: .whitespaces).isEmpty
+            && ((b.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
+                || (b.endpointID ?? "").trimmingCharacters(in: .whitespaces).count >= 9)
+        let sellerOk = !s.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !s.country.trimmingCharacters(in: .whitespaces).isEmpty
+            && ((s.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
+                || (s.endpointID ?? "").trimmingCharacters(in: .whitespaces).count >= 9)
+        let headerOk = !order.number.trimmingCharacters(in: .whitespaces).isEmpty
+            && !order.currency.trimmingCharacters(in: .whitespaces).isEmpty
+        let linesOk = order.lines.allSatisfy {
+            !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && $0.quantity > 0 && $0.unitPrice >= 0
+        }
+        return !(buyerOk && sellerOk && headerOk && linesOk)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Édition : \(order.number)").font(.title2.bold())
+                if isLocked {
+                    Label("Lecture seule", systemImage: "lock.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
+                }
+                Spacer()
+                if isLocked {
+                    Button { showUnlockAlert = true } label: {
+                        Label("Modifier", systemImage: "lock.open")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Repasser en édition (la commande n'est plus protégée)")
+                } else if validation?.isValid == true {
+                    Button { isLocked = true } label: {
+                        Label("Verrouiller", systemImage: "lock")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Protéger la commande validée en lecture seule")
+                }
+                Button("Valider") { runValidation() }
+                    .buttonStyle(.bordered)
+                    .disabled(isLocked)
+                Button("Exporter XML") { exportXML() }
+                    .buttonStyle(.bordered)
+                Button("Générer l'Order-X") { export() }
+                    .buttonStyle(.borderedProminent)
+                Button("Créer la facture") { createInvoice() }
+                    .buttonStyle(.bordered)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                if let err = exportError {
+                    Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
+                        .onChange(of: order.number) { _ in exportError = nil }
+                        .onChange(of: order.seller.name) { _ in exportError = nil }
+                        .onChange(of: order.buyer.name) { _ in exportError = nil }
+                }
+                if let url = exportedURL {
+                    Text("Fichier généré : \(url.lastPathComponent)").font(.caption).foregroundStyle(.green)
+                    Button("Afficher dans le Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        .onChange(of: order.number) { _ in exportedURL = nil }
+                        .onChange(of: order.seller.name) { _ in exportedURL = nil }
+                        .onChange(of: order.buyer.name) { _ in exportedURL = nil }
+                }
+                if let n = createdInvoiceNumber {
+                    Text("Facture créée : \(n)").font(.caption).foregroundStyle(.green)
+                        .onChange(of: order.number) { _ in createdInvoiceNumber = nil }
+                }
+
+                if hasMandatoryWarnings {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Données obligatoires pour la conformité Order-X", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption.bold())
+                                .foregroundStyle(.orange)
+                            Text("Acheteur et client : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique, n° TVA si applicable.").font(.caption)
+                            Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
+                            Text("En-tête : numéro de commande, date d'émission, date de livraison souhaitée, devise (EUR).").font(.caption)
+                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if showValidation, let v = validation {
+                    orderValidationPanel(v)
+                }
+
+                GroupBox("En-tête") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 24) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    LabeledContent {
+                                        TextField("", text: $order.number).frame(width: 160)
+                                    } label: {
+                                        HStack(spacing: 3) {
+                                            Text("Numéro *").foregroundColor(.red)
+                                            InfoBadge(text: "Numéro unique de la commande.")
+                                        }
+                                    }
+                                    HStack(spacing: 3) {
+                                        Picker("Type", selection: $order.type) {
+                                            ForEach(OrderTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
+                                        }.frame(width: 260)
+                                        InfoBadge(text: "Type de document : 220 commande, 221 modification, 222 réponse.")
+                                    }
+                                }
+                                HStack {
+                                    HStack(spacing: 3) {
+                                        DatePicker("Date", selection: $order.issueDate, displayedComponents: .date)
+                                        InfoBadge(text: "Date d'émission de la commande.")
+                                    }
+                                    HStack(spacing: 3) {
+                                        DatePicker("Livraison", selection: $order.requestedDeliveryDate, displayedComponents: .date)
+                                        InfoBadge(text: "Date de livraison souhaitée par l'acheteur.")
+                                    }
+                                }
+                                HStack {
+                                    Picker("Profil Order-X", selection: $order.profile) {
+                                        ForEach(OrderXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                    }
+                                    NormRefPicker("Devise", options: NormRefs.currencies, code: $order.currency).frame(width: 160)
+                                    HStack(spacing: 3) {
+                                        TextField("Réf. acheteur", text: Binding($order.buyerReference, replacingNilWith: ""))
+                                        InfoBadge(text: "Référence acheteur (BuyerReference), remontée en haut de la commande.")
+                                    }
+                                }
+                                DisclosureGroup("Autres références") {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. devis", text: Binding($order.quotationRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "QuotationReferencedDocument — référence du devis.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. contrat", text: Binding($order.contractRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "ContractReferencedDocument — référence du contrat.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. commande cadre", text: Binding($order.blanketOrderRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "BlanketOrderReferencedDocument — commande cadre.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. modif. précédente", text: Binding($order.previousOrderChangeRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "PreviousOrderChangeReferencedDocument.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. réponse précédente", text: Binding($order.previousOrderResponseRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "PreviousOrderResponseReferencedDocument.")
+                                        }
+                                    }
+                                }
+                                .font(.caption)
+                            }
+                            VStack(alignment: .trailing) {
+                                row("Total HT", order.lineTotal)
+                                ForEach(order.vatBreakdown, id: \.rate) { item in
+                                    row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
+                                }
+                                row("Total TTC", order.grandTotal, bold: true)
+                                Divider().frame(width: 280)
+                                row("Montant facturé", linkedInvoicesAmount)
+                                row("Reste à facturer", max(0, order.grandTotal - linkedInvoicesAmount), bold: true)
+                            }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+                        }
+                    }.padding(8)
+                }.lockable(isLocked)
+
+                HStack(alignment: .top, spacing: 12) {
+                    GroupBox("Acheteur (vous)") {
+                        OrderPartySection(party: $order.buyer, role: .buyer)
+                    }.lockable(isLocked)
+                    GroupBox("Client") {
+                        OrderPartySection(party: $order.seller, role: .buyer)
+                    }.lockable(isLocked)
+                }
+
+                GroupBox("Lignes") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach($order.lines) { $line in
+                            HStack {
+                                HStack(spacing: 2) {
+                                    TextField("Désignation *", text: $line.name).frame(minWidth: 220)
+                                    InfoBadge(text: "Désignation de la ligne. Obligatoire.")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("Qté", value: $line.quantity, format: .number)
+                                    InfoBadge(text: "Quantité demandée. Doit être positive.")
+                                }
+                                HStack(spacing: 2) {
+                                    NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
+                                    InfoBadge(text: "Unité de mesure (UN/ECE Rec 20).")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
+                                    InfoBadge(text: "Prix unitaire HT.")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("TVA %", value: $line.vatRate, format: .number)
+                                    InfoBadge(text: "Taux de TVA appliqué (%).")
+                                }
+                                Text(String(format: "%.2f", line.lineTotal))
+                                    .monospacedDigit().frame(width: 80, alignment: .trailing)
+                                Button { order.lines.removeAll { $0.id == line.id } } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                            }
+                        }
+                        Button {
+                            order.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: order.lines.last?.vatRate ?? 20))
+                        } label: { Label("Ajouter une ligne", systemImage: "plus") }
+                    }.padding(8)
+                }.lockable(isLocked)
+
+                GroupBox("Notes") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Notes libres", text: Binding($order.notes, replacingNilWith: ""))
+                    }.padding(8)
+                }.lockable(isLocked)
+
+                GroupBox("Factures et avoirs liés") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if linkedInvoices.isEmpty {
+                            Text("Aucune facture ou avoir lié à cette commande.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(linkedInvoices.enumerated()), id: \.element.id) { _, inv in
+                                HStack {
+                                    Image(systemName: inv.type.isCreditNote ? "arrow.uturn.backward.circle" : "doc.text")
+                                        .foregroundStyle(inv.type.isCreditNote ? Color.orange : Color.accentColor)
+                                    VStack(alignment: .leading) {
+                                        Text(inv.number).font(.headline)
+                                        Text("\(inv.type == .creditNote ? "Avoir" : inv.type.isInternalCreditNote ? "Avoir interne" : "Facture") — \(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(inv.issueDate, format: .dateTime.day().month().year())
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }.padding(8)
+                }.lockable(isLocked)
+            }.padding()
+        }
+            .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
+                Button("Annuler", role: .cancel) { }
+                Button("Modifier", role: .destructive) { isLocked = false }
+            } message: {
+                Text("La commande était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout envoi au client.")
+            }
+        }
+    }
+
+    private var linkedInvoices: [Invoice] {
+        store.invoices.filter { inv in
+            inv.purchaseOrderRef == order.number
+                || inv.lines.contains(where: { ($0.orderReference ?? "") == order.number })
+        }.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private var linkedInvoicesAmount: Double {
+        linkedInvoices.reduce(0) { acc, inv in
+            inv.type.isCreditNote ? acc - inv.grandTotal : acc + inv.grandTotal
+        }.rounded(toPlaces: 2)
+    }
+
+    private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {
+        HStack {
+            Text(label).font(bold ? .body.bold() : .body)
+            Spacer()
+            Text(String(format: "%.2f %@", value, order.currency))
+                .font(bold ? .body.bold() : .body)
+                .monospacedDigit()
+        }.frame(width: 280)
+    }
+
+    private func export() {
+        exportError = nil
+        exportedURL = nil
+        let preCheck = OrderXValidator().validate(order: order)
+        if !preCheck.isValid {
+            validation = preCheck
+            showValidation = true
+            exportError = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de générer."
+            return
+        }
+        do {
+            orderStore.upsert(order)
+            let data = try OrderXGenerator().generate(order: order)
+            let postCheck = OrderXValidator().validate(pdf: data)
+            if !postCheck.isValid {
+                validation = FacturXValidationResult(
+                    isValid: false,
+                    errors: postCheck.errors,
+                    warnings: preCheck.warnings + postCheck.warnings
+                )
+                showValidation = true
+                exportError = "La conformité du PDF généré a échoué : \(postCheck.errors.count) erreur(s)."
+                return
+            }
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.pdf]
+            panel.nameFieldStringValue = "commande-\(order.number).pdf"
+            if panel.runModal() == .OK, let url = panel.url {
+                try data.write(to: url)
+                exportedURL = url
+                validation = FacturXValidationResult(
+                    isValid: true,
+                    warnings: preCheck.warnings + postCheck.warnings
+                )
+                showValidation = true
+            }
+        } catch {
+            exportError = "\(error)"
+        }
+    }
+
+    private func runValidation() {
+        validation = OrderXValidator().validate(order: order)
+        showValidation = true
+    }
+
+    private func createInvoice() {
+        let number = store.nextNumber(companyID: order.companyID)
+        let invoice = order.toInvoice(number: number)
+        store.upsert(invoice)
+        createdInvoiceNumber = number
+    }
+
+    private func exportXML() {
+        do {
+            let xml = try OrderCIOXMLGenerator().generate(order: order)
+            let xmlString = String(data: xml, encoding: .utf8) ?? ""
+            print("=== XML CIO ===")
+            print(xmlString)
+            print("=== FIN XML ===")
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.xml]
+            panel.nameFieldStringValue = "commande-\(order.number).xml"
+            if panel.runModal() == .OK, let url = panel.url {
+                try xml.write(to: url)
+            }
+        } catch {
+            exportError = "\(error)"
+        }
+    }
+
+    private func orderValidationPanel(_ v: FacturXValidationResult) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    if v.isValid {
+                        Label("Conforme", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("Non conforme — \(v.errors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                            .foregroundStyle(.red)
+                    }
+                    Spacer()
+                    HStack(spacing: 4) {
+                        let current = statusStore.override(for: order)
+                        Image(systemName: current.systemImage)
+                            .foregroundColor(Color(hex: current.hexColor))
+                            .font(.caption2)
+                        Picker("Statut", selection: Binding<String>(
+                            get: { order.customStatusID ?? order.status.rawValue },
+                            set: { selectedID in
+                                if let s = OrderStatus(rawValue: selectedID) {
+                                    order.status = s
+                                    order.customStatusID = nil
+                                } else {
+                                    order.customStatusID = selectedID
+                                }
+                            }
+                        )) {
+                            ForEach(statusStore.overrides) { o in
+                                Label(o.label, systemImage: o.systemImage).tag(o.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                        .help("Statut de la commande (modifiable à tout moment)")
+                    }
+                    Button { showValidation = false } label: {
+                        Image(systemName: "xmark.circle")
+                    }.buttonStyle(.plain)
+                }
+                if !v.errors.isEmpty {
+                    Text("Erreurs :").font(.caption.bold())
+                    ForEach(v.errors, id: \.self) { e in
+                        Text("• \(e)").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                if !v.warnings.isEmpty {
+                    Text("Avertissements :").font(.caption.bold())
+                    ForEach(v.warnings, id: \.self) { w in
+                        Text("• \(w)").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
