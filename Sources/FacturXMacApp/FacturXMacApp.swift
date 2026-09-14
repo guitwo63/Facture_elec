@@ -1336,7 +1336,7 @@ struct DirectoryDetailView: View {
                             Button {
                                 editingContact = nil
                                 showContactEditor = true
-                            } label: { Label("Contacts", systemImage: "person.crop.circle.badge.plus") }
+                            } label: { Label("Créer un contact", systemImage: "plus.circle") }
                                 .buttonStyle(.bordered).controlSize(.small)
                         }
                         if !entry.contacts.isEmpty {
@@ -1394,8 +1394,8 @@ struct DirectoryDetailView: View {
                             Text("Adresses de facturation électronique").font(.headline)
                             Spacer()
                             Button {
-                                showRoutingEditor = true
-                            } label: { Label("Adresses", systemImage: "envelope.badge") }
+                                editingAddress = PartyRoutingAddress(siren: entry.party.siren ?? "")
+                            } label: { Label("Créer une adresse", systemImage: "plus.circle") }
                                 .buttonStyle(.bordered).controlSize(.small)
                         }
                         if entry.routingAddresses.isEmpty {
