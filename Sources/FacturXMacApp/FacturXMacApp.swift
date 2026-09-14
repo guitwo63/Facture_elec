@@ -188,6 +188,12 @@ struct RootView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var appEnv: AppEnvironment
+    @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var chorusSettings: ChorusProSettings
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
