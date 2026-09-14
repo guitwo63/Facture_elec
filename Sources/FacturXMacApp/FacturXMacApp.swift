@@ -3135,7 +3135,7 @@ struct OrdersTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $selectedID) {
-                        ForEach(filteredOrders) { order in
+                        ForEach(filteredOrders, id: \.id) { order in
                             VStack(alignment: .leading) {
                                 HStack {
                                     Text(order.number).font(.headline)
