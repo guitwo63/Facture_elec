@@ -216,7 +216,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
     }
 }
 
-public struct OrderStatusOverride: Codable, Hashable {
+public struct OrderStatusOverride: Codable, Hashable, Identifiable {
     public var id: String
     public var label: String
     public var systemImage: String
