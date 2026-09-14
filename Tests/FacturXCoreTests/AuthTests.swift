@@ -184,4 +184,30 @@ final class AuthTests: XCTestCase {
         let decoded2 = try JSONDecoder().decode(Invoice.self, from: data2)
         XCTAssertNil(decoded2.companyID)
     }
+
+    func testDirectoryEntryCompanyIDRetrocompatibility() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","kind":"client",
+         "party":{"name":"Client A","street":"","postcode":"","city":""}}
+        """.data(using: .utf8)!
+        let entry = try JSONDecoder().decode(DirectoryEntry.self, from: json)
+        XCTAssertNil(entry.companyID,
+                     "Une fiche annuaire sans companyID doit se décoder avec companyID nil")
+        XCTAssertEqual(entry.party.name, "Client A")
+    }
+
+    func testDirectoryEntryCompanyIDRoundTrip() throws {
+        let cid = UUID()
+        var entry = DirectoryEntry(kind: .client,
+                                   party: InvoiceParty(name: "Client A", street: "", postcode: "", city: ""),
+                                   companyID: cid)
+        XCTAssertEqual(entry.companyID, cid)
+        let data = try JSONEncoder().encode(entry)
+        let decoded = try JSONDecoder().decode(DirectoryEntry.self, from: data)
+        XCTAssertEqual(decoded.companyID, cid)
+        entry.companyID = nil
+        let data2 = try JSONEncoder().encode(entry)
+        let decoded2 = try JSONDecoder().decode(DirectoryEntry.self, from: data2)
+        XCTAssertNil(decoded2.companyID)
+    }
 }

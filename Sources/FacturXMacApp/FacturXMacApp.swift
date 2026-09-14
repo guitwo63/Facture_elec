@@ -1093,15 +1093,22 @@ struct PartyPickerSheet: View {
         return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
+    private var canCreateNew: Bool {
+        if role == .seller { return auth.currentUser?.role == .admin }
+        return true
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Annuaire — choisir \(role.title.lowercased())").font(.headline)
                 Spacer()
-                Button {
-                    creatingNew = true
-                } label: { Label("Nouveau", systemImage: "plus") }
-                    .buttonStyle(.bordered)
+                if canCreateNew {
+                    Button {
+                        creatingNew = true
+                    } label: { Label("Nouveau", systemImage: "plus") }
+                        .buttonStyle(.bordered)
+                }
                 Button("Fermer") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
@@ -1179,15 +1186,28 @@ struct DirectoryView: View {
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var auth: AuthStore
     @State private var query = ""
     @State private var editingEntry: DirectoryEntry?
     @State private var creatingNew = false
     @State private var showArchived = false
     @State private var selectedEntry: DirectoryEntry?
 
+    private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
+
+    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let base = directory.entries.filter { showArchived || !$0.isArchived }
+        var base = directory.entries.filter { showArchived || !$0.isArchived }
+        if let scope = scope {
+            base = base.filter { entry in
+                if entry.kind == .fournisseur { return scope.contains(entry.id) }
+                if entry.kind == .both { return scope.contains(entry.id) }
+                if let cid = entry.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
         guard !q.isEmpty else { return base }
         return base.filter {
             $0.displayName.lowercased().contains(q)
@@ -1276,23 +1296,27 @@ struct DirectoryView: View {
                         }
                         .tag(entry.id)
                         .contextMenu {
-                            Button {
-                                editingEntry = entry
-                            } label: { Label("Modifier", systemImage: "pencil") }
-                            Divider()
-                            Button {
-                                var e = entry
-                                e.isArchived.toggle()
-                                directory.upsert(e)
-                            } label: {
-                                Label(entry.isArchived ? "Désarchiver" : "Archiver",
-                                      systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+                            if canEditEntry(entry) {
+                                Button {
+                                    editingEntry = entry
+                                } label: { Label("Modifier", systemImage: "pencil") }
+                                Divider()
+                                Button {
+                                    var e = entry
+                                    e.isArchived.toggle()
+                                    directory.upsert(e)
+                                } label: {
+                                    Label(entry.isArchived ? "Désarchiver" : "Archiver",
+                                          systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    directory.delete(entry)
+                                    if selectedEntry?.id == entry.id { selectedEntry = nil }
+                                } label: { Label("Supprimer", systemImage: "trash") }
+                            } else {
+                                Text("Fournisseur : modification réservée à l'administrateur")
                             }
-                            Divider()
-                            Button(role: .destructive) {
-                                directory.delete(entry)
-                                if selectedEntry?.id == entry.id { selectedEntry = nil }
-                            } label: { Label("Supprimer", systemImage: "trash") }
                         }
                     }
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 360)
@@ -1300,14 +1324,17 @@ struct DirectoryView: View {
 
                 DirectoryDetailView(
                     entry: selectedEntry,
+                    canEdit: selectedEntry.map { canEditEntry($0) } ?? true,
                     onEdit: { entry in editingEntry = entry },
                     onArchive: { entry in
+                        guard canEditEntry(entry) else { return }
                         var e = entry
                         e.isArchived.toggle()
                         directory.upsert(e)
                         selectedEntry = e
                     },
                     onDelete: { entry in
+                        guard canEditEntry(entry) else { return }
                         directory.delete(entry)
                         selectedEntry = nil
                     }
@@ -1327,16 +1354,28 @@ struct DirectoryView: View {
             })
         }
         .sheet(isPresented: $creatingNew) {
-            DirectoryEditorView(initialKind: .client) { newEntry in
+            DirectoryEditorView(initialKind: .client, defaultCompanyID: defaultCompanyID()) { newEntry in
                 directory.upsert(newEntry)
                 creatingNew = false
             }
         }
     }
+
+    private func canEditEntry(_ entry: DirectoryEntry) -> Bool {
+        if entry.kind == .fournisseur || entry.kind == .both { return canManageFournisseurs }
+        return true
+    }
+
+    private func defaultCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
+    }
 }
 
 struct DirectoryDetailView: View {
     let entry: DirectoryEntry?
+    let canEdit: Bool
     let onEdit: (DirectoryEntry) -> Void
     let onArchive: (DirectoryEntry) -> Void
     let onDelete: (DirectoryEntry) -> Void
@@ -1389,13 +1428,16 @@ struct DirectoryDetailView: View {
                     Spacer()
                     Button { onEdit(entry) } label: { Label("Modifier", systemImage: "pencil") }
                         .buttonStyle(.bordered)
+                        .disabled(!canEdit)
                     Button { onArchive(entry) } label: {
                         Label(entry.isArchived ? "Désarchiver" : "Archiver",
                               systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!canEdit)
                     Button(role: .destructive) { onDelete(entry) } label: { Label("Supprimer", systemImage: "trash") }
                         .buttonStyle(.bordered)
+                        .disabled(!canEdit)
                 }
                 .padding(12)
 
@@ -1640,6 +1682,7 @@ struct DirectoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var auth: AuthStore
     @State private var entry: DirectoryEntry
     private let isEditing: Bool
     let onSave: (DirectoryEntry) -> Void
@@ -1654,8 +1697,12 @@ struct DirectoryEditorView: View {
         self.onDelete = onDelete
     }
 
-    init(initialKind: DirectoryEntryKind, onSave: @escaping (DirectoryEntry) -> Void) {
-        _entry = State(initialValue: DirectoryEntry(kind: initialKind, party: InvoiceParty(name: "", street: "", postcode: "", city: "")))
+    init(initialKind: DirectoryEntryKind, defaultCompanyID: UUID? = nil, onSave: @escaping (DirectoryEntry) -> Void) {
+        var initial = DirectoryEntry(kind: initialKind, party: InvoiceParty(name: "", street: "", postcode: "", city: ""))
+        if initialKind == .client, let cid = defaultCompanyID {
+            initial.companyID = cid
+        }
+        _entry = State(initialValue: initial)
         self.isEditing = false
         self.onSave = onSave
         self.onDelete = nil
@@ -1666,6 +1713,13 @@ struct DirectoryEditorView: View {
             return isEditing ? "Modifier le tiers" : "Nouveau tiers"
         }
         return isEditing ? "Modifier : \(entry.party.name)" : "Nouveau tiers : \(entry.party.name)"
+    }
+
+    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+
+    private var availableKinds: [DirectoryEntryKind] {
+        if canManageFournisseurs { return DirectoryEntryKind.allCases }
+        return [.client]
     }
 
     var body: some View {
@@ -1691,6 +1745,10 @@ struct DirectoryEditorView: View {
                 }
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Enregistrer") {
+                    var entry = entry
+                    if let cid = entry.companyID, !auth.availableSocieties().contains(where: { $0.id == cid }) {
+                        entry.companyID = nil
+                    }
                     let dup = directory.findDuplicates(of: entry)
                     if dup.isEmpty {
                         onSave(entry)
@@ -1704,8 +1762,27 @@ struct DirectoryEditorView: View {
             }
 
             Picker("Type", selection: $entry.kind) {
-                ForEach(DirectoryEntryKind.allCases, id: \.self) { Text($0.label).tag($0) }
+                ForEach(availableKinds, id: \.self) { Text($0.label).tag($0) }
             }.pickerStyle(.segmented)
+            .disabled(!canManageFournisseurs && entry.kind == .fournisseur)
+
+            if entry.kind == .client || entry.kind == .both {
+                GroupBox("Société (périmètre)") {
+                    HStack {
+                        Text("Société").frame(width: 80, alignment: .leading)
+                        Picker("Société", selection: Binding<UUID?>(
+                            get: { entry.companyID },
+                            set: { entry.companyID = $0 }
+                        )) {
+                            Text("Aucune").tag(UUID?.none)
+                            ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                                Text(s.displayName).tag(Optional(s.id))
+                            }
+                        }
+                        Spacer()
+                    }.padding(4)
+                }
+            }
 
             GroupBox("Identité et adresse") {
                 PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)

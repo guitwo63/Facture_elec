@@ -176,6 +176,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var id: UUID
     public var kind: DirectoryEntryKind
     public var party: InvoiceParty
+    public var companyID: UUID?
     public var note: String?
     public var routingAddresses: [PartyRoutingAddress]
     public var contacts: [PartyContact]
@@ -186,6 +187,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         id: UUID = UUID(),
         kind: DirectoryEntryKind = .client,
         party: InvoiceParty,
+        companyID: UUID? = nil,
         note: String? = nil,
         routingAddresses: [PartyRoutingAddress] = [],
         contacts: [PartyContact] = [],
@@ -195,6 +197,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         self.id = id
         self.kind = kind
         self.party = party
+        self.companyID = companyID
         self.note = note
         self.routingAddresses = routingAddresses
         self.contacts = contacts
@@ -224,7 +227,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, party, note, routingAddresses, contacts, isArchived, tagIDs
+        case id, kind, party, companyID, note, routingAddresses, contacts, isArchived, tagIDs
     }
 
     public init(from decoder: Decoder) throws {
@@ -233,6 +236,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         kind = try c.decodeIfPresent(DirectoryEntryKind.self, forKey: .kind) ?? .client
         party = try c.decodeIfPresent(InvoiceParty.self, forKey: .party)
             ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
+        companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
         note = try c.decodeIfPresent(String.self, forKey: .note)
         routingAddresses = try c.decodeIfPresent([PartyRoutingAddress].self, forKey: .routingAddresses) ?? []
         contacts = try c.decodeIfPresent([PartyContact].self, forKey: .contacts) ?? []
