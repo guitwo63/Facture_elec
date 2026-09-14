@@ -14,7 +14,7 @@ struct LoginView: View {
             VStack(spacing: 12) {
                 Image(systemName: "lock.shield.fill")
                     .font(.system(size: 56))
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                 Text("Factur-X").font(.largeTitle.bold())
                 Text("Connexion").font(.title3).foregroundStyle(.secondary)
             }
