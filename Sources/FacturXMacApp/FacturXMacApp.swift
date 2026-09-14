@@ -848,6 +848,13 @@ struct PartySection: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(party.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button {
+                    syncFromDirectory()
+                } label: {
+                    Label("Synchroniser depuis l'annuaire", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canSyncFromDirectory)
                 Spacer()
             }
 
@@ -923,6 +930,42 @@ struct PartySection: View {
                 Text("Un ou plusieurs tiers existants semblent correspondre :\n\(lines)")
             }
         }
+    }
+
+    private var canSyncFromDirectory: Bool {
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        if siren.count == 9 {
+            return directory.entries.contains { ($0.party.siren ?? "").filter { $0.isNumber } == siren }
+        }
+        let name = party.name.trimmingCharacters(in: .whitespaces)
+        return !name.isEmpty && directory.entries.contains { $0.party.name.trimmingCharacters(in: .whitespaces) == name }
+    }
+
+    private func syncFromDirectory() {
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        let name = party.name.trimmingCharacters(in: .whitespaces)
+        let match: DirectoryEntry?
+        if siren.count == 9 {
+            match = directory.entries.first { ($0.party.siren ?? "").filter { $0.isNumber } == siren }
+        } else {
+            match = directory.entries.first { $0.party.name.trimmingCharacters(in: .whitespaces) == name }
+        }
+        guard let entry = match else { return }
+        var p = party
+        if let routing = entry.defaultRoutingAddress, routing.isActive {
+            let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+            if !composed.isEmpty {
+                p.endpointID = composed
+                p.endpointSchemeID = "0225"
+            }
+        }
+        if let contact = entry.defaultContact, contact.isActive {
+            p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+            p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+            p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+        }
+        party = p
+        onPartyPicked?(p)
     }
 }
 
