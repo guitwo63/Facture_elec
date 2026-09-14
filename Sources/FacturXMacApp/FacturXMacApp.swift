@@ -3078,7 +3078,7 @@ struct OrdersTabView: View {
     @State private var query = ""
 
     var filteredOrders: [SalesOrder] {
-        var result = orderStore.orders
+        let result = orderStore.orders
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
         return result.filter { order in
