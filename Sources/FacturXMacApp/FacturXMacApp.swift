@@ -2412,7 +2412,7 @@ struct ApplicationSettingsView: View {
 
                 Divider()
                 HStack {
-                    Text("Facture_elec v0.2.1").font(.caption).foregroundStyle(.secondary)
+                    Text("Facture_elec v0.3.0").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     if let repo = URL(string: "https://github.com/guitwo63/Facture_elec") {
                         Link("GitHub", destination: repo).font(.caption)
