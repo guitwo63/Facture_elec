@@ -1291,14 +1291,39 @@ struct DirectoryDetailView: View {
                         }
 
                         Divider()
-                        Text("Contact").font(.headline)
-                        if let cn = entry.party.contactName, !cn.isEmpty { detailRow("Nom", cn) }
-                        if let ce = entry.party.contactEmail, !ce.isEmpty { detailRow("Email", ce) }
-                        if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
-                        if (entry.party.contactName?.isEmpty ?? true)
+                        Text("Contact(s)").font(.headline)
+                        if !entry.contacts.isEmpty {
+                            ForEach(entry.contacts) { ct in
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack {
+                                            Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name).font(.callout.bold())
+                                            if ct.isDefault {
+                                                Text("défaut").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
+                                                    .background(Color.accentColor.opacity(0.2), in: Capsule())
+                                            }
+                                            if !ct.isActive {
+                                                Text("inactif").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
+                                                    .background(Color.gray.opacity(0.2), in: Capsule())
+                                            }
+                                        }
+                                        if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty { Text("Email : \(e)").font(.caption).foregroundColor(.secondary) }
+                                        if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty { Text("Tél : \(p)").font(.caption).foregroundColor(.secondary) }
+                                        if let lbl = ct.label?.trimmingCharacters(in: .whitespaces), !lbl.isEmpty { Text("Libellé : \(lbl)").font(.caption).foregroundColor(.secondary) }
+                                    }
+                                    Spacer()
+                                }
+                                .padding(8)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+                            }
+                        } else if (entry.party.contactName?.isEmpty ?? true)
                             && (entry.party.contactEmail?.isEmpty ?? true)
                             && (entry.party.contactPhone?.isEmpty ?? true) {
                             Text("Aucun contact renseigné").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            if let cn = entry.party.contactName, !cn.isEmpty { detailRow("Nom", cn) }
+                            if let ce = entry.party.contactEmail, !ce.isEmpty { detailRow("Email", ce) }
+                            if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
                         }
 
                         if !entry.routingAddresses.isEmpty {
@@ -1441,7 +1466,7 @@ struct DirectoryEditorView: View {
             }.pickerStyle(.segmented)
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
             }
 
             if !tagStore.tags.isEmpty {
@@ -1545,6 +1570,50 @@ struct RoutingAddressFormView: View {
                 }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
             }
         }.padding(16).frame(minWidth: 420, minHeight: 360)
+    }
+}
+
+struct ContactFormView: View {
+    @Binding var contacts: [PartyContact]
+    @State private var draft: PartyContact
+    @Environment(\.dismiss) private var dismiss
+    private let existingID: UUID?
+
+    init(contacts: Binding<[PartyContact]>, editing: PartyContact) {
+        _contacts = contacts
+        _draft = State(initialValue: editing)
+        existingID = editing.id
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(existingID == nil ? "Nouveau contact" : "Modifier le contact").font(.headline)
+            TextField("Nom", text: $draft.name)
+            TextField("Email", text: Binding($draft.email, replacingNilWith: ""))
+            TextField("Téléphone", text: Binding($draft.phone, replacingNilWith: ""))
+            TextField("Libellé (optionnel)", text: Binding($draft.label, replacingNilWith: ""))
+            Toggle("Contact actif", isOn: $draft.isActive)
+            Toggle("Contact par défaut", isOn: $draft.isDefault)
+            HStack {
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Enregistrer") {
+                    if draft.isDefault {
+                        for i in contacts.indices { contacts[i].isDefault = false }
+                    }
+                    if let id = existingID, let idx = contacts.firstIndex(where: { $0.id == id }) {
+                        contacts[idx] = draft
+                    } else {
+                        if contacts.isEmpty { draft.isDefault = true }
+                        contacts.append(draft)
+                    }
+                    if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
+                        contacts[0].isDefault = true
+                    }
+                    dismiss()
+                }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+            }
+        }.padding(16).frame(minWidth: 420, minHeight: 320)
     }
 }
 
@@ -1912,16 +1981,19 @@ struct ChorusProSearchSheet: View {
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
     @Binding var routingAddresses: [PartyRoutingAddress]
+    @Binding var contacts: [PartyContact]
     var showWebButton: Bool
     var isFournisseur: Bool = false
     @State private var showRoutingEditor = false
     @State private var editingAddress: PartyRoutingAddress?
+    @State private var showContactEditor = false
+    @State private var editingContact: PartyContact?
     @State private var dinumResults: [SireneResult] = []
     @State private var dinumLoading = false
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false) {
         self._party = party
         self.showWebButton = showWebButton
         self.isFournisseur = isFournisseur
@@ -1929,6 +2001,11 @@ struct PartyEditorView: View {
             self._routingAddresses = ra
         } else {
             self._routingAddresses = .constant([])
+        }
+        if let ct = contacts {
+            self._contacts = ct
+        } else {
+            self._contacts = .constant([])
         }
     }
 
@@ -1997,10 +2074,51 @@ struct PartyEditorView: View {
                 TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
                 NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
             }
-            HStack {
-                TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
-                TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
-                TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
+            Button {
+                editingContact = nil
+                showContactEditor = true
+            } label: {
+                Label("Contacts", systemImage: "person.crop.circle.badge.plus")
+            }
+            .buttonStyle(.bordered)
+            if !contacts.isEmpty {
+                ForEach(contacts) { ct in
+                    HStack(spacing: 8) {
+                        if ct.isDefault {
+                            Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.2), in: Capsule())
+                        }
+                        Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
+                            .font(.caption.bold())
+                        if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
+                            Text(e).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+                            Text(p).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if !ct.isActive {
+                            Text("inactif").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Color.gray.opacity(0.2), in: Capsule())
+                        }
+                        Spacer()
+                        Button {
+                            editingContact = ct
+                            showContactEditor = true
+                        } label: { Image(systemName: "pencil") }
+                            .buttonStyle(.borderless)
+                            .help("Modifier ce contact")
+                        Button(role: .destructive) {
+                            contacts.removeAll { $0.id == ct.id }
+                            if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
+                                contacts[0].isDefault = true
+                            }
+                        } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                            .help("Supprimer ce contact")
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                }
             }
             Button {
                 showRoutingEditor = true
@@ -2080,6 +2198,16 @@ struct PartyEditorView: View {
         }
         .sheet(item: $editingAddress) { addr in
             RoutingAddressFormView(addresses: $routingAddresses, editing: addr)
+        }
+        .sheet(isPresented: $showContactEditor) {
+            if let ct = editingContact {
+                ContactFormView(contacts: $contacts, editing: ct)
+            } else {
+                ContactFormView(contacts: $contacts, editing: PartyContact())
+            }
+        }
+        .onChange(of: showContactEditor) { showing in
+            if !showing { editingContact = nil }
         }
     }
 

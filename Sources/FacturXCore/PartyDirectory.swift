@@ -120,12 +120,65 @@ public struct PartyRoutingAddress: Codable, Hashable, Identifiable {
     }
 }
 
+public struct PartyContact: Codable, Hashable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var email: String?
+    public var phone: String?
+    public var label: String?
+    public var isActive: Bool
+    public var isDefault: Bool
+
+    public init(
+        id: UUID = UUID(),
+        name: String = "",
+        email: String? = nil,
+        phone: String? = nil,
+        label: String? = nil,
+        isActive: Bool = true,
+        isDefault: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.email = email
+        self.phone = phone
+        self.label = label
+        self.isActive = isActive
+        self.isDefault = isDefault
+    }
+
+    public var displayLine: String {
+        var parts: [String] = []
+        let n = name.trimmingCharacters(in: .whitespaces)
+        if !n.isEmpty { parts.append(n) }
+        if let e = email?.trimmingCharacters(in: .whitespaces), !e.isEmpty { parts.append(e) }
+        if let p = phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty { parts.append(p) }
+        return parts.joined(separator: " • ")
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, email, phone, label, isActive, isDefault
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        phone = try c.decodeIfPresent(String.self, forKey: .phone)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+    }
+}
+
 public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var id: UUID
     public var kind: DirectoryEntryKind
     public var party: InvoiceParty
     public var note: String?
     public var routingAddresses: [PartyRoutingAddress]
+    public var contacts: [PartyContact]
     public var isArchived: Bool
     public var tagIDs: [UUID]
 
@@ -135,6 +188,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         party: InvoiceParty,
         note: String? = nil,
         routingAddresses: [PartyRoutingAddress] = [],
+        contacts: [PartyContact] = [],
         isArchived: Bool = false,
         tagIDs: [UUID] = []
     ) {
@@ -143,6 +197,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         self.party = party
         self.note = note
         self.routingAddresses = routingAddresses
+        self.contacts = contacts
         self.isArchived = isArchived
         self.tagIDs = tagIDs
     }
@@ -169,7 +224,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, party, note, routingAddresses, isArchived, tagIDs
+        case id, kind, party, note, routingAddresses, contacts, isArchived, tagIDs
     }
 
     public init(from decoder: Decoder) throws {
@@ -180,6 +235,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
             ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         note = try c.decodeIfPresent(String.self, forKey: .note)
         routingAddresses = try c.decodeIfPresent([PartyRoutingAddress].self, forKey: .routingAddresses) ?? []
+        contacts = try c.decodeIfPresent([PartyContact].self, forKey: .contacts) ?? []
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         tagIDs = try c.decodeIfPresent([UUID].self, forKey: .tagIDs) ?? []
     }
@@ -187,6 +243,11 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var defaultRoutingAddress: PartyRoutingAddress? {
         routingAddresses.first(where: { $0.isDefault && $0.isActive })
             ?? routingAddresses.first(where: { $0.isActive })
+    }
+
+    public var defaultContact: PartyContact? {
+        contacts.first(where: { $0.isDefault && $0.isActive })
+            ?? contacts.first(where: { $0.isActive })
     }
 }
 
@@ -206,8 +267,21 @@ public final class PartyDirectory: ObservableObject {
     public func load() {
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([DirectoryEntry].self, from: data) {
-            entries = decoded
+            entries = decoded.map { migrateContacts($0) }
         }
+    }
+
+    private func migrateContacts(_ entry: DirectoryEntry) -> DirectoryEntry {
+        var e = entry
+        if e.contacts.isEmpty {
+            let cn = e.party.contactName?.trimmingCharacters(in: .whitespaces) ?? ""
+            let ce = e.party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? ""
+            let cp = e.party.contactPhone?.trimmingCharacters(in: .whitespaces) ?? ""
+            if !cn.isEmpty || !ce.isEmpty || !cp.isEmpty {
+                e.contacts = [PartyContact(name: cn, email: ce.isEmpty ? nil : ce, phone: cp.isEmpty ? nil : cp, isActive: true, isDefault: true)]
+            }
+        }
+        return e
     }
 
     public func save() {
