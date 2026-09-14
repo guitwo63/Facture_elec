@@ -446,8 +446,6 @@ public final class SuperPDPService {
         let isPDF = fileData.count > 4 && fileData[0] == 0x25 && fileData[1] == 0x50 && fileData[2] == 0x44 && fileData[3] == 0x46
         if isPDF {
             req.setValue("application/pdf", forHTTPHeaderField: "Content-Type")
-        } else {
-            req.setValue("application/xml", forHTTPHeaderField: "Content-Type")
         }
         req.httpBody = fileData
         let (data, resp) = try await session.data(for: req)
@@ -456,7 +454,10 @@ public final class SuperPDPService {
         }
         guard (200...299).contains(http.statusCode) else {
             let bodyText = String(data: data, encoding: .utf8) ?? ""
-            throw SuperPDPError.http(status: http.statusCode, body: bodyText.isEmpty ? "(corps vide)" : bodyText)
+            let hint = credentials.useSandbox
+                ? " (bac à sable : le SIREN émetteur de la facture doit correspondre à celui de l'application OAuth — Tricatel 000000001 ou Burger Queen 000000002 — et le destinataire doit être joignable sur le réseau Peppol test)"
+                : ""
+            throw SuperPDPError.http(status: http.statusCode, body: (bodyText.isEmpty ? "(corps vide)" : bodyText) + hint)
         }
         guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
             throw SuperPDPError.decoding("JSON dépôt illisible : \(String(data: data, encoding: .utf8) ?? "")")
