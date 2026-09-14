@@ -851,7 +851,7 @@ struct PartySection: View {
                 Spacer()
             }
 
-            PartyEditorView(party: $party, isFournisseur: role == .seller)
+            PartyEditorView(party: $party, isFournisseur: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -863,6 +863,11 @@ struct PartySection: View {
                         p.endpointID = composed
                         p.endpointSchemeID = "0225"
                     }
+                }
+                if let contact = selected.defaultContact, contact.isActive {
+                    p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+                    p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+                    p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
                 }
                 party = p
                 onPartyPicked?(p)
@@ -918,6 +923,26 @@ struct PartySection: View {
                 Text("Un ou plusieurs tiers existants semblent correspondre :\n\(lines)")
             }
         }
+    }
+
+    private func updatePartyFromContact(_ contact: PartyContact) {
+        var p = party
+        p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+        p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+        p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+        party = p
+        onPartyPicked?(p)
+    }
+
+    private func updatePartyFromRouting(_ routing: PartyRoutingAddress) {
+        var p = party
+        let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+        if !composed.isEmpty {
+            p.endpointID = composed
+            p.endpointSchemeID = "0225"
+        }
+        party = p
+        onPartyPicked?(p)
     }
 }
 
@@ -1200,9 +1225,43 @@ struct DirectoryDetailView: View {
     let onDelete: (DirectoryEntry) -> Void
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var showRoutingEditor = false
+    @State private var showContactEditor = false
+    @State private var editingAddress: PartyRoutingAddress?
+    @State private var editingContact: PartyContact?
+
+    private var currentEntry: DirectoryEntry? {
+        guard let id = entry?.id else { return nil }
+        return directory.entries.first(where: { $0.id == id }) ?? entry
+    }
+
+    private func routingBinding(entry: DirectoryEntry) -> Binding<[PartyRoutingAddress]> {
+        Binding(
+            get: { directory.entries.first(where: { $0.id == entry.id })?.routingAddresses ?? entry.routingAddresses },
+            set: { newValue in
+                if var e = directory.entries.first(where: { $0.id == entry.id }) {
+                    e.routingAddresses = newValue
+                    directory.upsert(e)
+                }
+            }
+        )
+    }
+
+    private func contactsBinding(entry: DirectoryEntry) -> Binding<[PartyContact]> {
+        Binding(
+            get: { directory.entries.first(where: { $0.id == entry.id })?.contacts ?? entry.contacts },
+            set: { newValue in
+                if var e = directory.entries.first(where: { $0.id == entry.id }) {
+                    e.contacts = newValue
+                    directory.upsert(e)
+                }
+            }
+        )
+    }
 
     var body: some View {
-        if let entry = entry {
+        if let entry = currentEntry {
             VStack(spacing: 0) {
                 HStack {
                     Text(entry.displayName).font(.headline)
@@ -1291,46 +1350,118 @@ struct DirectoryDetailView: View {
                         }
 
                         Divider()
-                        Text("Contact").font(.headline)
-                        if let cn = entry.party.contactName, !cn.isEmpty { detailRow("Nom", cn) }
-                        if let ce = entry.party.contactEmail, !ce.isEmpty { detailRow("Email", ce) }
-                        if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
-                        if (entry.party.contactName?.isEmpty ?? true)
-                            && (entry.party.contactEmail?.isEmpty ?? true)
-                            && (entry.party.contactPhone?.isEmpty ?? true) {
-                            Text("Aucun contact renseigné").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text("Contact(s)").font(.headline)
+                            Spacer()
+                            Button {
+                                editingContact = nil
+                                showContactEditor = true
+                            } label: { Label("Créer un contact", systemImage: "plus.circle") }
+                                .buttonStyle(.bordered).controlSize(.small)
                         }
-
-                        if !entry.routingAddresses.isEmpty {
-                            Divider()
-                            Text("Adresses de facturation électronique").font(.headline)
-                            ForEach(entry.routingAddresses) { addr in
-                                HStack(alignment: .top) {
+                        if !entry.contacts.isEmpty {
+                            ForEach(entry.contacts) { ct in
+                                HStack(alignment: .top, spacing: 8) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         HStack {
-                                            Text(addr.format.label).font(.callout.bold())
-                                            if addr.isDefault {
+                                            Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name).font(.callout.bold())
+                                            if ct.isDefault {
                                                 Text("défaut").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
                                                     .background(Color.accentColor.opacity(0.2), in: Capsule())
                                             }
-                                            if !addr.isActive {
-                                                Text("inactive").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
+                                            if !ct.isActive {
+                                                Text("inactif").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
                                                     .background(Color.gray.opacity(0.2), in: Capsule())
                                             }
                                         }
-                                        Text(addr.composedAddress).font(.system(.callout, design: .monospaced))
-                                        if let lbl = addr.label, !lbl.isEmpty {
-                                            Text("Libellé : \(lbl)").font(.caption).foregroundColor(.secondary)
-                                        }
-                                        if let s = addr.siret, !s.isEmpty { Text("SIRET : \(s)").font(.caption).foregroundColor(.secondary) }
-                                        if let suf = addr.suffixe, !suf.isEmpty { Text("Suffixe : \(suf)").font(.caption).foregroundColor(.secondary) }
-                                        if let cr = addr.codeRoutage, !cr.isEmpty { Text("Code routage : \(cr)").font(.caption).foregroundColor(.secondary) }
+                                        if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty { Text("Email : \(e)").font(.caption).foregroundColor(.secondary) }
+                                        if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty { Text("Tél : \(p)").font(.caption).foregroundColor(.secondary) }
+                                        if let lbl = ct.label?.trimmingCharacters(in: .whitespaces), !lbl.isEmpty { Text("Libellé : \(lbl)").font(.caption).foregroundColor(.secondary) }
                                     }
                                     Spacer()
+                                    Button {
+                                        editingContact = ct
+                                        showContactEditor = true
+                                    } label: { Image(systemName: "pencil") }
+                                        .buttonStyle(.borderless)
+                                        .help("Modifier ce contact")
+                                    Button(role: .destructive) {
+                                        var e = entry
+                                        e.contacts.removeAll { $0.id == ct.id }
+                                        if e.contacts.allSatisfy({ !$0.isDefault }), !e.contacts.isEmpty {
+                                            e.contacts[0].isDefault = true
+                                        }
+                                        directory.upsert(e)
+                                    } label: { Image(systemName: "trash") }
+                                        .buttonStyle(.borderless)
+                                        .help("Supprimer ce contact")
                                 }
                                 .padding(8)
                                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                             }
+                        } else if (entry.party.contactName?.isEmpty ?? true)
+                            && (entry.party.contactEmail?.isEmpty ?? true)
+                            && (entry.party.contactPhone?.isEmpty ?? true) {
+                            Text("Aucun contact renseigné").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            if let cn = entry.party.contactName, !cn.isEmpty { detailRow("Nom", cn) }
+                            if let ce = entry.party.contactEmail, !ce.isEmpty { detailRow("Email", ce) }
+                            if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
+                        }
+
+                        Divider()
+                        HStack {
+                            Text("Adresses de facturation électronique").font(.headline)
+                            Spacer()
+                            Button {
+                                editingAddress = PartyRoutingAddress(siren: entry.party.siren ?? "")
+                            } label: { Label("Créer une adresse", systemImage: "plus.circle") }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        }
+                        if entry.routingAddresses.isEmpty {
+                            Text("Aucune adresse de facturation électronique renseignée").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(entry.routingAddresses) { addr in
+                            HStack(alignment: .top, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text(addr.format.label).font(.callout.bold())
+                                        if addr.isDefault {
+                                            Text("défaut").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
+                                                .background(Color.accentColor.opacity(0.2), in: Capsule())
+                                        }
+                                        if !addr.isActive {
+                                            Text("inactive").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
+                                                .background(Color.gray.opacity(0.2), in: Capsule())
+                                        }
+                                    }
+                                    Text(addr.composedAddress).font(.system(.callout, design: .monospaced))
+                                    if let lbl = addr.label, !lbl.isEmpty {
+                                        Text("Libellé : \(lbl)").font(.caption).foregroundColor(.secondary)
+                                    }
+                                    if let s = addr.siret, !s.isEmpty { Text("SIRET : \(s)").font(.caption).foregroundColor(.secondary) }
+                                    if let suf = addr.suffixe, !suf.isEmpty { Text("Suffixe : \(suf)").font(.caption).foregroundColor(.secondary) }
+                                    if let cr = addr.codeRoutage, !cr.isEmpty { Text("Code routage : \(cr)").font(.caption).foregroundColor(.secondary) }
+                                }
+                                Spacer()
+                                Button {
+                                    editingAddress = addr
+                                } label: { Image(systemName: "pencil") }
+                                    .buttonStyle(.borderless)
+                                    .help("Modifier cette adresse")
+                                Button(role: .destructive) {
+                                    var e = entry
+                                    e.routingAddresses.removeAll { $0.id == addr.id }
+                                    if e.routingAddresses.allSatisfy({ !$0.isDefault }), !e.routingAddresses.isEmpty {
+                                        e.routingAddresses[0].isDefault = true
+                                    }
+                                    directory.upsert(e)
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Supprimer cette adresse")
+                            }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                         }
 
                         if let note = entry.note, !note.isEmpty {
@@ -1350,6 +1481,25 @@ struct DirectoryDetailView: View {
                         }
                     }.padding(14)
                 }
+            }
+            .sheet(isPresented: $showRoutingEditor) {
+                RoutingAddressQuickEditor(
+                    siren: entry.party.siren ?? "",
+                    addresses: routingBinding(entry: entry)
+                )
+            }
+            .sheet(item: $editingAddress) { addr in
+                RoutingAddressFormView(addresses: routingBinding(entry: entry), editing: addr)
+            }
+            .sheet(isPresented: $showContactEditor) {
+                if let ct = editingContact {
+                    ContactFormView(contacts: contactsBinding(entry: entry), editing: ct)
+                } else {
+                    ContactFormView(contacts: contactsBinding(entry: entry), editing: PartyContact())
+                }
+            }
+            .onChange(of: showContactEditor) { showing in
+                if !showing { editingContact = nil }
             }
         } else {
             VStack(spacing: 8) {
@@ -1441,7 +1591,7 @@ struct DirectoryEditorView: View {
             }.pickerStyle(.segmented)
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
             }
 
             if !tagStore.tags.isEmpty {
@@ -1545,6 +1695,231 @@ struct RoutingAddressFormView: View {
                 }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
             }
         }.padding(16).frame(minWidth: 420, minHeight: 360)
+    }
+}
+
+struct ContactFormView: View {
+    @Binding var contacts: [PartyContact]
+    @State private var draft: PartyContact
+    @Environment(\.dismiss) private var dismiss
+    private let existingID: UUID?
+
+    init(contacts: Binding<[PartyContact]>, editing: PartyContact) {
+        _contacts = contacts
+        _draft = State(initialValue: editing)
+        existingID = editing.id
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(existingID == nil ? "Nouveau contact" : "Modifier le contact").font(.headline)
+            TextField("Nom", text: $draft.name)
+            TextField("Email", text: Binding($draft.email, replacingNilWith: ""))
+            TextField("Téléphone", text: Binding($draft.phone, replacingNilWith: ""))
+            TextField("Libellé (optionnel)", text: Binding($draft.label, replacingNilWith: ""))
+            Toggle("Contact actif", isOn: $draft.isActive)
+            Toggle("Contact par défaut", isOn: $draft.isDefault)
+            HStack {
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Enregistrer") {
+                    if draft.isDefault {
+                        for i in contacts.indices { contacts[i].isDefault = false }
+                    }
+                    if let id = existingID, let idx = contacts.firstIndex(where: { $0.id == id }) {
+                        contacts[idx] = draft
+                    } else {
+                        if contacts.isEmpty { draft.isDefault = true }
+                        contacts.append(draft)
+                    }
+                    if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
+                        contacts[0].isDefault = true
+                    }
+                    dismiss()
+                }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+            }
+        }.padding(16).frame(minWidth: 420, minHeight: 320)
+    }
+}
+
+struct ContactPickerSheet: View {
+    let entry: DirectoryEntry
+    let onPick: (PartyContact?) -> Void
+    @EnvironmentObject var directory: PartyDirectory
+    @Environment(\.dismiss) private var dismiss
+    @State private var showEditor = false
+    @State private var editing: PartyContact?
+    @State private var drafts: [PartyContact]
+
+    init(entry: DirectoryEntry, onPick: @escaping (PartyContact?) -> Void) {
+        self.entry = entry
+        self.onPick = onPick
+        _drafts = State(initialValue: entry.contacts)
+    }
+
+    private var contactsBinding: Binding<[PartyContact]> {
+        Binding(
+            get: { drafts },
+            set: { drafts = $0 }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Contacts — \(entry.displayName)").font(.headline)
+                Spacer()
+                Button("Fermer") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(12)
+            Divider()
+            if drafts.isEmpty {
+                Text("Aucun contact. Cliquez « Nouveau » pour en créer un.")
+                    .foregroundStyle(.secondary).padding()
+            } else {
+                List {
+                    ForEach(drafts) { ct in
+                        Button {
+                            onPick(ct); dismiss()
+                        } label: {
+                            HStack(spacing: 8) {
+                                if ct.isDefault {
+                                    Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.accentColor.opacity(0.2), in: Capsule())
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
+                                        .font(.body.weight(.medium))
+                                    if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
+                                        Text(e).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+                                        Text(p).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    if !ct.isActive {
+                                        Text("inactif").font(.caption2)
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            HStack {
+                Button {
+                    editing = nil
+                    showEditor = true
+                } label: { Label("Nouveau contact", systemImage: "plus") }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Aucun contact") { onPick(nil); dismiss() }
+            }.padding(12)
+        }
+        .frame(minWidth: 460, minHeight: 320)
+        .sheet(isPresented: $showEditor) {
+            if let ct = editing {
+                ContactFormView(contacts: contactsBinding, editing: ct)
+            } else {
+                ContactFormView(contacts: contactsBinding, editing: PartyContact())
+            }
+        }
+        .onChange(of: showEditor) { showing in
+            guard !showing else { return }
+            var e = entry
+            e.contacts = drafts
+            directory.upsert(e)
+            editing = nil
+        }
+    }
+}
+
+struct RoutingPickerSheet: View {
+    let entry: DirectoryEntry
+    let onPick: (PartyRoutingAddress?) -> Void
+    @EnvironmentObject var directory: PartyDirectory
+    @Environment(\.dismiss) private var dismiss
+    @State private var showEditor = false
+    @State private var editing: PartyRoutingAddress?
+    @State private var drafts: [PartyRoutingAddress]
+
+    init(entry: DirectoryEntry, onPick: @escaping (PartyRoutingAddress?) -> Void) {
+        self.entry = entry
+        self.onPick = onPick
+        _drafts = State(initialValue: entry.routingAddresses)
+    }
+
+    private var routingBinding: Binding<[PartyRoutingAddress]> {
+        Binding(
+            get: { drafts },
+            set: { drafts = $0 }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Adresses de facturation électronique — \(entry.displayName)").font(.headline)
+                Spacer()
+                Button("Fermer") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(12)
+            Divider()
+            if drafts.isEmpty {
+                Text("Aucune adresse. Cliquez « Nouvelle » pour en créer une.")
+                    .foregroundStyle(.secondary).padding()
+            } else {
+                List {
+                    ForEach(drafts) { addr in
+                        Button {
+                            onPick(addr); dismiss()
+                        } label: {
+                            HStack(spacing: 8) {
+                                if addr.isDefault {
+                                    Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.accentColor.opacity(0.2), in: Capsule())
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(addr.format.label).font(.caption.bold())
+                                    Text(addr.composedAddress).font(.system(.body, design: .monospaced))
+                                    if let l = addr.label, !l.isEmpty { Text(l).font(.caption2).foregroundStyle(.secondary) }
+                                    if !addr.isActive { Text("inactive").font(.caption2) }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            HStack {
+                Button {
+                    editing = nil
+                    showEditor = true
+                } label: { Label("Nouvelle adresse", systemImage: "plus") }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Aucune adresse") { onPick(nil); dismiss() }
+            }.padding(12)
+        }
+        .frame(minWidth: 480, minHeight: 340)
+        .sheet(isPresented: $showEditor) {
+            if let addr = editing {
+                RoutingAddressFormView(addresses: routingBinding, editing: addr)
+            } else {
+                RoutingAddressFormView(addresses: routingBinding, editing: PartyRoutingAddress(siren: entry.party.siren ?? ""))
+            }
+        }
+        .onChange(of: showEditor) { showing in
+            guard !showing else { return }
+            var e = entry
+            e.routingAddresses = drafts
+            directory.upsert(e)
+            editing = nil
+        }
     }
 }
 
@@ -1912,24 +2287,55 @@ struct ChorusProSearchSheet: View {
 struct PartyEditorView: View {
     @Binding var party: InvoiceParty
     @Binding var routingAddresses: [PartyRoutingAddress]
+    @Binding var contacts: [PartyContact]
     var showWebButton: Bool
     var isFournisseur: Bool = false
+    var isMultiContact: Bool
+    var directory: PartyDirectory?
+    var onPickContact: ((PartyContact) -> Void)?
+    var onPickRouting: ((PartyRoutingAddress) -> Void)?
+    var onPartyPicked: ((InvoiceParty) -> Void)?
     @State private var showRoutingEditor = false
     @State private var editingAddress: PartyRoutingAddress?
+    @State private var showContactEditor = false
+    @State private var editingContact: PartyContact?
+    @State private var showContactPicker = false
+    @State private var showRoutingPicker = false
     @State private var dinumResults: [SireneResult] = []
     @State private var dinumLoading = false
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
         self.isFournisseur = isFournisseur
+        self.isMultiContact = contacts != nil
+        self.directory = directory
+        self.onPickContact = onPickContact
+        self.onPickRouting = onPickRouting
+        self.onPartyPicked = onPartyPicked
         if let ra = routingAddresses {
             self._routingAddresses = ra
         } else {
             self._routingAddresses = .constant([])
         }
+        if let ct = contacts {
+            self._contacts = ct
+        } else {
+            self._contacts = .constant([])
+        }
+    }
+
+    private var linkedEntry: DirectoryEntry? {
+        guard let dir = directory else { return nil }
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        if siren.count == 9, let e = dir.entries.first(where: { ($0.party.siren ?? "").filter { $0.isNumber } == siren }) {
+            return e
+        }
+        let name = party.name.trimmingCharacters(in: .whitespaces)
+        if !name.isEmpty { return dir.entries.first(where: { $0.party.name.trimmingCharacters(in: .whitespaces) == name }) }
+        return nil
     }
 
     private var star: some View { Text(" *").foregroundColor(.red) }
@@ -1977,11 +2383,10 @@ struct PartyEditorView: View {
                     TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("SIRET").font(.caption)
-                    TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
-                }
+            HStack {
+                Text("SIRET").font(.caption)
+                TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
+                    .frame(maxWidth: 200)
                 if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
                     if SireneValidator.isValidSiret(st) {
                         Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
@@ -1991,23 +2396,113 @@ struct PartyEditorView: View {
                             .font(.caption2).foregroundStyle(.orange)
                     }
                 }
+                Spacer()
             }
             HStack {
                 Text("Ident. élec. (BT-49/34)").font(.caption)
-                TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
-                NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
+                if linkedEntry != nil {
+                    Text((party.endpointID ?? "").isEmpty ? "Aucune" : (party.endpointID ?? ""))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        showRoutingPicker = true
+                    } label: { Label("Choisir", systemImage: "envelope") }
+                        .buttonStyle(.bordered)
+                        .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
+                } else {
+                    TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
+                    NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
+                }
             }
-            HStack {
-                TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
-                TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
-                TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
+            if isMultiContact {
+                Button {
+                    editingContact = nil
+                    showContactEditor = true
+                } label: {
+                    Label("Contacts", systemImage: "person.crop.circle.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                if !contacts.isEmpty {
+                    ForEach(contacts) { ct in
+                        HStack(spacing: 8) {
+                            if ct.isDefault {
+                                Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.accentColor.opacity(0.2), in: Capsule())
+                            }
+                            Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
+                                .font(.caption.bold())
+                            if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
+                                Text(e).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+                                Text(p).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if !ct.isActive {
+                                Text("inactif").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.gray.opacity(0.2), in: Capsule())
+                            }
+                            Spacer()
+                            Button {
+                                editingContact = ct
+                                showContactEditor = true
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce contact")
+                            Button(role: .destructive) {
+                                contacts.removeAll { $0.id == ct.id }
+                                if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
+                                    contacts[0].isDefault = true
+                                }
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer ce contact")
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                    }
+                }
+            } else if linkedEntry != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Contact").font(.caption)
+                        Spacer()
+                        Button {
+                            showContactPicker = true
+                        } label: { Label("Choisir", systemImage: "person") }
+                            .buttonStyle(.bordered)
+                            .help("Choisir ou créer un contact depuis la fiche tiers")
+                    }
+                    let name = party.contactName?.trimmingCharacters(in: .whitespaces) ?? ""
+                    let email = party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? ""
+                    let phone = party.contactPhone?.trimmingCharacters(in: .whitespaces) ?? ""
+                    if name.isEmpty && email.isEmpty && phone.isEmpty {
+                        Text("Aucun contact").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        HStack(spacing: 8) {
+                            Text(name.isEmpty ? "(sans nom)" : name).font(.caption.bold())
+                            if !email.isEmpty { Text(email).font(.caption).foregroundStyle(.secondary) }
+                            if !phone.isEmpty { Text(phone).font(.caption).foregroundStyle(.secondary) }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                    }
+                }
+            } else {
+                HStack {
+                    TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
+                    TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
+                    TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
+                }
             }
-            Button {
-                showRoutingEditor = true
-            } label: {
-                Label("Adresses de facturation électronique", systemImage: "envelope.badge")
+            if linkedEntry == nil {
+                Button {
+                    showRoutingEditor = true
+                } label: {
+                    Label("Adresses de facturation électronique", systemImage: "envelope.badge")
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
             if isFournisseur {
                 DisclosureGroup("Coordonnées bancaires & conditions de paiement") {
                     VStack(alignment: .leading, spacing: 6) {
@@ -2080,6 +2575,46 @@ struct PartyEditorView: View {
         }
         .sheet(item: $editingAddress) { addr in
             RoutingAddressFormView(addresses: $routingAddresses, editing: addr)
+        }
+        .sheet(isPresented: $showContactEditor) {
+            if let ct = editingContact {
+                ContactFormView(contacts: $contacts, editing: ct)
+            } else {
+                ContactFormView(contacts: $contacts, editing: PartyContact())
+            }
+        }
+        .onChange(of: showContactEditor) { showing in
+            if !showing { editingContact = nil }
+        }
+        .sheet(isPresented: $showContactPicker) {
+            if let e = linkedEntry {
+                ContactPickerSheet(entry: e) { contact in
+                    if let c = contact {
+                        onPickContact?(c)
+                    } else {
+                        var p = party
+                        p.contactName = nil
+                        p.contactEmail = nil
+                        p.contactPhone = nil
+                        party = p
+                        onPartyPicked?(p)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showRoutingPicker) {
+            if let e = linkedEntry {
+                RoutingPickerSheet(entry: e) { routing in
+                    if let r = routing {
+                        onPickRouting?(r)
+                    } else {
+                        var p = party
+                        p.endpointID = nil
+                        party = p
+                        onPartyPicked?(p)
+                    }
+                }
+            }
         }
     }
 
