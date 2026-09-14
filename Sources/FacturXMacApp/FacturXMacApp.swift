@@ -95,6 +95,7 @@ struct FacturXMacApp: App {
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
+    @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -105,8 +106,10 @@ struct FacturXMacApp: App {
                 .environmentObject(chorusSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
+                .environmentObject(auth)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
+                    auth.attachDirectory(directory)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -152,11 +155,23 @@ enum RootTab: String, CaseIterable, Identifiable {
 
 struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var showSettings = false
+    @State private var showUserManagement = false
 
     var body: some View {
+        Group {
+            if auth.currentUser == nil {
+                LoginView()
+            } else {
+                mainBody
+            }
+        }
+    }
+
+    private var mainBody: some View {
         VStack(spacing: 0) {
             HStack {
                 Picker("", selection: $tab) {
@@ -165,6 +180,34 @@ struct RootView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 200)
                 Spacer()
+                if let user = auth.currentUser {
+                    HStack(spacing: 6) {
+                        Image(systemName: user.role.systemImage)
+                            .foregroundStyle(.secondary)
+                        Text(user.effectiveDisplayName).font(.callout)
+                        Text(user.role.label).font(.caption).foregroundStyle(.secondary)
+                        Button {
+                            auth.logout()
+                            tab = .invoices
+                            selectedID = nil
+                        } label: {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.title2)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Se déconnecter")
+                    }
+                }
+                if auth.currentUser?.role == .admin {
+                    Button {
+                        showUserManagement = true
+                    } label: {
+                        Image(systemName: "person.badge.shield.checkmark")
+                            .font(.title2)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Gestion utilisateurs")
+                }
                 Button {
                     showSettings = true
                 } label: {
@@ -200,16 +243,43 @@ struct RootView: View {
                 }
                 .padding(12)
                 Divider()
-                SettingsView()
+                SettingsTabView()
                     .frame(minWidth: 720, minHeight: 640)
+            }
+        }
+        .sheet(isPresented: $showUserManagement) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Gestion utilisateurs").font(.title2.bold())
+                    Spacer()
+                    Button {
+                        showUserManagement = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Fermer")
+                }
+                .padding(12)
+                Divider()
+                UserManagementView()
+                    .frame(minWidth: 760, minHeight: 560)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
-            let draft = store.newDraft()
+            let draft = store.newDraft(companyID: defaultDraftCompanyID())
             store.upsert(draft)
             selectedID = draft.id
         }
+    }
+
+    private func defaultDraftCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
     }
 }
 
@@ -221,12 +291,19 @@ enum InvoiceTypeFilter: String, CaseIterable, Hashable {
 
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
 
     var filteredInvoices: [Invoice] {
         var result = store.invoices
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { inv in
+                if let cid = inv.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
         switch typeFilter {
         case .all:
             break
@@ -250,7 +327,7 @@ struct InvoicesTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let draft = store.newDraft()
+                        let draft = store.newDraft(companyID: defaultCompanyID())
                         store.upsert(draft)
                         selectedID = draft.id
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
@@ -290,7 +367,7 @@ struct InvoicesTabView: View {
                         Text("Aucune facture.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle facture") {
-                            let draft = store.newDraft()
+                            let draft = store.newDraft(companyID: defaultCompanyID())
                             store.upsert(draft)
                             selectedID = draft.id
                         }
@@ -368,11 +445,18 @@ struct InvoicesTabView: View {
             }
         )
     }
+
+    private func defaultCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
+    }
 }
 
 struct InvoiceEditorView: View {
     @Binding var invoice: Invoice
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var validation: FacturXValidationResult?
@@ -545,6 +629,7 @@ struct InvoiceEditorView: View {
                                         InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
                                     }
                                 }
+                                companyScopePicker
                                 DisclosureGroup("Autres références") {
                                     VStack(alignment: .leading, spacing: 6) {
                                         HStack(spacing: 3) {
@@ -678,11 +763,39 @@ struct InvoiceEditorView: View {
         }.frame(width: 280)
     }
 
+    @ViewBuilder
+    private var companyScopePicker: some View {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count > 1 {
+            HStack(spacing: 3) {
+                Picker("Société (périmètre)", selection: Binding(
+                    get: { invoice.companyID ?? visible.first?.id ?? UUID() },
+                    set: { invoice.companyID = $0 }
+                )) {
+                    ForEach(visible) { s in Text(s.displayName).tag(s.id) }
+                }.frame(width: 320)
+                InfoBadge(text: "Société émettrice du périmètre de l'utilisateur. La facture est rattachée à cette société.")
+            }
+        } else if visible.count == 1, let s = visible.first, invoice.companyID == nil {
+            HStack(spacing: 3) {
+                Text("Société : \(s.displayName)").font(.caption).foregroundStyle(.secondary)
+                Button {
+                    invoice.companyID = s.id
+                } label: { Text("Rattacher") }
+                    .buttonStyle(.bordered)
+            }
+        }
+    }
+
     private var linkedCreditNotes: [Invoice] {
         guard !invoice.number.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return store.invoices.filter {
-            $0.type == .creditNote
-                && ($0.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces)
+        let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
+        return store.invoices.filter { inv in
+            guard inv.type == .creditNote
+                && (inv.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces) else { return false }
+            if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
+            if scope != nil && inv.companyID == nil { return false }
+            return true
         }
     }
 
@@ -951,6 +1064,7 @@ struct PartyPickerSheet: View {
     let onPick: (DirectoryEntry) -> Void
 
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var auth: AuthStore
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var creatingNew = false
@@ -959,8 +1073,11 @@ struct PartyPickerSheet: View {
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         let roleKind = role.defaultKind
-        let active = directory.entries.filter {
+        var active = directory.entries.filter {
             !$0.isArchived && ($0.kind == roleKind || $0.kind == .both)
+        }
+        if role == .seller, let scope = auth.visibleDirectoryEntryIDs(for: auth.currentUser) {
+            active = active.filter { scope.contains($0.id) }
         }
         let base: [DirectoryEntry]
         if q.isEmpty {
@@ -976,15 +1093,22 @@ struct PartyPickerSheet: View {
         return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
+    private var canCreateNew: Bool {
+        if role == .seller { return auth.currentUser?.role == .admin }
+        return true
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Annuaire — choisir \(role.title.lowercased())").font(.headline)
                 Spacer()
-                Button {
-                    creatingNew = true
-                } label: { Label("Nouveau", systemImage: "plus") }
-                    .buttonStyle(.bordered)
+                if canCreateNew {
+                    Button {
+                        creatingNew = true
+                    } label: { Label("Nouveau", systemImage: "plus") }
+                        .buttonStyle(.bordered)
+                }
                 Button("Fermer") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
@@ -1062,15 +1186,28 @@ struct DirectoryView: View {
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var auth: AuthStore
     @State private var query = ""
     @State private var editingEntry: DirectoryEntry?
     @State private var creatingNew = false
     @State private var showArchived = false
     @State private var selectedEntry: DirectoryEntry?
 
+    private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
+
+    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let base = directory.entries.filter { showArchived || !$0.isArchived }
+        var base = directory.entries.filter { showArchived || !$0.isArchived }
+        if let scope = scope {
+            base = base.filter { entry in
+                if entry.kind == .fournisseur { return scope.contains(entry.id) }
+                if entry.kind == .both { return scope.contains(entry.id) }
+                if let cid = entry.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
         guard !q.isEmpty else { return base }
         return base.filter {
             $0.displayName.lowercased().contains(q)
@@ -1159,23 +1296,27 @@ struct DirectoryView: View {
                         }
                         .tag(entry.id)
                         .contextMenu {
-                            Button {
-                                editingEntry = entry
-                            } label: { Label("Modifier", systemImage: "pencil") }
-                            Divider()
-                            Button {
-                                var e = entry
-                                e.isArchived.toggle()
-                                directory.upsert(e)
-                            } label: {
-                                Label(entry.isArchived ? "Désarchiver" : "Archiver",
-                                      systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+                            if canEditEntry(entry) {
+                                Button {
+                                    editingEntry = entry
+                                } label: { Label("Modifier", systemImage: "pencil") }
+                                Divider()
+                                Button {
+                                    var e = entry
+                                    e.isArchived.toggle()
+                                    directory.upsert(e)
+                                } label: {
+                                    Label(entry.isArchived ? "Désarchiver" : "Archiver",
+                                          systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    directory.delete(entry)
+                                    if selectedEntry?.id == entry.id { selectedEntry = nil }
+                                } label: { Label("Supprimer", systemImage: "trash") }
+                            } else {
+                                Text("Fournisseur : modification réservée à l'administrateur")
                             }
-                            Divider()
-                            Button(role: .destructive) {
-                                directory.delete(entry)
-                                if selectedEntry?.id == entry.id { selectedEntry = nil }
-                            } label: { Label("Supprimer", systemImage: "trash") }
                         }
                     }
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 360)
@@ -1183,14 +1324,17 @@ struct DirectoryView: View {
 
                 DirectoryDetailView(
                     entry: selectedEntry,
+                    canEdit: selectedEntry.map { canEditEntry($0) } ?? true,
                     onEdit: { entry in editingEntry = entry },
                     onArchive: { entry in
+                        guard canEditEntry(entry) else { return }
                         var e = entry
                         e.isArchived.toggle()
                         directory.upsert(e)
                         selectedEntry = e
                     },
                     onDelete: { entry in
+                        guard canEditEntry(entry) else { return }
                         directory.delete(entry)
                         selectedEntry = nil
                     }
@@ -1210,16 +1354,28 @@ struct DirectoryView: View {
             })
         }
         .sheet(isPresented: $creatingNew) {
-            DirectoryEditorView(initialKind: .client) { newEntry in
+            DirectoryEditorView(initialKind: .client, defaultCompanyID: defaultCompanyID()) { newEntry in
                 directory.upsert(newEntry)
                 creatingNew = false
             }
         }
     }
+
+    private func canEditEntry(_ entry: DirectoryEntry) -> Bool {
+        if entry.kind == .fournisseur || entry.kind == .both { return canManageFournisseurs }
+        return true
+    }
+
+    private func defaultCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
+    }
 }
 
 struct DirectoryDetailView: View {
     let entry: DirectoryEntry?
+    let canEdit: Bool
     let onEdit: (DirectoryEntry) -> Void
     let onArchive: (DirectoryEntry) -> Void
     let onDelete: (DirectoryEntry) -> Void
@@ -1272,13 +1428,16 @@ struct DirectoryDetailView: View {
                     Spacer()
                     Button { onEdit(entry) } label: { Label("Modifier", systemImage: "pencil") }
                         .buttonStyle(.bordered)
+                        .disabled(!canEdit)
                     Button { onArchive(entry) } label: {
                         Label(entry.isArchived ? "Désarchiver" : "Archiver",
                               systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
                     }
                     .buttonStyle(.bordered)
+                    .disabled(!canEdit)
                     Button(role: .destructive) { onDelete(entry) } label: { Label("Supprimer", systemImage: "trash") }
                         .buttonStyle(.bordered)
+                        .disabled(!canEdit)
                 }
                 .padding(12)
 
@@ -1523,6 +1682,7 @@ struct DirectoryEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var auth: AuthStore
     @State private var entry: DirectoryEntry
     private let isEditing: Bool
     let onSave: (DirectoryEntry) -> Void
@@ -1537,8 +1697,12 @@ struct DirectoryEditorView: View {
         self.onDelete = onDelete
     }
 
-    init(initialKind: DirectoryEntryKind, onSave: @escaping (DirectoryEntry) -> Void) {
-        _entry = State(initialValue: DirectoryEntry(kind: initialKind, party: InvoiceParty(name: "", street: "", postcode: "", city: "")))
+    init(initialKind: DirectoryEntryKind, defaultCompanyID: UUID? = nil, onSave: @escaping (DirectoryEntry) -> Void) {
+        var initial = DirectoryEntry(kind: initialKind, party: InvoiceParty(name: "", street: "", postcode: "", city: ""))
+        if initialKind == .client, let cid = defaultCompanyID {
+            initial.companyID = cid
+        }
+        _entry = State(initialValue: initial)
         self.isEditing = false
         self.onSave = onSave
         self.onDelete = nil
@@ -1549,6 +1713,13 @@ struct DirectoryEditorView: View {
             return isEditing ? "Modifier le tiers" : "Nouveau tiers"
         }
         return isEditing ? "Modifier : \(entry.party.name)" : "Nouveau tiers : \(entry.party.name)"
+    }
+
+    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+
+    private var availableKinds: [DirectoryEntryKind] {
+        if canManageFournisseurs { return DirectoryEntryKind.allCases }
+        return [.client]
     }
 
     var body: some View {
@@ -1574,6 +1745,10 @@ struct DirectoryEditorView: View {
                 }
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Enregistrer") {
+                    var entry = entry
+                    if let cid = entry.companyID, !auth.availableSocieties().contains(where: { $0.id == cid }) {
+                        entry.companyID = nil
+                    }
                     let dup = directory.findDuplicates(of: entry)
                     if dup.isEmpty {
                         onSave(entry)
@@ -1587,8 +1762,27 @@ struct DirectoryEditorView: View {
             }
 
             Picker("Type", selection: $entry.kind) {
-                ForEach(DirectoryEntryKind.allCases, id: \.self) { Text($0.label).tag($0) }
+                ForEach(availableKinds, id: \.self) { Text($0.label).tag($0) }
             }.pickerStyle(.segmented)
+            .disabled(!canManageFournisseurs && entry.kind == .fournisseur)
+
+            if entry.kind == .client || entry.kind == .both {
+                GroupBox("Société (périmètre)") {
+                    HStack {
+                        Text("Société").frame(width: 80, alignment: .leading)
+                        Picker("Société", selection: Binding<UUID?>(
+                            get: { entry.companyID },
+                            set: { entry.companyID = $0 }
+                        )) {
+                            Text("Aucune").tag(UUID?.none)
+                            ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                                Text(s.displayName).tag(Optional(s.id))
+                            }
+                        }
+                        Spacer()
+                    }.padding(4)
+                }
+            }
 
             GroupBox("Identité et adresse") {
                 PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
@@ -1923,12 +2117,38 @@ struct RoutingPickerSheet: View {
     }
 }
 
-struct SettingsView: View {
+struct SettingsTabView: View {
+    @EnvironmentObject var auth: AuthStore
+    @State private var settingsTab = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $settingsTab) {
+                Text("Profil").tag(0)
+                if auth.currentUser?.role == .admin {
+                    Text("Application").tag(1)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(10)
+            Divider()
+            switch settingsTab {
+            case 0:
+                ProfileSettingsView()
+            default:
+                ApplicationSettingsView()
+            }
+        }
+    }
+}
+
+struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var auth: AuthStore
     @State private var testMessage: String?
     @State private var testing = false
     @State private var dinumExpanded = true
@@ -2157,7 +2377,7 @@ struct SettingsView: View {
 
                 DisclosureGroup(isExpanded: $numberingExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini.")
+                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini. Le compteur est indépendant par société émettrice.")
                             .font(.caption).foregroundStyle(.secondary)
                         HStack {
                             Text("Préfixe texte").font(.caption)
@@ -2175,7 +2395,7 @@ struct SettingsView: View {
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                            Text(store.previewNextNumber()).monospaced().font(.caption.bold())
+                            Text(store.previewNextNumber(companyID: previewCompanyID())).monospaced().font(.caption.bold())
                             Spacer()
                             Button("Appliquer") { store.save() }
                                 .buttonStyle(.borderedProminent)
@@ -2209,6 +2429,12 @@ struct SettingsView: View {
                 showSellerPicker = false
             }
         }
+    }
+
+    private func previewCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
     }
 }
 

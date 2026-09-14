@@ -94,13 +94,14 @@ public final class InvoiceStore: ObservableObject {
         save()
     }
 
-    public func newDraft(directory: PartyDirectory? = nil) -> Invoice {
+    public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil) -> Invoice {
         let dir = directory ?? PartyDirectory.shared
         let seller = resolveDefaultSeller(from: dir) ?? myCompany
         return Invoice(
-            number: nextNumber(),
+            number: nextNumber(companyID: companyID),
             seller: seller,
             buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""),
+            companyID: companyID,
             lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
             paymentIBAN: seller.iban,
             paymentBIC: seller.bic,
@@ -111,7 +112,7 @@ public final class InvoiceStore: ObservableObject {
     public func newCreditNote(from invoice: Invoice) -> Invoice {
         var credit = invoice
         credit.id = UUID()
-        credit.number = nextNumber(prefix: "AV")
+        credit.number = nextNumber(prefix: "AV", companyID: invoice.companyID)
         credit.type = .creditNote
         credit.status = .draft
         credit.issueDate = Date()
@@ -128,7 +129,7 @@ public final class InvoiceStore: ObservableObject {
         return credit
     }
 
-    public func nextNumber(prefix: String = "") -> String {
+    private func headKey(prefix: String) -> String {
         let sep = numberUseSeparator ? "-" : ""
         let year = String(Calendar.current.component(.year, from: Date()))
         var built: [String] = []
@@ -141,28 +142,29 @@ public final class InvoiceStore: ObservableObject {
             built.append(year)
             built.append(sep)
         }
-        let headKey = built.joined()
+        return built.joined()
+    }
+
+    private func matchesScope(_ invoice: Invoice, companyID: UUID?) -> Bool {
+        // La société émettrice (vendeur) est rattachée à une fiche annuaire dont l'id
+        // correspond au companyID. Une facture sans companyID n'est comptée que dans
+        // le chrono sans-société (companyID == nil), pour ne pas mélanger les périmètres.
+        if invoice.companyID == companyID { return true }
+        if invoice.companyID == nil && companyID == nil { return true }
+        return false
+    }
+
+    public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
+        let headKey = self.headKey(prefix: prefix)
         let paddedStart = max(1, numberStart)
-        let existing = invoices.filter { $0.number.hasPrefix(headKey) }.count
+        let existing = invoices.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }.count
         let seq = paddedStart + existing
         let chrono = String(format: "%04d", seq)
         return headKey + chrono
     }
 
-    public func previewNextNumber(prefix: String = "") -> String {
-        let sep = numberUseSeparator ? "-" : ""
-        let year = String(Calendar.current.component(.year, from: Date()))
-        var built: [String] = []
-        let textPrefix = prefix.isEmpty ? (numberPrefix.trimmingCharacters(in: .whitespaces)) : prefix.trimmingCharacters(in: .whitespaces)
-        if !textPrefix.isEmpty {
-            built.append(textPrefix)
-            built.append(sep)
-        }
-        if numberIncludeYear {
-            built.append(year)
-            built.append(sep)
-        }
-        let headKey = built.joined()
+    public func previewNextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
+        let headKey = self.headKey(prefix: prefix)
         let chrono = String(format: "%04d", max(1, numberStart))
         return headKey + chrono
     }
