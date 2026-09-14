@@ -137,7 +137,7 @@ public enum AuthError: Error, LocalizedError {
 public enum EmailValidator {
     public static func isValid(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespaces)
-        guard trimmed.lowercased() == trimmed.lowercased(), trimmed.contains("@") else { return false }
+        guard !trimmed.contains(" "), trimmed.contains("@") else { return false }
         let at = trimmed.firstIndex(of: "@") ?? trimmed.endIndex
         let local = trimmed[..<at]
         let domain = trimmed[trimmed.index(after: at)...]

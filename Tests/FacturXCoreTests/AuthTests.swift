@@ -20,6 +20,18 @@ final class AuthTests: XCTestCase {
         XCTAssertFalse(PasswordHasher.constantTimeEquals("abcd", "abc"))
     }
 
+    func testEmailValidator() {
+        XCTAssertTrue(EmailValidator.isValid("[email protected]"))
+        XCTAssertTrue(EmailValidator.isValid("  [email protected]  "))
+        XCTAssertTrue(EmailValidator.isValid("a.b+c@d.co"))
+        XCTAssertFalse(EmailValidator.isValid("pasunemail"))
+        XCTAssertFalse(EmailValidator.isValid("@domain.com"))
+        XCTAssertFalse(EmailValidator.isValid("user@.com"))
+        XCTAssertFalse(EmailValidator.isValid("user@domain"))
+        XCTAssertFalse(EmailValidator.isValid("user@domain.c"))
+        XCTAssertFalse(EmailValidator.isValid(""))
+    }
+
     func testLoginSuccessAndWrongPassword() throws {
         let store = AuthStore()
         store.users = []
