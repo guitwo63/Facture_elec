@@ -94,6 +94,7 @@ struct FacturXMacApp: App {
     @StateObject private var orderStore = OrderStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
+    @StateObject private var superPDPSettings = SuperPDPSettings.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
     @StateObject private var statusStore = OrderStatusStore.shared
@@ -107,6 +108,7 @@ struct FacturXMacApp: App {
                 .environmentObject(orderStore)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
+                .environmentObject(superPDPSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -978,6 +980,7 @@ struct InvoiceEditorView: View {
     @Binding var invoice: Invoice
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var duplicatedNumber: String?
@@ -987,6 +990,9 @@ struct InvoiceEditorView: View {
     @State private var showUnlockAlert = false
     @State private var showPrecedingInvoicePicker = false
     @State private var showMandatoryDetails = false
+    @State private var superPDPSubmitting = false
+    @State private var superPDPMessage: String?
+    @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1062,11 +1068,17 @@ struct InvoiceEditorView: View {
                         .buttonStyle(.bordered)
                     Button("Générer le Factur-X") { export() }
                         .buttonStyle(.borderedProminent)
+                    Button {
+                        depositToSuperPDP()
+                    } label: { Label("Super PDP", systemImage: "paperplane.fill") }
+                        .buttonStyle(.bordered)
+                        .disabled(isLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                        .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
                 }
             }
             .padding(12)
             Divider()
-            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || duplicatedNumber != nil {
+            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil {
                 VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
@@ -1084,6 +1096,21 @@ struct InvoiceEditorView: View {
                 if let n = duplicatedNumber {
                     Text("Facture dupliquée : \(n) (disponible dans la liste)").font(.caption).foregroundStyle(.green)
                         .onChange(of: invoice.number) { _ in duplicatedNumber = nil }
+                }
+                if let m = superPDPMessage {
+                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        .onChange(of: invoice.number) { _ in superPDPMessage = nil }
+                }
+                if let sub = superPDPSubmission {
+                    HStack(spacing: 8) {
+                        Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
+                            .foregroundStyle(sub.isProcessed ? .green : .orange)
+                        Text("SUPER PDP — id \(sub.remoteID ?? "?") · statut \(sub.status)").font(.caption)
+                        Button("Rafraîchir") { refreshSuperPDPStatus() }
+                            .buttonStyle(.bordered)
+                            .disabled(superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                    }
+                    .onChange(of: invoice.number) { _ in superPDPSubmission = nil }
                 }
 
                 if hasMandatoryWarnings {
@@ -1495,6 +1522,49 @@ struct InvoiceEditorView: View {
         showValidation = true
     }
 
+    private func depositToSuperPDP() {
+        superPDPSubmitting = true
+        superPDPMessage = nil
+        let preCheck = FacturXValidator().validate(invoice: invoice)
+        if !preCheck.isValid {
+            validation = preCheck
+            showValidation = true
+            superPDPMessage = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de déposer."
+            superPDPSubmitting = false
+            return
+        }
+        Task {
+            do {
+                let xml = try CIIXMLGenerator().generate(invoice: invoice)
+                let service = SuperPDPService()
+                let submission = try await service.submitInvoice(fileData: xml, credentials: superPDPSettings.credentials)
+                superPDPSubmission = submission
+                superPDPMessage = "Facture déposée sur SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
+            } catch let e as SuperPDPError {
+                superPDPMessage = "Échec dépôt SUPER PDP : \(e.localizedDescription)"
+            } catch {
+                superPDPMessage = "Échec dépôt SUPER PDP : \(error)"
+            }
+            superPDPSubmitting = false
+        }
+    }
+
+    private func refreshSuperPDPStatus() {
+        guard let rid = superPDPSubmission?.remoteID, !rid.isEmpty else { return }
+        superPDPSubmitting = true
+        Task {
+            do {
+                let service = SuperPDPService()
+                let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: superPDPSettings.credentials)
+                superPDPSubmission = updated
+                superPDPMessage = "Statut SUPER PDP mis à jour : \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "")."
+            } catch {
+                superPDPMessage = "Échec rafraîchissement : \(error.localizedDescription)"
+            }
+            superPDPSubmitting = false
+        }
+    }
+
     private func exportPlainPDF() {
         exportError = nil
         exportedURL = nil
@@ -1607,8 +1677,10 @@ struct PartySection: View {
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var showPicker = false
     @State private var showSaveSheet = false
+    @State private var showSuperPDPSearch = false
     @State private var saveName = ""
     @State private var pendingEntry: DirectoryEntry?
     @State private var duplicateMatches: [PartyDirectory.DuplicateMatch]?
@@ -1631,12 +1703,28 @@ struct PartySection: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(party.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                if role == .buyer {
+                    Button {
+                        showSuperPDPSearch = true
+                    } label: {
+                        Label("SUPER PDP", systemImage: "paperplane")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!superPDPSettings.credentials.isConfigured)
+                    .help("Rechercher un destinataire dans l'annuaire SUPER PDP")
+                }
                 Spacer()
             }
 
             PartyEditorView(party: $party, isFournisseur: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
+        .sheet(isPresented: $showSuperPDPSearch) {
+            SuperPDPSearchSheet(initialQuery: party.siren ?? party.siret ?? party.name) { picked in
+                party = picked
+                onPartyPicked?(picked)
+            }
+        }
         .sheet(isPresented: $showPicker) {
             PartyPickerSheet(role: role) { selected in
                 var p = selected.party
@@ -3022,14 +3110,18 @@ struct OrderStatusSettingsView: View {
 
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var auth: AuthStore
     @State private var testMessage: String?
     @State private var testing = false
+    @State private var superPDPTestMessage: String?
+    @State private var superPDPTesting = false
     @State private var dinumExpanded = true
     @State private var pisteExpanded = false
+    @State private var superPDPExpanded = false
     @State private var appearanceExpanded = true
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
@@ -3129,6 +3221,60 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("Annuaire Chorus Pro (PISTE)", systemImage: "network")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $superPDPExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("SUPER PDP est une Plateforme Agréée (PA) API-first pour envoyer et recevoir des factures électroniques conformes (Factur-X/UBL) et consulter l'annuaire des destinataires.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text("Client ID").frame(width: 100, alignment: .leading)
+                            TextField("Client ID", text: $superPDPSettings.credentials.clientID)
+                        }
+                        HStack {
+                            Text("Client Secret").frame(width: 100, alignment: .leading)
+                            SecureField("Client Secret", text: $superPDPSettings.credentials.clientSecret)
+                        }
+                        HStack {
+                            Text("Base API").frame(width: 100, alignment: .leading)
+                            TextField("https://api.superpdp.tech", text: $superPDPSettings.credentials.apiBaseURL)
+                        }
+                        Toggle("Environnement bac à sable", isOn: $superPDPSettings.credentials.useSandbox)
+                        HStack {
+                            Button {
+                                superPDPSettings.save()
+                            } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                                .buttonStyle(.borderedProminent)
+                            Button {
+                                superPDPTesting = true
+                                superPDPTestMessage = nil
+                                Task {
+                                    do {
+                                        let service = SuperPDPService()
+                                        let company = try await service.getCompany(credentials: superPDPSettings.credentials)
+                                        superPDPTestMessage = "Connexion réussie — \(company.formalName ?? "société") (env : \(company.env ?? "?"))"
+                                    } catch {
+                                        superPDPTestMessage = "Échec : \(error.localizedDescription)"
+                                    }
+                                    superPDPTesting = false
+                                }
+                            } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
+                                .buttonStyle(.bordered)
+                                .disabled(superPDPTesting || !superPDPSettings.credentials.isConfigured)
+                            Spacer()
+                        }
+                        if let m = superPDPTestMessage {
+                            Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Endpoint OAuth : https://api.superpdp.tech/oauth2/token").font(.caption2).foregroundStyle(.tertiary)
+                            Text("API : https://api.superpdp.tech/v1.beta/…").font(.caption2).foregroundStyle(.tertiary)
+                            Text("Créez une application par entreprise sur superpdp.tech pour obtenir client_id et client_secret.").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("SUPER PDP (dépôt + annuaire)", systemImage: "paperplane.circle")
                         .font(.headline)
                 }
 
@@ -3848,6 +3994,102 @@ struct ChorusProSearchSheet: View {
                 results = r
                 if r.isEmpty { error = "Aucun résultat." }
             } catch let e as ChorusProError {
+                self.error = e.errorDescription
+            } catch {
+                self.error = error.localizedDescription
+            }
+            searching = false
+        }
+    }
+}
+
+struct SuperPDPSearchSheet: View {
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @Environment(\.dismiss) private var dismiss
+    @State private var query: String
+    @State private var results: [SuperPDPDirectoryEntry] = []
+    @State private var searching = false
+    @State private var error: String?
+    let onPick: (InvoiceParty) -> Void
+    init(initialQuery: String, onPick: @escaping (InvoiceParty) -> Void) {
+        _query = State(initialValue: initialQuery)
+        self.onPick = onPick
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Rechercher un destinataire (SUPER PDP)").font(.headline)
+                Spacer()
+                Button { dismiss() } label: { Text("Fermer") }.keyboardShortcut(.cancelAction)
+            }.padding(12)
+            HStack {
+                TextField("SIRET ou SIREN", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { runSearch() }
+                Button { runSearch() } label: { Label("Rechercher", systemImage: "magnifyingglass") }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(searching || query.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.horizontal, 12).padding(.bottom, 8)
+            if !superPDPSettings.credentials.isConfigured {
+                Text("Identifiants SUPER PDP non configurés. Ouvrez l'onglet Réglages.")
+                    .font(.caption).foregroundStyle(.orange).padding(12)
+            }
+            if searching {
+                HStack { Spacer(); ProgressView(); Spacer() }.padding()
+            } else if let err = error {
+                Text(err).font(.caption).foregroundStyle(.red).padding(12)
+            } else {
+                Divider()
+                if results.isEmpty {
+                    Text("Saisissez un SIREN/SIRET et lancez la recherche.")
+                        .foregroundStyle(.secondary).padding()
+                } else {
+                    List {
+                        ForEach(results) { r in
+                            Button {
+                                onPick(r.toInvoiceParty())
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(r.name ?? "(sans dénomination)").font(.body.weight(.medium))
+                                        Text(r.displaySubtitle).font(.caption).foregroundStyle(.secondary)
+                                        if let addr = r.addressLine, !addr.isEmpty {
+                                            Text(addr).font(.caption2).foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minWidth: 520, minHeight: 460)
+    }
+    private func runSearch() {
+        guard superPDPSettings.credentials.isConfigured else {
+            error = "Identifiants SUPER PDP non configurés."
+            return
+        }
+        searching = true
+        error = nil
+        results = []
+        Task {
+            do {
+                let r = try await SuperPDPService().searchRecipient(
+                    siretOrSiren: query,
+                    credentials: superPDPSettings.credentials
+                )
+                results = r
+                if r.isEmpty { error = "Aucun résultat." }
+            } catch let e as SuperPDPError {
                 self.error = e.errorDescription
             } catch {
                 self.error = error.localizedDescription
