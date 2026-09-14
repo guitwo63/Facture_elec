@@ -831,6 +831,11 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-153 — Désignation de la ligne. Obligatoire.")
                                 }
                                 HStack(spacing: 2) {
+                                    TextField("Commande", text: Binding($line.orderReference, replacingNilWith: ""))
+                                        .frame(width: 140)
+                                    InfoBadge(text: "BT-132 — Référence de commande liée à la ligne.")
+                                }
+                                HStack(spacing: 2) {
                                     DoubleField("Qté", value: $line.quantity, format: .number)
                                     InfoBadge(text: "BT-149 — Quantité. Doit être positive (facture) ou négative (avoir).")
                                 }
@@ -3656,6 +3661,31 @@ struct OrderEditorView: View {
                         TextField("Notes libres", text: Binding($order.notes, replacingNilWith: ""))
                     }.padding(8)
                 }.lockable(isLocked)
+
+                GroupBox("Factures et avoirs liés") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if linkedInvoices.isEmpty {
+                            Text("Aucune facture ou avoir lié à cette commande.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(linkedInvoices.enumerated()), id: \.element.id) { _, inv in
+                                HStack {
+                                    Image(systemName: inv.type == .creditNote ? "arrow.uturn.backward.circle" : "doc.text")
+                                        .foregroundStyle(inv.type == .creditNote ? .orange : .accentColor)
+                                    VStack(alignment: .leading) {
+                                        Text(inv.number).font(.headline)
+                                        Text("\(inv.type == .creditNote ? "Avoir" : "Facture") — \(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(inv.issueDate, format: .dateTime.day().month().year())
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }.padding(8)
+                }.lockable(isLocked)
             }.padding()
         }
             .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
@@ -3665,6 +3695,13 @@ struct OrderEditorView: View {
                 Text("La commande était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout envoi au client.")
             }
         }
+    }
+
+    private var linkedInvoices: [Invoice] {
+        store.invoices.filter { inv in
+            inv.purchaseOrderRef == order.number
+                || inv.lines.contains(where: { ($0.orderReference ?? "") == order.number })
+        }.sorted { $0.issueDate > $1.issueDate }
     }
 
     private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {

@@ -216,6 +216,18 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
     }
 
     public func toInvoice(number: String) -> Invoice {
+        let mappedLines = lines.map { line in
+            InvoiceLine(
+                id: line.id,
+                name: line.name,
+                description: line.description,
+                quantity: line.quantity,
+                unit: line.unit,
+                unitPrice: line.unitPrice,
+                vatRate: line.vatRate,
+                orderReference: line.orderReference ?? self.number
+            )
+        }
         return Invoice(
             number: number,
             type: .commercialInvoice,
@@ -230,7 +242,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
             buyerReference: buyerReference,
             purchaseOrderRef: quotationRef,
             contractRef: contractRef,
-            lines: lines,
+            lines: mappedLines,
             paymentIBAN: buyer.iban,
             paymentBIC: buyer.bic,
             paymentTerms: buyer.paymentTerms,
