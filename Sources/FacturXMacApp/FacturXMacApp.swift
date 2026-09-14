@@ -1502,14 +1502,16 @@ struct InvoiceEditorView: View {
     }
 
     private func validationPanel(_ v: FacturXValidationResult) -> some View {
-        GroupBox {
+        let ruleErrors = v.businessRules.filter { $0.severity == .error }
+        let ruleWarnings = v.businessRules.filter { $0.severity == .warning }
+        return GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     if v.isValid {
                         Label("Conforme", systemImage: "checkmark.seal.fill")
                             .foregroundStyle(.green)
                     } else {
-                        Label("Non conforme — \(v.errors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                        Label("Non conforme — \(ruleErrors.count) erreur(s)", systemImage: "xmark.seal.fill")
                             .foregroundStyle(.red)
                     }
                     Spacer()
@@ -1530,30 +1532,32 @@ struct InvoiceEditorView: View {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
                 }
-                if !v.errors.isEmpty {
+                if !ruleErrors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
-                    ForEach(v.errors, id: \.self) { e in
-                        Text("• \(e)").font(.caption).foregroundStyle(.red)
-                    }
-                }
-                if !v.warnings.isEmpty {
-                    Text("Avertissements :").font(.caption.bold())
-                    ForEach(v.warnings, id: \.self) { w in
-                        Text("• \(w)").font(.caption).foregroundStyle(.orange)
-                    }
-                }
-                if !v.businessRules.isEmpty {
-                    Divider().padding(.vertical, 2)
-                    Text("Règles métier EN 16931 :").font(.caption.bold())
-                    ForEach(v.businessRules) { br in
+                    ForEach(ruleErrors) { br in
                         HStack(alignment: .top, spacing: 4) {
                             Text(br.ruleId)
                                 .font(.caption.bold().monospaced())
-                                .foregroundStyle(br.severity == .error ? .red : .orange)
-                                .frame(width: 84, alignment: .leading)
+                                .foregroundStyle(.red)
+                                .frame(width: 96, alignment: .leading)
                             Text(br.message)
                                 .font(.caption)
-                                .foregroundStyle(br.severity == .error ? .red : .orange)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                if !ruleWarnings.isEmpty {
+                    if !ruleErrors.isEmpty { Divider().padding(.vertical, 2) }
+                    Text("Avertissements :").font(.caption.bold())
+                    ForEach(ruleWarnings) { br in
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(br.ruleId)
+                                .font(.caption.bold().monospaced())
+                                .foregroundStyle(.orange)
+                                .frame(width: 96, alignment: .leading)
+                            Text(br.message)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
                         }
                     }
                 }
