@@ -1008,15 +1008,51 @@ struct InvoiceEditorView: View {
                                 }
                                 if invoice.type.requiresPrecedingInvoice || invoice.type == .internalCreditNote {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Référence et date de la facture liée :").font(.caption.bold())
-                                        HStack(spacing: 3) {
-                                            TextField("N° facture liée", text: Binding($invoice.precedingInvoiceRef, replacingNilWith: "")).frame(width: 160)
-                                            InfoBadge(text: "BT-25 — Numéro de la facture antérieure référencée. Obligatoire pour un avoir, une rectificative ou un solde.")
-                                            DatePicker("Date facture liée", selection: Binding(
-                                                get: { invoice.precedingInvoiceDate ?? Date() },
-                                                set: { invoice.precedingInvoiceDate = $0 }
-                                            ), displayedComponents: .date)
-                                            InfoBadge(text: "BT-26 — Date d'émission de la facture antérieure référencée.")
+                                        Text("Facture antérieure référencée :").font(.caption.bold())
+                                        HStack(spacing: 6) {
+                                            Menu {
+                                                Button("Aucune") {
+                                                    invoice.precedingInvoiceRef = nil
+                                                    invoice.precedingInvoiceDate = nil
+                                                }
+                                                Divider()
+                                                ForEach(linkableInvoices) { inv in
+                                                    Button {
+                                                        invoice.precedingInvoiceRef = inv.number
+                                                        invoice.precedingInvoiceDate = inv.issueDate
+                                                    } label: {
+                                                        HStack {
+                                                            Text(inv.number)
+                                                            Spacer()
+                                                            Text(inv.issueDate, format: .dateTime.day().month().year())
+                                                                .foregroundStyle(.secondary)
+                                                        }
+                                                    }
+                                                }
+                                            } label: {
+                                                HStack(spacing: 3) {
+                                                    Image(systemName: "doc.text.magnifyingglass")
+                                                    if let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces), !ref.isEmpty {
+                                                        VStack(alignment: .leading, spacing: 1) {
+                                                            Text(ref).font(.caption.bold())
+                                                            if let d = invoice.precedingInvoiceDate {
+                                                                Text(d, format: .dateTime.day().month().year())
+                                                                    .font(.caption2).foregroundStyle(.secondary)
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Text("Sélectionner une facture…").foregroundStyle(.secondary)
+                                                    }
+                                                }
+                                                .frame(maxWidth: 320, alignment: .leading)
+                                            }
+                                            .menuStyle(.borderlessButton)
+                                            .padding(.horizontal, 8).padding(.vertical, 4)
+                                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+                                            if linkableInvoices.isEmpty {
+                                                Text("Aucune facture disponible").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                            InfoBadge(text: "BT-25/BT-26 — Numéro et date de la facture antérieure référencée. Sélection dans les factures du périmètre (hors avoirs).")
                                         }
                                     }
                                 }
@@ -1221,6 +1257,19 @@ struct InvoiceEditorView: View {
             if scope != nil && inv.companyID == nil { return false }
             return true
         }
+    }
+
+    private var linkableInvoices: [Invoice] {
+        let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
+        var result = store.invoices.filter { inv in
+            guard !inv.type.isCreditNote else { return false }
+            guard inv.id != invoice.id else { return false }
+            if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
+            if scope != nil && inv.companyID == nil { return false }
+            return true
+        }
+        result.sort { $0.issueDate > $1.issueDate }
+        return result
     }
 
     private func export() {
