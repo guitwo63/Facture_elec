@@ -19,7 +19,7 @@ final class FacturXCoreTests: XCTestCase {
                 country: "FR",
                 vatNumber: "FR12345678901",
                 siren: "123456789",
-                contactEmail: "[email protected]",
+                contactEmail: "contact@exemple.fr",
                 endpointID: "123456789",
                 endpointSchemeID: "0225"
             ),
@@ -108,7 +108,7 @@ final class FacturXCoreTests: XCTestCase {
         var inv = sampleInvoice()
         inv.seller = InvoiceParty(
             name: "Test", street: "", postcode: "", city: "",
-            contactName: "   ", contactEmail: "[email protected]"
+            contactName: "   ", contactEmail: "contact@exemple.fr"
         )
         let xml = try CIIXMLGenerator().generate(invoice: inv)
         let s = String(data: xml, encoding: .utf8) ?? ""

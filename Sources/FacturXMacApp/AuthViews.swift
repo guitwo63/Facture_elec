@@ -42,7 +42,7 @@ struct LoginView: View {
                 .disabled(username.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || attempting)
             }
             VStack(spacing: 4) {
-                Text("Compte admin par défaut : [email protected] / admin")
+                Text("Compte admin par défaut : admin@facturx.local / admin")
                     .font(.caption2).foregroundStyle(.tertiary)
                 Text("Pensez à modifier le mot de passe après la première connexion.")
                     .font(.caption2).foregroundStyle(.tertiary)
@@ -317,7 +317,7 @@ struct UserEditorSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Identifiant (e-mail)").frame(width: 140, alignment: .leading)
-                    TextField("[email protected]", text: $username)
+                    TextField("admin@facturx.local", text: $username)
                         .textFieldStyle(.roundedBorder)
                         .disableAutocorrection(true)
                 }

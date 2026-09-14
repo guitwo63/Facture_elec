@@ -21,8 +21,8 @@ final class AuthTests: XCTestCase {
     }
 
     func testEmailValidator() {
-        XCTAssertTrue(EmailValidator.isValid("[email protected]"))
-        XCTAssertTrue(EmailValidator.isValid("  [email protected]  "))
+        XCTAssertTrue(EmailValidator.isValid("alice@exemple.fr"))
+        XCTAssertTrue(EmailValidator.isValid("  bob@exemple.fr  "))
         XCTAssertTrue(EmailValidator.isValid("a.b+c@d.co"))
         XCTAssertFalse(EmailValidator.isValid("pasunemail"))
         XCTAssertFalse(EmailValidator.isValid("@domain.com"))
@@ -75,13 +75,13 @@ final class AuthTests: XCTestCase {
     func testCreateUserDuplicateRejected() throws {
         let store = AuthStore()
         store.users = []
-        _ = try store.createUser(username: "[email protected]", password: "pw", role: .admin)
-        XCTAssertThrowsError(try store.createUser(username: "[email protected]", password: "pw", role: .admin)) { error in
+        _ = try store.createUser(username: "dup@exemple.fr", password: "pw", role: .admin)
+        XCTAssertThrowsError(try store.createUser(username: "dup@exemple.fr", password: "pw", role: .admin)) { error in
             guard case AuthError.duplicateUsername = error else {
                 return XCTFail("Attendu AuthError.duplicateUsername, eu \(error)")
             }
         }
-        XCTAssertThrowsError(try store.createUser(username: "[email protected]", password: "", role: .admin)) { error in
+        XCTAssertThrowsError(try store.createUser(username: "nopw@exemple.fr", password: "", role: .admin)) { error in
             guard case AuthError.emptyPassword = error else {
                 return XCTFail("Attendu AuthError.emptyPassword, eu \(error)")
             }
@@ -96,13 +96,13 @@ final class AuthTests: XCTestCase {
     func testUpdatePasswordRehashes() throws {
         let store = AuthStore()
         store.users = []
-        let user = try store.createUser(username: "[email protected]", password: "oldpw", role: .admin)
+        let user = try store.createUser(username: "rehash@exemple.fr", password: "oldpw", role: .admin)
         let oldHash = store.users.first(where: { $0.id == user.id })?.passwordHash
         try store.updatePassword(user, newPassword: "newpw")
         let updated = store.users.first(where: { $0.id == user.id })
         XCTAssertNotEqual(updated?.passwordHash, oldHash)
-        XCTAssertThrowsError(try store.login(username: "[email protected]", password: "oldpw")) { _ in }
-        let logged = try store.login(username: "[email protected]", password: "newpw")
+        XCTAssertThrowsError(try store.login(username: "rehash@exemple.fr", password: "oldpw")) { _ in }
+        let logged = try store.login(username: "rehash@exemple.fr", password: "newpw")
         XCTAssertEqual(logged.id, user.id)
     }
 
@@ -138,8 +138,9 @@ final class AuthTests: XCTestCase {
     }
 
     func testVisibleSocietiesScopedForComptable() {
-        let (store, _, entries) = makeDirectoryStore()
-        let s1 = entries[0]; let s2 = entries[1]
+        let (store, directory, entries) = makeDirectoryStore()
+        _ = directory  // retient la référence faible attachée à AuthStore
+        let s2 = entries[1]
         let admin = User(username: "admin", role: .admin, societyIDs: [])
         let comptable = User(username: "compta", role: .comptable, societyIDs: [s2.id])
         XCTAssertEqual(Set(store.visibleSocieties(for: admin).map(\.displayName)), Set(["Société A", "Société B"]))
@@ -151,7 +152,7 @@ final class AuthTests: XCTestCase {
 
     func testCreateComptableRequiresSociety() throws {
         let (store, _, _) = makeDirectoryStore()
-        XCTAssertThrowsError(try store.createUser(username: "[email protected]", password: "pw", role: .comptable, societyIDs: [])) { error in
+        XCTAssertThrowsError(try store.createUser(username: "nocompta@exemple.fr", password: "pw", role: .comptable, societyIDs: [])) { error in
             guard case AuthError.missingSociety = error else {
                 return XCTFail("Attendu AuthError.missingSociety, eu \(error)")
             }

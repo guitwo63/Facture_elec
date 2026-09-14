@@ -198,7 +198,7 @@ public final class AuthStore: ObservableObject {
             let salt = PasswordHasher.generateSalt()
             let hash = PasswordHasher.hash(password: "admin", salt: salt)
             let admin = User(
-                username: "[email protected]",
+                username: "admin@facturx.local",
                 displayName: "Administrateur",
                 role: .admin,
                 passwordHash: hash,
