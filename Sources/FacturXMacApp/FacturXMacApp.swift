@@ -2053,6 +2053,9 @@ struct PartyEditorView: View {
                     Button {
                         party = r.merged(into: party)
                         dinumResults = []
+                        dinumError = nil
+                        dinumLoading = false
+                        lastSearchKey = searchTrigger
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(r.denomination ?? r.siren).font(.body.weight(.semibold))
