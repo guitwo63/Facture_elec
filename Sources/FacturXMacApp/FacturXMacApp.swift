@@ -2148,6 +2148,7 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var auth: AuthStore
     @State private var testMessage: String?
     @State private var testing = false
     @State private var dinumExpanded = true
@@ -2376,7 +2377,7 @@ struct ApplicationSettingsView: View {
 
                 DisclosureGroup(isExpanded: $numberingExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini.")
+                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini. Le compteur est indépendant par société émettrice.")
                             .font(.caption).foregroundStyle(.secondary)
                         HStack {
                             Text("Préfixe texte").font(.caption)
@@ -2394,7 +2395,7 @@ struct ApplicationSettingsView: View {
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                            Text(store.previewNextNumber()).monospaced().font(.caption.bold())
+                            Text(store.previewNextNumber(companyID: previewCompanyID())).monospaced().font(.caption.bold())
                             Spacer()
                             Button("Appliquer") { store.save() }
                                 .buttonStyle(.borderedProminent)
@@ -2428,6 +2429,12 @@ struct ApplicationSettingsView: View {
                 showSellerPicker = false
             }
         }
+    }
+
+    private func previewCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
     }
 }
 
