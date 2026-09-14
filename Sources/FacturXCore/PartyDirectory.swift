@@ -261,7 +261,8 @@ public final class PartyDirectory: ObservableObject {
     @Published public var entries: [DirectoryEntry]
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "facturx.directory.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("facturx.directory.v1") }
     public weak var audit: AuditStore?
     public var actorName: String = "system"
 
@@ -398,7 +399,8 @@ public final class TagStore: ObservableObject {
     @Published public var tags: [PartyTag]
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "facturx.tags.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("facturx.tags.v1") }
 
     public init() {
         self.tags = []
@@ -439,7 +441,8 @@ public final class KindColorStore: ObservableObject {
     @Published public var colors: [DirectoryEntryKind: String]
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "facturx.kindcolors.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("facturx.kindcolors.v1") }
 
     public init() {
         self.colors = [

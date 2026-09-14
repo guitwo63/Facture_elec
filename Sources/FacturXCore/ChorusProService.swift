@@ -306,10 +306,11 @@ public final class ChorusProSettings: ObservableObject {
     @Published public var credentials: ChorusProCredentials
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "facturx.choruspro.credentials.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("facturx.choruspro.credentials.v1") }
 
     public init() {
-        if let data = defaults.data(forKey: storageKey),
+        if let data = defaults.data(forKey: env.key("facturx.choruspro.credentials.v1")),
            let decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
             credentials = decoded
         } else {

@@ -14,13 +14,14 @@ public final class InvoiceStore: ObservableObject {
     public var actorName: String = "system"
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "facturx.invoices.v1"
-    private let companyKey = "facturx.mycompany.v1"
-    private let sellerEntryKey = "facturx.defaultseller.entryid.v1"
-    private let numPrefixKey = "facturx.number.prefix.v1"
-    private let numYearKey = "facturx.number.includeyear.v1"
-    private let numStartKey = "facturx.number.start.v1"
-    private let numSepKey = "facturx.number.useseparator.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("facturx.invoices.v1") }
+    private var companyKey: String { env.key("facturx.mycompany.v1") }
+    private var sellerEntryKey: String { env.key("facturx.defaultseller.entryid.v1") }
+    private var numPrefixKey: String { env.key("facturx.number.prefix.v1") }
+    private var numYearKey: String { env.key("facturx.number.includeyear.v1") }
+    private var numStartKey: String { env.key("facturx.number.start.v1") }
+    private var numSepKey: String { env.key("facturx.number.useseparator.v1") }
 
     public init() {
         self.invoices = []

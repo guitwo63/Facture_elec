@@ -95,6 +95,7 @@ struct FacturXMacApp: App {
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
+    @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
     @StateObject private var statusStore = OrderStatusStore.shared
@@ -113,6 +114,7 @@ struct FacturXMacApp: App {
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
                 .environmentObject(auth)
+                .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     auth.attachDirectory(directory)
@@ -185,11 +187,13 @@ struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var appEnv: AppEnvironment
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
     @State private var showSettings = false
     @State private var showUserManagement = false
+    @State private var showEnvConfirm = false
 
     var body: some View {
         Group {
@@ -197,12 +201,70 @@ struct RootView: View {
                 LoginView()
             } else {
                 mainBody
+                    .onChange(of: appEnv.mode) { _ in
+                        reloadAllStores()
+                    }
             }
         }
+        .alert("Changer d'environnement ?", isPresented: $showEnvConfirm) {
+            Button("Annuler", role: .cancel) { }
+        } message: {
+            Text("Les données affichées vont basculer vers l'environnement sélectionné (test ou production). Les identifiants SUPER PDP propres à cet environnement seront utilisés.")
+        }
+    }
+
+    private func reloadAllStores() {
+        store.load()
+        orderStore.load()
+        directory.load()
+        tagStore.load()
+        kindColors.load()
+        statusStore.load()
+        AuditStore.shared.load()
+        chorusSettings.credentials = reloadChorusCredentials()
+        superPDPSettings.credentials = reloadSuperPDPCredentials()
+        store.audit = AuditStore.shared
+        orderStore.audit = AuditStore.shared
+        directory.audit = AuditStore.shared
+        auth.reloadEnvironment()
+        store.actorName = auth.currentUser?.username ?? "system"
+        orderStore.actorName = auth.currentUser?.username ?? "system"
+        directory.actorName = auth.currentUser?.username ?? "system"
+        selectedID = nil
+        selectedOrderID = nil
+    }
+
+    private func reloadChorusCredentials() -> ChorusProCredentials {
+        let k = appEnv.key("facturx.choruspro.credentials.v1")
+        if let data = UserDefaults.standard.data(forKey: k),
+           let decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+            return decoded
+        }
+        return ChorusProCredentials(clientID: "", clientSecret: "")
+    }
+
+    private func reloadSuperPDPCredentials() -> SuperPDPCredentials {
+        let k = appEnv.key("facturx.superpdp.credentials.v1")
+        if let data = UserDefaults.standard.data(forKey: k),
+           let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+            return decoded
+        }
+        return SuperPDPCredentials(clientID: "", clientSecret: "", useSandbox: appEnv.isTest)
     }
 
     private var mainBody: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: appEnv.isTest ? "flask" : "checkmark.seal.fill")
+                    .foregroundStyle(appEnv.isTest ? .orange : .green)
+                Text("Environnement : \(appEnv.mode.label)")
+                    .font(.caption.bold())
+                    .foregroundStyle(appEnv.isTest ? .orange : .green)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(appEnv.isTest ? Color.orange.opacity(0.12) : Color.green.opacity(0.12))
             HStack {
                 Picker("", selection: $tab) {
                     ForEach(RootTab.visible(for: auth.currentUser?.role)) { Text($0.rawValue).tag($0) }
@@ -3111,6 +3173,7 @@ struct OrderStatusSettingsView: View {
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
@@ -3131,6 +3194,32 @@ struct ApplicationSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: appEnv.isTest ? "flask" : "checkmark.seal.fill")
+                                .foregroundStyle(appEnv.isTest ? .orange : .green)
+                            Text("Environnement actif : \(appEnv.mode.label)")
+                                .font(.headline)
+                            Spacer()
+                        }
+                        Text("Bascule entre données de test et de production. Chaque environnement a ses propres factures, commandes, tiers, utilisateurs, journal d'audit et identifiants SUPER PDP.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Picker("Environnement", selection: Binding(
+                            get: { appEnv.mode },
+                            set: { newMode in appEnv.setMode(newMode) }
+                        )) {
+                            ForEach(AppEnvironmentMode.allCases, id: \.self) { m in
+                                Text(m.label).tag(m)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        if appEnv.isTest {
+                            Label("Mode bac à sable : les données et identifiants sont isolés de la production.", systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    }.padding(8)
+                }
                 DisclosureGroup(isExpanded: $dinumExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("L'API recherche-entreprises.api.gouv.fr (DINUM) pré-remplit la désignation et l'adresse postale d'un tiers à partir d'un SIREN, SIRET ou nom. Gratuite, publique, sans compte ni jeton. Ne donne pas l'adresse de routage PPF.")
@@ -3240,7 +3329,12 @@ struct ApplicationSettingsView: View {
                             Text("Base API").frame(width: 100, alignment: .leading)
                             TextField("https://api.superpdp.tech", text: $superPDPSettings.credentials.apiBaseURL)
                         }
-                        Toggle("Environnement bac à sable", isOn: $superPDPSettings.credentials.useSandbox)
+                        HStack {
+                            Text("Mode SUPER PDP").font(.caption)
+                            Spacer()
+                            Text(appEnv.isTest ? "Bac à sable (suivant l'environnement)" : "Production (suivant l'environnement)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         HStack {
                             Button {
                                 superPDPSettings.save()

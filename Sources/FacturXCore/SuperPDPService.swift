@@ -454,7 +454,7 @@ public final class SuperPDPService {
         }
         guard (200...299).contains(http.statusCode) else {
             let bodyText = String(data: data, encoding: .utf8) ?? ""
-            let hint = credentials.useSandbox
+            let hint = AppEnvironment.shared.isTest
                 ? " (bac à sable : le SIREN émetteur de la facture doit correspondre à celui de l'application OAuth — Tricatel 000000001 ou Burger Queen 000000002 — et le destinataire doit être joignable sur le réseau Peppol test)"
                 : ""
             throw SuperPDPError.http(status: http.statusCode, body: (bodyText.isEmpty ? "(corps vide)" : bodyText) + hint)
@@ -546,14 +546,15 @@ public final class SuperPDPSettings: ObservableObject {
     @Published public var credentials: SuperPDPCredentials
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "facturx.superpdp.credentials.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("facturx.superpdp.credentials.v1") }
 
     public init() {
-        if let data = defaults.data(forKey: storageKey),
+        if let data = defaults.data(forKey: env.key("facturx.superpdp.credentials.v1")),
            let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
             credentials = decoded
         } else {
-            credentials = SuperPDPCredentials(clientID: "", clientSecret: "")
+            credentials = SuperPDPCredentials(clientID: "", clientSecret: "", useSandbox: env.isTest)
         }
     }
 
