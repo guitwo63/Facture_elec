@@ -1253,13 +1253,13 @@ struct DirectoryDetailView: View {
                         if let st = entry.party.siret, !st.isEmpty {
                             HStack(alignment: .top) {
                                 Text("SIRET").font(.callout.bold()).frame(width: 160, alignment: .leading)
-                                VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
                                     Text(st).font(.body)
                                     if SireneValidator.isValidSiret(st) {
-                                        Label("valide (Luhn)", systemImage: "checkmark.circle.fill")
+                                        Label("SIRET valide", systemImage: "checkmark.circle.fill")
                                             .font(.caption2).foregroundStyle(.green)
                                     } else {
-                                        Label("invalide (Luhn)", systemImage: "exclamationmark.triangle.fill")
+                                        Label("SIRET invalide", systemImage: "exclamationmark.triangle.fill")
                                             .font(.caption2).foregroundStyle(.orange)
                                     }
                                 }
