@@ -114,3 +114,44 @@ python3 ref/gen_swift_mirror.py     # valide la logique CII contre le XSD offici
 ## Contexte réglementaire
 
 La réforme française de la facturation électronique impose, à partir de 2026, la transmission de factures structurées (machine-readable) via le PPF et des PDP. Factur-X (PDF/A-3 + XML CII) est l'un des trois formats acceptés (avec UBL 2.1 et CII standalone). Le profil EN 16931 est recommandé car il couvre le noyau sémantique européen complet.
+
+## Module Order-X (commandes)
+
+L'application intègre un **module de commandes** au format **Order-X** (profil **COMFORT**), accessible via l'onglet **« Commandes »** (structuré comme l'onglet Factures).
+
+Une commande Order-X est un **PDF/A-3** contenant un fichier **XML Cross Industry Order (CIO)** embarqué sous le nom `order-x.xml` avec `/AFRelationship /Alternative`, accompagné des métadonnées XMP (`fx:DocumentType = ORDER`). Le **profil ventes** modélise une commande de ventes : l'**acheteur** émet une commande (TypeCode `220`) à destination du **fournisseur**, en indiquant les lignes, la devise, et la date de livraison souhaitée.
+
+### Conformité Order-X
+
+- **Profil** : COMFORT (URN `urn:order-x.eu:1p0:comfort`).
+- **XML CIO** : généré selon le schéma **UN/CEFACT SCRDMCCBDACIOMessageStructure D20B** (Cross Industry Order), distinct du XML CII des factures.
+- **Racine** : `rsm:SCRDMCCBDACIOMessageStructure` (namespaces `:128` pour ram/qdt/udt, rsm `urn:un:unece:uncefact:data:SCRDMCCBDACIOMessageStructure:100`).
+- **TypeCodes** : `220` (commande), `221` (modifications), `222` (réponses). Le profil ventes émet par défaut `220`.
+- **Spécificités CIO** : `RequestedQuantity` (au lieu de `BilledQuantity`), `OrderCurrencyCode` (au lieu de `InvoiceCurrencyCode`), `RequestedDeliverySupplyChainEvent` (au lieu de `ActualDeliverySupplyChainEvent`), pas de `DuePayableAmount`.
+- **Conteneur PDF/A-3** : le PDF embarque le XML en pièce jointe (`order-x.xml`) avec XMP `fx:DocumentType = ORDER`, `fx:DocumentFileName = order-x.xml`, namespace `urn:factur-x:pdfa:CrossIndustryDocument:1p0#` et `pdfaid:part = 3`.
+
+### Contenu du module
+
+```
+Sources/FacturXCore/
+├── OrderModels.swift           # SalesOrder, OrderXProfile, OrderTypeCode, OrderStatus
+├── OrderCIOXMLGenerator.swift  # Générateur XML CIO D20B Order-X
+├── OrderPDFRenderer.swift      # Rendu PDF lisible (CoreGraphics) — « COMMANDE »
+├── OrderXEmbedder.swift        # Embarquement PDF/A-3 + XMP (order-x.xml)
+├── OrderXValidator.swift       # Validation interne (données + PDF)
+├── OrderXGenerator.swift      # Façade
+└── OrderStore.swift            # Persistance (UserDefaults, clés orderx.*)
+Tests/FacturXCoreTests/
+└── OrderXCoreTests.swift      # 17 tests (totaux, XML CIO, embarquement, validation)
+```
+
+### Utilisation
+
+1. Sélectionnez l'**acheteur** (émetteur de la commande) et le **fournisseur** (destinataire) via les annuaires réutilisés.
+2. Ajoutez les lignes (désignation, quantité, unité, prix unitaire HT, taux TVA) et la **date de livraison souhaitée**.
+3. Choisissez le **TypeCode** (`220` commande par défaut) et les références (devis, commande-cadre, etc.).
+4. Cliquez **« Valider »** pour vérifier la conformité de la commande, puis **« Générer l'Order-X »** pour produire le PDF hybride.
+
+Les commandes sont sauvegardées localement (UserDefaults, clés `orderx.*`) entre les sessions.
+
+> Note : comme pour les factures, le conteneur produit est conforme à la structure Order-X (XML + XMP + AF). Une validation Schematron complète via un validateur externe reste recommandée avant transmission.

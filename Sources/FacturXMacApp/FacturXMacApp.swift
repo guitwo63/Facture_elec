@@ -91,6 +91,7 @@ struct LabeledInfoField<Content: View>: View {
 @main
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
+    @StateObject private var orderStore = OrderStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var tagStore = TagStore.shared
@@ -102,6 +103,7 @@ struct FacturXMacApp: App {
         WindowGroup("Factur-X") {
             RootView()
                 .environmentObject(store)
+                .environmentObject(orderStore)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
                 .environmentObject(tagStore)
@@ -124,6 +126,10 @@ struct FacturXMacApp: App {
                     NotificationCenter.default.post(name: .newInvoiceRequested, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
+                Button("Nouvelle commande") {
+                    NotificationCenter.default.post(name: .newOrderRequested, object: nil)
+                }
+                .keyboardShortcut("o", modifiers: .command)
             }
         }
     }
@@ -131,6 +137,7 @@ struct FacturXMacApp: App {
 
 extension Notification.Name {
     static let newInvoiceRequested = Notification.Name("newInvoiceRequested")
+    static let newOrderRequested = Notification.Name("newOrderRequested")
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -149,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum RootTab: String, CaseIterable, Identifiable {
     case invoices = "Factures"
+    case orders = "Commandes"
     case directory = "Annuaire"
     var id: String { rawValue }
 }
@@ -156,8 +164,10 @@ enum RootTab: String, CaseIterable, Identifiable {
 struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var orderStore: OrderStore
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
+    @State private var selectedOrderID: UUID?
     @State private var showSettings = false
     @State private var showUserManagement = false
 
@@ -178,7 +188,7 @@ struct RootView: View {
                     ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 200)
+                .frame(width: 300)
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {
@@ -222,6 +232,8 @@ struct RootView: View {
             switch tab {
             case .invoices:
                 InvoicesTabView(selectedID: $selectedID)
+            case .orders:
+                OrdersTabView(selectedID: $selectedOrderID)
             case .directory:
                 DirectoryView()
             }
@@ -274,6 +286,12 @@ struct RootView: View {
                                        preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
             store.upsert(draft)
             selectedID = draft.id
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newOrderRequested)) { _ in
+            tab = .orders
+            let draft = orderStore.newDraft()
+            orderStore.upsert(draft)
+            selectedOrderID = draft.id
         }
     }
 
@@ -2979,6 +2997,563 @@ struct NormRefPicker: View {
         )) {
             ForEach(options) { ref in Text(ref.label).tag(ref.id as String) }
             Text("Autre…").tag("__custom__" as String)
+        }
+    }
+}
+
+struct OrderPartySection: View {
+    enum Role {
+        case buyer, seller
+        var title: String { self == .buyer ? "Acheteur" : "Fournisseur" }
+        var defaultKind: DirectoryEntryKind { self == .buyer ? .client : .fournisseur }
+    }
+
+    @Binding var party: InvoiceParty
+    let role: Role
+    var onPartyPicked: ((InvoiceParty) -> Void)? = nil
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var showPicker = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button {
+                    showPicker = true
+                } label: {
+                    Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+            }
+
+            PartyEditorView(party: $party, isFournisseur: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+        }
+        .padding(8)
+        .sheet(isPresented: $showPicker) {
+            PartyPickerSheet(role: role == .buyer ? .buyer : .seller) { selected in
+                var p = selected.party
+                if let routing = selected.defaultRoutingAddress, routing.isActive {
+                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+                    if !composed.isEmpty {
+                        p.endpointID = composed
+                        p.endpointSchemeID = "0225"
+                    }
+                }
+                if let contact = selected.defaultContact, contact.isActive {
+                    p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+                    p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+                    p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+                }
+                party = p
+                onPartyPicked?(p)
+                showPicker = false
+            }
+        }
+    }
+
+    private func updatePartyFromContact(_ contact: PartyContact) {
+        var p = party
+        p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+        p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+        p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+        party = p
+        onPartyPicked?(p)
+    }
+
+    private func updatePartyFromRouting(_ routing: PartyRoutingAddress) {
+        var p = party
+        let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+        if !composed.isEmpty {
+            p.endpointID = composed
+            p.endpointSchemeID = "0225"
+        }
+        party = p
+        onPartyPicked?(p)
+    }
+}
+
+struct OrdersTabView: View {
+    @EnvironmentObject var orderStore: OrderStore
+    @Binding var selectedID: UUID?
+    @State private var query = ""
+
+    var filteredOrders: [SalesOrder] {
+        var result = orderStore.orders
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return result }
+        return result.filter { order in
+            order.number.lowercased().contains(q)
+                || order.seller.name.lowercased().contains(q)
+                || (order.seller.siren ?? "").lowercased().contains(q)
+                || order.buyer.name.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                HStack {
+                    Button {
+                        let draft = orderStore.newDraft()
+                        orderStore.upsert(draft)
+                        selectedID = draft.id
+                    } label: { Label("Nouvelle commande", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                    Text("Commandes").font(.title2.bold())
+                    Spacer()
+                }
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Rechercher (numéro, fournisseur, client…)", text: $query)
+                        .textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+            }
+            .padding(12)
+
+            Divider()
+
+            HSplitView {
+                if filteredOrders.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "cart").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Aucune commande.")
+                            .foregroundStyle(.secondary)
+                        Button("Nouvelle commande") {
+                            let draft = orderStore.newDraft()
+                            orderStore.upsert(draft)
+                            selectedID = draft.id
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(filteredOrders, selection: Binding(
+                        get: { selectedID },
+                        set: { id in selectedID = id }
+                    )) { order in
+                        VStack(alignment: .leading) {
+                            HStack {
+                                Text(order.number).font(.headline)
+                                Spacer()
+                                Text(order.issueDate, format: .dateTime.day().month().year())
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            HStack(spacing: 6) {
+                                Image(systemName: order.status.systemImage)
+                                    .foregroundColor(Color(hex: order.status.hexColor))
+                                    .font(.caption2)
+                                Text(order.status.label).font(.caption2)
+                                    .foregroundColor(Color(hex: order.status.hexColor))
+                                Text(order.type.label)
+                                    .font(.caption2).foregroundStyle(.accentColor)
+                                Spacer()
+                            }
+                            Text("\(order.seller.name.isEmpty ? "Sans fournisseur" : order.seller.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                orderStore.orders.removeAll { $0.id == order.id }
+                                orderStore.save()
+                                if selectedID == order.id { selectedID = nil }
+                            } label: { Label("Supprimer", systemImage: "trash") }
+                        }
+                    }
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
+                }
+
+                if let id = selectedID,
+                   orderStore.orders.contains(where: { $0.id == id }) {
+                    OrderEditorView(order: binding(for: id))
+                        .frame(minWidth: 380)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "cart.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Sélectionnez ou créez une commande")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+
+    private func binding(for id: UUID) -> Binding<SalesOrder> {
+        Binding(
+            get: { orderStore.orders.first(where: { $0.id == id }) ?? SalesOrder(number: "", buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""), seller: InvoiceParty(name: "", street: "", postcode: "", city: "")) },
+            set: { newValue in
+                if let idx = orderStore.orders.firstIndex(where: { $0.id == id }) {
+                    orderStore.orders[idx] = newValue
+                    orderStore.save()
+                }
+            }
+        )
+    }
+}
+
+struct OrderEditorView: View {
+    @Binding var order: SalesOrder
+    @EnvironmentObject var orderStore: OrderStore
+    @State private var exportError: String?
+    @State private var exportedURL: URL?
+    @State private var validation: FacturXValidationResult?
+    @State private var showValidation = false
+    @State private var isLocked = false
+    @State private var showUnlockAlert = false
+
+    private var hasMandatoryWarnings: Bool {
+        let b = order.buyer
+        let s = order.seller
+        let buyerOk = !b.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !b.country.trimmingCharacters(in: .whitespaces).isEmpty
+            && ((b.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
+                || (b.endpointID ?? "").trimmingCharacters(in: .whitespaces).count >= 9)
+        let sellerOk = !s.name.trimmingCharacters(in: .whitespaces).isEmpty
+            && !s.country.trimmingCharacters(in: .whitespaces).isEmpty
+            && ((s.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
+                || (s.endpointID ?? "").trimmingCharacters(in: .whitespaces).count >= 9)
+        let headerOk = !order.number.trimmingCharacters(in: .whitespaces).isEmpty
+            && !order.currency.trimmingCharacters(in: .whitespaces).isEmpty
+        let linesOk = order.lines.allSatisfy {
+            !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && $0.quantity > 0 && $0.unitPrice >= 0
+        }
+        return !(buyerOk && sellerOk && headerOk && linesOk)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Édition : \(order.number)").font(.title2.bold())
+                if isLocked {
+                    Label("Lecture seule", systemImage: "lock.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
+                }
+                Spacer()
+                if isLocked {
+                    Button { showUnlockAlert = true } label: {
+                        Label("Modifier", systemImage: "lock.open")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Repasser en édition (la commande n'est plus protégée)")
+                } else if validation?.isValid == true {
+                    Button { isLocked = true } label: {
+                        Label("Verrouiller", systemImage: "lock")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Protéger la commande validée en lecture seule")
+                }
+                Button("Valider") { runValidation() }
+                    .buttonStyle(.bordered)
+                    .disabled(isLocked)
+                Button("Exporter XML") { exportXML() }
+                    .buttonStyle(.bordered)
+                Button("Générer l'Order-X") { export() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                if let err = exportError {
+                    Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
+                        .onChange(of: order.number) { _ in exportError = nil }
+                        .onChange(of: order.seller.name) { _ in exportError = nil }
+                        .onChange(of: order.buyer.name) { _ in exportError = nil }
+                }
+                if let url = exportedURL {
+                    Text("Fichier généré : \(url.lastPathComponent)").font(.caption).foregroundStyle(.green)
+                    Button("Afficher dans le Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        .onChange(of: order.number) { _ in exportedURL = nil }
+                        .onChange(of: order.seller.name) { _ in exportedURL = nil }
+                        .onChange(of: order.buyer.name) { _ in exportedURL = nil }
+                }
+
+                if hasMandatoryWarnings {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Données obligatoires pour la conformité Order-X", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption.bold())
+                                .foregroundStyle(.orange)
+                            Text("Acheteur et fournisseur : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique, n° TVA si applicable.").font(.caption)
+                            Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
+                            Text("En-tête : numéro de commande, date d'émission, date de livraison souhaitée, devise (EUR).").font(.caption)
+                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if showValidation, let v = validation {
+                    orderValidationPanel(v)
+                }
+
+                GroupBox("En-tête") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 24) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    LabeledContent {
+                                        TextField("", text: $order.number).frame(width: 160)
+                                    } label: {
+                                        HStack(spacing: 3) {
+                                            Text("Numéro *").foregroundColor(.red)
+                                            InfoBadge(text: "Numéro unique de la commande.")
+                                        }
+                                    }
+                                    HStack(spacing: 3) {
+                                        Picker("Type", selection: $order.type) {
+                                            ForEach(OrderTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
+                                        }.frame(width: 260)
+                                        InfoBadge(text: "Type de document : 220 commande, 221 modification, 222 réponse.")
+                                    }
+                                }
+                                HStack {
+                                    HStack(spacing: 3) {
+                                        DatePicker("Date", selection: $order.issueDate, displayedComponents: .date)
+                                        InfoBadge(text: "Date d'émission de la commande.")
+                                    }
+                                    HStack(spacing: 3) {
+                                        DatePicker("Livraison", selection: $order.requestedDeliveryDate, displayedComponents: .date)
+                                        InfoBadge(text: "Date de livraison souhaitée par l'acheteur.")
+                                    }
+                                }
+                                HStack {
+                                    Picker("Profil Order-X", selection: $order.profile) {
+                                        ForEach(OrderXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                    }
+                                    NormRefPicker("Devise", options: NormRefs.currencies, code: $order.currency).frame(width: 160)
+                                    HStack(spacing: 3) {
+                                        TextField("Réf. acheteur", text: Binding($order.buyerReference, replacingNilWith: ""))
+                                        InfoBadge(text: "Référence acheteur (BuyerReference), remontée en haut de la commande.")
+                                    }
+                                }
+                                DisclosureGroup("Autres références") {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. devis", text: Binding($order.quotationRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "QuotationReferencedDocument — référence du devis.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. contrat", text: Binding($order.contractRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "ContractReferencedDocument — référence du contrat.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. commande cadre", text: Binding($order.blanketOrderRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "BlanketOrderReferencedDocument — commande cadre.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. modif. précédente", text: Binding($order.previousOrderChangeRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "PreviousOrderChangeReferencedDocument.")
+                                        }
+                                        HStack(spacing: 3) {
+                                            TextField("Réf. réponse précédente", text: Binding($order.previousOrderResponseRef, replacingNilWith: "")).frame(width: 220)
+                                            InfoBadge(text: "PreviousOrderResponseReferencedDocument.")
+                                        }
+                                    }
+                                }
+                                .font(.caption)
+                            }
+                            VStack(alignment: .trailing) {
+                                row("Total HT", order.lineTotal)
+                                ForEach(order.vatBreakdown, id: \.rate) { item in
+                                    row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
+                                }
+                                row("Total TTC", order.grandTotal, bold: true)
+                            }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+                        }
+                    }.padding(8)
+                }.lockable(isLocked)
+
+                HStack(alignment: .top, spacing: 12) {
+                    GroupBox("Acheteur (vous)") {
+                        OrderPartySection(party: $order.buyer, role: .buyer)
+                    }.lockable(isLocked)
+                    GroupBox("Fournisseur") {
+                        OrderPartySection(party: $order.seller, role: .seller)
+                    }.lockable(isLocked)
+                }
+
+                GroupBox("Lignes") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach($order.lines) { $line in
+                            HStack {
+                                HStack(spacing: 2) {
+                                    TextField("Désignation *", text: $line.name).frame(minWidth: 220)
+                                    InfoBadge(text: "Désignation de la ligne. Obligatoire.")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("Qté", value: $line.quantity, format: .number)
+                                    InfoBadge(text: "Quantité demandée. Doit être positive.")
+                                }
+                                HStack(spacing: 2) {
+                                    NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
+                                    InfoBadge(text: "Unité de mesure (UN/ECE Rec 20).")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
+                                    InfoBadge(text: "Prix unitaire HT.")
+                                }
+                                HStack(spacing: 2) {
+                                    DoubleField("TVA %", value: $line.vatRate, format: .number)
+                                    InfoBadge(text: "Taux de TVA appliqué (%).")
+                                }
+                                Text(String(format: "%.2f", line.lineTotal))
+                                    .monospacedDigit().frame(width: 80, alignment: .trailing)
+                                Button { order.lines.removeAll { $0.id == line.id } } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                            }
+                        }
+                        Button {
+                            order.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: order.lines.last?.vatRate ?? 20))
+                        } label: { Label("Ajouter une ligne", systemImage: "plus") }
+                    }.padding(8)
+                }.lockable(isLocked)
+
+                GroupBox("Notes") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Notes libres", text: Binding($order.notes, replacingNilWith: ""))
+                    }.padding(8)
+                }.lockable(isLocked)
+            }.padding()
+        }
+            .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
+                Button("Annuler", role: .cancel) { }
+                Button("Modifier", role: .destructive) { isLocked = false }
+            } message: {
+                Text("La commande était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout envoi au fournisseur.")
+            }
+        }
+    }
+
+    private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {
+        HStack {
+            Text(label).font(bold ? .body.bold() : .body)
+            Spacer()
+            Text(String(format: "%.2f %@", value, order.currency))
+                .font(bold ? .body.bold() : .body)
+                .monospacedDigit()
+        }.frame(width: 280)
+    }
+
+    private func export() {
+        exportError = nil
+        exportedURL = nil
+        let preCheck = OrderXValidator().validate(order: order)
+        if !preCheck.isValid {
+            validation = preCheck
+            showValidation = true
+            exportError = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de générer."
+            return
+        }
+        do {
+            orderStore.upsert(order)
+            let data = try OrderXGenerator().generate(order: order)
+            let postCheck = OrderXValidator().validate(pdf: data)
+            if !postCheck.isValid {
+                validation = FacturXValidationResult(
+                    isValid: false,
+                    errors: postCheck.errors,
+                    warnings: preCheck.warnings + postCheck.warnings
+                )
+                showValidation = true
+                exportError = "La conformité du PDF généré a échoué : \(postCheck.errors.count) erreur(s)."
+                return
+            }
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.pdf]
+            panel.nameFieldStringValue = "commande-\(order.number).pdf"
+            if panel.runModal() == .OK, let url = panel.url {
+                try data.write(to: url)
+                exportedURL = url
+                validation = FacturXValidationResult(
+                    isValid: true,
+                    warnings: preCheck.warnings + postCheck.warnings
+                )
+                showValidation = true
+            }
+        } catch {
+            exportError = "\(error)"
+        }
+    }
+
+    private func runValidation() {
+        validation = OrderXValidator().validate(order: order)
+        showValidation = true
+    }
+
+    private func exportXML() {
+        do {
+            let xml = try OrderCIOXMLGenerator().generate(order: order)
+            let xmlString = String(data: xml, encoding: .utf8) ?? ""
+            print("=== XML CIO ===")
+            print(xmlString)
+            print("=== FIN XML ===")
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.xml]
+            panel.nameFieldStringValue = "commande-\(order.number).xml"
+            if panel.runModal() == .OK, let url = panel.url {
+                try xml.write(to: url)
+            }
+        } catch {
+            exportError = "\(error)"
+        }
+    }
+
+    private func orderValidationPanel(_ v: FacturXValidationResult) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    if v.isValid {
+                        Label("Conforme", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("Non conforme — \(v.errors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                            .foregroundStyle(.red)
+                    }
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: order.status.systemImage)
+                            .foregroundColor(Color(hex: order.status.hexColor))
+                            .font(.caption2)
+                        Picker("Statut", selection: $order.status) {
+                            ForEach(OrderStatus.allCases, id: \.self) { s in
+                                Label(s.label, systemImage: s.systemImage).tag(s)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                        .help("Statut de la commande (modifiable à tout moment)")
+                    }
+                    Button { showValidation = false } label: {
+                        Image(systemName: "xmark.circle")
+                    }.buttonStyle(.plain)
+                }
+                if !v.errors.isEmpty {
+                    Text("Erreurs :").font(.caption.bold())
+                    ForEach(v.errors, id: \.self) { e in
+                        Text("• \(e)").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                if !v.warnings.isEmpty {
+                    Text("Avertissements :").font(.caption.bold())
+                    ForEach(v.warnings, id: \.self) { w in
+                        Text("• \(w)").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
