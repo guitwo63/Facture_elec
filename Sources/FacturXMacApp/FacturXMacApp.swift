@@ -2161,8 +2161,8 @@ struct SettingsTabView: View {
         VStack(spacing: 0) {
             Picker("", selection: $settingsTab) {
                 Text("Profil").tag(0)
-                Text("Commandes").tag(1)
                 if auth.currentUser?.role == .admin {
+                    Text("Commandes").tag(1)
                     Text("Application").tag(2)
                 }
             }
