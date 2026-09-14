@@ -241,16 +241,25 @@ struct UserDetailCard: View {
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(auth.availableSocieties()) { s in
-                            Toggle(isOn: Binding(
-                                get: { user.societyIDs.contains(s.id) },
-                                set: { checked in
-                                    var u = user
-                                    if checked { u.societyIDs.append(s.id) }
-                                    else { u.societyIDs.removeAll { $0 == s.id } }
-                                    onChange(u)
+                            HStack {
+                                Toggle(isOn: Binding(
+                                    get: { user.societyIDs.contains(s.id) },
+                                    set: { checked in
+                                        var u = user
+                                        if checked { u.societyIDs.append(s.id) }
+                                        else {
+                                            u.societyIDs.removeAll { $0 == s.id }
+                                            if u.defaultSellerEntryID == s.id { u.defaultSellerEntryID = nil }
+                                        }
+                                        onChange(u)
+                                    }
+                                )) {
+                                    Text(s.displayName)
                                 }
-                            )) {
-                                Text(s.displayName)
+                                Spacer()
+                                if user.defaultSellerEntryID == s.id {
+                                    Text("(société par défaut)").font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
