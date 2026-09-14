@@ -2668,9 +2668,8 @@ struct SettingsTabView: View {
                 Text("Profil").tag(0)
                 if auth.currentUser?.isAdmin == true {
                     Text("Tables").tag(1)
-                    Text("Commandes").tag(2)
-                    Text("Application").tag(3)
-                    Text("Journal").tag(4)
+                    Text("Application").tag(2)
+                    Text("Journal").tag(3)
                 }
             }
             .pickerStyle(.segmented)
@@ -2681,9 +2680,7 @@ struct SettingsTabView: View {
                 ProfileSettingsView()
             case 1:
                 ValueTablesView()
-            case 2:
-                OrderStatusSettingsView()
-            case 4:
+            case 3:
                 AuditLogView()
             default:
                 ApplicationSettingsView()
@@ -3007,6 +3004,10 @@ struct ApplicationSettingsView: View {
 
 // MARK: - Tables de valeurs paramétrées
 
+extension DirectoryEntryKind: Identifiable {
+    public var id: String { rawValue }
+}
+
 enum ValueTable: String, CaseIterable, Identifiable {
     case orderStatuses
     case tags
@@ -3056,6 +3057,9 @@ struct ValueTablesView: View {
     @EnvironmentObject var kindColors: KindColorStore
     @State private var selectedTable: ValueTable = .orderStatuses
     @State private var searchQuery = ""
+    @State private var editingStatus: OrderStatusOverride?
+    @State private var editingTag: PartyTag?
+    @State private var editingKind: DirectoryEntryKind?
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
 
@@ -3074,6 +3078,23 @@ struct ValueTablesView: View {
                 Divider()
                 valuesPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .sheet(item: $editingStatus) { override in
+            OrderStatusEditorSheet(override: override) { updated in
+                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    statusStore.overrides[i] = updated
+                    statusStore.save()
+                }
+            }
+        }
+        .sheet(item: $editingTag) { tag in
+            TagEditorSheet(tag: tag) { updated in tagStore.upsert(updated) }
+        }
+        .sheet(item: $editingKind) { kind in
+            KindColorEditorSheet(kind: kind, hex: kindColors.hexColor(for: kind)) { newHex in
+                kindColors.colors[kind] = newHex
+                kindColors.save()
             }
         }
     }
@@ -3143,9 +3164,31 @@ struct ValueTablesView: View {
             .padding(12)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(filteredStatuses) { override in
-                        statusRow(override)
+                        HStack(spacing: 10) {
+                            Image(systemName: override.systemImage)
+                                .frame(width: 22)
+                                .foregroundStyle(Color(hex: override.hexColor))
+                            Text(override.label).font(.body)
+                            Text(override.systemImage).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                editingStatus = override
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce statut")
+                            Button(role: .destructive) {
+                                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                                    statusStore.remove(at: i)
+                                }
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer ce statut")
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.06)))
                     }
                 }
                 .padding(12)
@@ -3159,36 +3202,6 @@ struct ValueTablesView: View {
         return statusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
 
-    private func statusRow(_ override: OrderStatusOverride) -> some View {
-        let idx = statusStore.overrides.firstIndex(where: { $0.id == override.id }) ?? 0
-        let binding = Binding<OrderStatusOverride>(
-            get: { statusStore.overrides[idx] },
-            set: { statusStore.overrides[idx] = $0; statusStore.save() }
-        )
-        return HStack(spacing: 12) {
-            Image(systemName: binding.wrappedValue.systemImage)
-                .frame(width: 22)
-                .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
-            TextField("Libellé", text: binding.label)
-                .frame(minWidth: 180)
-            TextField("Icône SF", text: binding.systemImage)
-                .frame(width: 120)
-            ColorPicker(selection: Binding(
-                get: { Color(hex: binding.wrappedValue.hexColor) },
-                set: { newColor in statusStore.overrides[idx].hexColor = hexString(from: newColor); statusStore.save() }
-            )) { Text("Couleur") }
-            .labelsHidden()
-            Spacer()
-            Button(role: .destructive) {
-                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
-                    statusStore.remove(at: i)
-                }
-            } label: { Image(systemName: "minus.circle.fill") }
-                .buttonStyle(.borderless)
-                .help("Supprimer ce statut")
-        }
-    }
-
     private var tagsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -3198,24 +3211,28 @@ struct ValueTablesView: View {
             .padding(12)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(filteredTags) { tag in
-                        HStack {
+                        HStack(spacing: 10) {
                             Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
-                            TextField("Nom du tag", text: Binding(
-                                get: { tag.name },
-                                set: { newName in var t = tag; t.name = newName; tagStore.upsert(t) }
-                            )).frame(maxWidth: 220)
-                            ColorPicker("", selection: Binding(
-                                get: { Color(hex: tag.hexColor) },
-                                set: { newColor in var t = tag; t.hexColor = hexString(from: newColor); tagStore.upsert(t) }
-                            )).labelsHidden().frame(width: 40)
+                            Text(tag.name).font(.body)
                             Spacer()
-                            Button(role: .destructive) { tagStore.delete(tag) } label: { Image(systemName: "trash") }
+                            Button {
+                                editingTag = tag
+                            } label: { Image(systemName: "pencil") }
                                 .buttonStyle(.borderless)
+                                .help("Modifier ce tag")
+                            Button(role: .destructive) {
+                                tagStore.delete(tag)
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer ce tag")
                         }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.06)))
                     }
-                    Divider()
+                    Divider().padding(.vertical, 6)
                     Text("Ajouter un tag").font(.caption.bold())
                     HStack {
                         ColorPicker("", selection: Binding(
@@ -3252,18 +3269,28 @@ struct ValueTablesView: View {
             .padding(12)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(DirectoryEntryKind.allCases, id: \.self) { kind in
-                        HStack {
-                            Text(kind.label).frame(width: 200, alignment: .leading)
-                            ColorPicker(selection: Binding(
-                                get: { Color(hex: kindColors.hexColor(for: kind)) },
-                                set: { newColor in kindColors.colors[kind] = hexString(from: newColor); kindColors.save() }
-                            )) { Text(kind.label) }
-                            .labelsHidden()
+                        HStack(spacing: 10) {
+                            Circle().fill(Color(hex: kindColors.hexColor(for: kind))).frame(width: 14, height: 14)
+                            Text(kind.label).font(.body)
                             Text(kindColors.hexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
                             Spacer()
+                            Button {
+                                editingKind = kind
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier cette couleur")
+                            Button(role: .destructive) {
+                                kindColors.colors[kind] = kind.defaultHexColor
+                                kindColors.save()
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Réinitialiser cette couleur")
                         }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.06)))
                     }
                 }
                 .padding(12)
@@ -3300,6 +3327,161 @@ struct ValueTablesView: View {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return refs }
         return refs.filter { $0.code.lowercased().contains(q) || $0.label.lowercased().contains(q) }
+    }
+}
+
+struct OrderStatusEditorSheet: View {
+    var override: OrderStatusOverride
+    let onSave: (OrderStatusOverride) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var systemImage: String
+    @State private var hexColor: String
+
+    init(override: OrderStatusOverride, onSave: @escaping (OrderStatusOverride) -> Void) {
+        self.override = override
+        self.onSave = onSave
+        _label = State(initialValue: override.label)
+        _systemImage = State(initialValue: override.systemImage)
+        _hexColor = State(initialValue: override.hexColor)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le statut").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Icône SF").frame(width: 100, alignment: .leading)
+                    TextField("Icône SF", text: $systemImage).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(OrderStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 300)
+    }
+}
+
+struct TagEditorSheet: View {
+    var tag: PartyTag
+    let onSave: (PartyTag) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var hexColor: String
+
+    init(tag: PartyTag, onSave: @escaping (PartyTag) -> Void) {
+        self.tag = tag
+        self.onSave = onSave
+        _name = State(initialValue: tag.name)
+        _hexColor = State(initialValue: tag.hexColor)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le tag").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Nom").frame(width: 100, alignment: .leading)
+                    TextField("Nom du tag", text: $name).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(PartyTag(id: tag.id, name: name, hexColor: hexColor))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 260)
+    }
+}
+
+struct KindColorEditorSheet: View {
+    let kind: DirectoryEntryKind
+    var hex: String
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var hexColor: String
+
+    init(kind: DirectoryEntryKind, hex: String, onSave: @escaping (String) -> Void) {
+        self.kind = kind
+        self.hex = hex
+        self.onSave = onSave
+        _hexColor = State(initialValue: hex)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier la couleur").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Type").frame(width: 100, alignment: .leading)
+                    Text(kind.label)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(hexColor)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 240)
     }
 }
 
