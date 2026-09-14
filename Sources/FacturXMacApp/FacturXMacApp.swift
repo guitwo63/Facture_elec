@@ -1424,6 +1424,26 @@ struct DirectoryDetailView: View {
                     }.padding(14)
                 }
             }
+            .sheet(isPresented: $showRoutingEditor) {
+                if let e = entry {
+                    RoutingAddressQuickEditor(
+                        siren: e.party.siren ?? "",
+                        addresses: routingBinding(entry: e)
+                    )
+                }
+            }
+            .sheet(isPresented: $showContactEditor) {
+                if let e = entry {
+                    if let ct = editingContact {
+                        ContactFormView(contacts: contactsBinding(entry: e), editing: ct)
+                    } else {
+                        ContactFormView(contacts: contactsBinding(entry: e), editing: PartyContact())
+                    }
+                }
+            }
+            .onChange(of: showContactEditor) { showing in
+                if !showing { editingContact = nil }
+            }
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "person.text.rectangle").font(.largeTitle).foregroundStyle(.secondary)
@@ -1431,26 +1451,6 @@ struct DirectoryDetailView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .sheet(isPresented: $showRoutingEditor) {
-            if let e = entry {
-                RoutingAddressQuickEditor(
-                    siren: e.party.siren ?? "",
-                    addresses: routingBinding(entry: e)
-                )
-            }
-        }
-        .sheet(isPresented: $showContactEditor) {
-            if let e = entry {
-                if let ct = editingContact {
-                    ContactFormView(contacts: contactsBinding(entry: e), editing: ct)
-                } else {
-                    ContactFormView(contacts: contactsBinding(entry: e), editing: PartyContact())
-                }
-            }
-        }
-        .onChange(of: showContactEditor) { showing in
-            if !showing { editingContact = nil }
         }
     }
 
