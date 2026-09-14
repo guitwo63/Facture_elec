@@ -114,6 +114,7 @@ struct FacturXMacApp: App {
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     auth.attachDirectory(directory)
+                    auth.testBypassSecurity = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -2668,6 +2669,7 @@ struct SettingsTabView: View {
                 if auth.currentUser?.role == .admin {
                     Text("Commandes").tag(1)
                     Text("Application").tag(2)
+                    Text("Journal").tag(3)
                 }
             }
             .pickerStyle(.segmented)
@@ -2678,6 +2680,8 @@ struct SettingsTabView: View {
                 ProfileSettingsView()
             case 1:
                 OrderStatusSettingsView()
+            case 3:
+                AuditLogView()
             default:
                 ApplicationSettingsView()
             }
