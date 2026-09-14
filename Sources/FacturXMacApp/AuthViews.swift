@@ -414,10 +414,13 @@ struct UserEditorSheet: View {
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var directory: PartyDirectory
     @State private var newPw = ""
     @State private var confirmPw = ""
     @State private var saved = false
     @State private var error: String?
+    @State private var showSellerPicker = false
 
     var body: some View {
         ScrollView {
@@ -445,6 +448,51 @@ struct ProfileSettingsView: View {
                                 }
                             }
                         }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Émetteur par défaut").font(.headline)
+                            Text("L’émetteur par défaut est un lien vers une fiche fournisseur de l’annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            let linkedEntry: DirectoryEntry? = store.defaultSellerEntryID.flatMap { id in directory.entries.first { $0.id == id } }
+                            if let entry = linkedEntry {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.party.name).font(.body.weight(.semibold))
+                                    if let s = entry.party.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
+                                    if let st = entry.party.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
+                                    if let v = entry.party.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+                                    if let iban = entry.party.iban, !iban.isEmpty { Text("IBAN : \(iban)").font(.caption).foregroundStyle(.secondary) }
+                                    if let bic = entry.party.bic, !bic.isEmpty { Text("BIC : \(bic)").font(.caption).foregroundStyle(.secondary) }
+                                    if let pt = entry.party.paymentTerms, !pt.isEmpty { Text("Conditions : \(pt)").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                HStack {
+                                    Button {
+                                        showSellerPicker = true
+                                    } label: { Label("Changer", systemImage: "person.crop.circle.badge.plus") }
+                                        .buttonStyle(.bordered)
+                                    Button(role: .destructive) {
+                                        store.defaultSellerEntryID = nil
+                                        store.save()
+                                    } label: { Label("Dissocier", systemImage: "minus.circle") }
+                                        .buttonStyle(.bordered)
+                                    Spacer()
+                                }
+                            } else {
+                                Text("Aucun émetteur par défaut défini.").font(.caption).foregroundStyle(.tertiary)
+                                Button {
+                                    showSellerPicker = true
+                                } label: { Label("Choisir un fournisseur dans l’annuaire", systemImage: "person.crop.circle.badge.plus") }
+                                    .buttonStyle(.bordered)
+                            }
+                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .sheet(isPresented: $showSellerPicker) {
+                        PartyPickerSheet(role: .seller) { selected in
+                            store.defaultSellerEntryID = selected.id
+                            store.save()
+                            showSellerPicker = false
+                        }
                     }
 
                     GroupBox {
