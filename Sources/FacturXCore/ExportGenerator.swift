@@ -155,6 +155,44 @@ public struct ExportGenerator {
         return encode(rows: rows)
     }
 
+    /// En-têtes et lignes CSV pour une liste de tiers (annuaire).
+    public func directoryCSV(_ entries: [DirectoryEntry]) -> String {
+        var rows: [[String]] = []
+        rows.append([
+            "Raison sociale", "Type", "SIREN", "SIRET", "TVA",
+            "Rue", "Code postal", "Ville", "Pays",
+            "Contact (nom)", "Contact (email)", "Contact (tél.)",
+            "Endpoint ID", "Schéma endpoint", "IBAN", "BIC", "Conditions paiement",
+            "Note", "Archivé"
+        ])
+        for e in entries {
+            let p = e.party
+            let c = e.defaultContact
+            rows.append([
+                csv(p.name),
+                csv(e.kind.label),
+                csv(orBlank(p.siren)),
+                csv(orBlank(p.siret)),
+                csv(orBlank(p.vatNumber)),
+                csv(p.street),
+                csv(p.postcode),
+                csv(p.city),
+                csv(p.country),
+                csv(c?.name ?? ""),
+                csv(c?.email ?? ""),
+                csv(c?.phone ?? ""),
+                csv(orBlank(p.endpointID)),
+                csv(p.endpointSchemeID),
+                csv(orBlank(p.iban)),
+                csv(orBlank(p.bic)),
+                csv(orBlank(p.paymentTerms)),
+                csv(orBlank(e.note)),
+                e.isArchived ? "Oui" : "Non"
+            ])
+        }
+        return encode(rows: rows)
+    }
+
     private func encode(rows: [[String]]) -> String {
         let body = rows.map { $0.joined(separator: ";") }.joined(separator: "\r\n")
         return body
@@ -165,5 +203,169 @@ public struct ExportGenerator {
         var data = Data([0xEF, 0xBB, 0xBF])
         data.append(contentsOf: csv.utf8)
         try data.write(to: url)
+    }
+
+    // MARK: - Import tiers (CSV)
+
+    public struct PartyImportResult {
+        public var entries: [DirectoryEntry]
+        public var errors: [String]
+        public init(entries: [DirectoryEntry], errors: [String]) {
+            self.entries = entries
+            self.errors = errors
+        }
+    }
+
+    /// Parse un CSV de tiers. En-têtes reconnues (insensible à la casse) :
+    /// Raison sociale (obligatoire), SIREN (obligatoire), Type, SIRET, TVA,
+    /// Rue, Code postal, Ville, Pays, Contact (nom), Contact (email), Contact (tél.),
+    /// Endpoint ID, Schéma endpoint, IBAN, BIC, Conditions paiement, Note.
+    /// Tous les champs sont optionnels sauf « Raison sociale » et « SIREN ».
+    public func parseDirectoryCSV(_ csv: String) -> PartyImportResult {
+        let cleaned = csv.hasPrefix("\u{FEFF}") ? String(csv.dropFirst()) : csv
+        let lines = cleaned
+            .components(separatedBy: "\r\n")
+            .flatMap { $0.components(separatedBy: "\n") }
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !lines.isEmpty else {
+            return PartyImportResult(entries: [], errors: ["Le fichier est vide."])
+        }
+        let header = parseCSVRow(lines[0]).map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        let nameIdx = header.firstIndex(of: "raison sociale")
+            ?? header.firstIndex(of: "nom")
+            ?? header.firstIndex(of: "raison sociale (nom)")
+        let sirenIdx = header.firstIndex(of: "siren")
+        if nameIdx == nil {
+            return PartyImportResult(entries: [], errors: ["Colonne « Raison sociale » introuvable."])
+        }
+        if sirenIdx == nil {
+            return PartyImportResult(entries: [], errors: ["Colonne « SIREN » introuvable."])
+        }
+        func col(_ key: String) -> Int? {
+            header.firstIndex(of: key.lowercased())
+        }
+        let typeIdx = col("type")
+        let siretIdx = col("siret")
+        let vatIdx = col("tva")
+        let streetIdx = col("rue")
+        let postcodeIdx = col("code postal")
+        let cityIdx = col("ville")
+        let countryIdx = col("pays")
+        let contactNameIdx = col("contact (nom)")
+        let contactEmailIdx = col("contact (email)")
+        let contactPhoneIdx = col("contact (tél.)") ?? col("contact (tel)")
+        let endpointIdx = col("endpoint id")
+        let endpointSchemeIdx = col("schéma endpoint")
+        let ibanIdx = col("iban")
+        let bicIdx = col("bic")
+        let termsIdx = col("conditions paiement")
+        let noteIdx = col("note")
+
+        var entries: [DirectoryEntry] = []
+        var errors: [String] = []
+        for (i, line) in lines.dropFirst().enumerated() {
+            let row = parseCSVRow(line)
+            func value(_ idx: Int?) -> String? {
+                guard let idx = idx, idx < row.count else { return nil }
+                let v = row[idx].trimmingCharacters(in: .whitespaces)
+                return v.isEmpty ? nil : v
+            }
+            let name = value(nameIdx) ?? ""
+            let siren = value(sirenIdx) ?? ""
+            if name.isEmpty {
+                errors.append("Ligne \(i + 2) : raison sociale manquante, ignorée.")
+                continue
+            }
+            if siren.isEmpty {
+                errors.append("Ligne \(i + 2) : SIREN manquant pour « \(name) », ignoré.")
+                continue
+            }
+            let kindStr = value(typeIdx)?.lowercased() ?? "client"
+            let kind: DirectoryEntryKind
+            switch kindStr {
+            case "fournisseur": kind = .fournisseur
+            case "client / fournisseur", "client/fournisseur", "both", "les deux": kind = .both
+            default: kind = .client
+            }
+            var contacts: [PartyContact] = []
+            let cname = value(contactNameIdx)
+            let cemail = value(contactEmailIdx)
+            let cphone = value(contactPhoneIdx)
+            if cname != nil || cemail != nil || cphone != nil {
+                contacts.append(PartyContact(
+                    name: cname ?? "",
+                    email: cemail,
+                    phone: cphone,
+                    isActive: true,
+                    isDefault: true
+                ))
+            }
+            let party = InvoiceParty(
+                name: name,
+                street: value(streetIdx) ?? "",
+                postcode: value(postcodeIdx) ?? "",
+                city: value(cityIdx) ?? "",
+                country: value(countryIdx) ?? "FR",
+                vatNumber: value(vatIdx),
+                siren: siren,
+                siret: value(siretIdx),
+                contactName: cname,
+                contactEmail: cemail,
+                contactPhone: cphone,
+                endpointID: value(endpointIdx),
+                endpointSchemeID: value(endpointSchemeIdx) ?? "0225",
+                iban: value(ibanIdx),
+                bic: value(bicIdx),
+                paymentTerms: value(termsIdx)
+            )
+            let entry = DirectoryEntry(
+                kind: kind,
+                party: party,
+                note: value(noteIdx),
+                contacts: contacts
+            )
+            entries.append(entry)
+        }
+        return PartyImportResult(entries: entries, errors: errors)
+    }
+
+    /// Analyse une ligne CSV en gérant les guillemets et le séparateur « ; ».
+    private func parseCSVRow(_ line: String) -> [String] {
+        var fields: [String] = []
+        var current = ""
+        var inQuotes = false
+        var iter = line.makeIterator()
+        while let ch = iter.next() {
+            if inQuotes {
+                if ch == "\"" {
+                    let peeked = peekAhead(&iter)
+                    if peeked == "\"" {
+                        current.append("\"")
+                        _ = iter.next()
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    current.append(ch)
+                }
+            } else {
+                if ch == "\"" {
+                    inQuotes = true
+                } else if ch == ";" {
+                    fields.append(current)
+                    current = ""
+                } else {
+                    current.append(ch)
+                }
+            }
+        }
+        fields.append(current)
+        return fields
+    }
+
+    /// Récupère le prochain caractère sans le consommer.
+    private func peekAhead(_ iter: inout String.Iterator) -> Character? {
+        var copy = iter
+        return copy.next()
     }
 }

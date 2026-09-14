@@ -1582,6 +1582,122 @@ struct PartyPickerSheet: View {
     }
 }
 
+struct PartyExportSheet: View {
+    let entries: [DirectoryEntry]
+    @Binding var isPresented: Bool
+    @State private var exportLog = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Export des tiers").font(.headline)
+                Spacer()
+            }.padding(12)
+            Divider()
+            VStack(alignment: .leading, spacing: 12) {
+                Text("\(entries.count) tier(s) à exporter (selon le filtre et le périmètre).")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Format : CSV compatible Excel (UTF-8, séparateur ;). Toutes les données : raison sociale, type, SIREN, SIRET, TVA, adresse, contact, endpoint, IBAN/BIC, conditions de paiement, note, archive.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(12)
+            Spacer()
+            Divider()
+            HStack {
+                Button("Fermer") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                if !exportLog.isEmpty {
+                    Text(exportLog).font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Exporter") { runExport() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(entries.isEmpty)
+            }.padding(12)
+        }
+        .frame(width: 520, height: 280)
+    }
+
+    private func runExport() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "tiers.csv"
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try ExportGenerator().writeCSV(ExportGenerator().directoryCSV(entries), to: url)
+                exportLog = "Exporté : \(url.lastPathComponent)"
+            } catch {
+                exportLog = "Erreur : \(error)"
+            }
+        }
+    }
+}
+
+struct PartyImportSheet: View {
+    @Binding var isPresented: Bool
+    let onImport: ([DirectoryEntry]) -> Void
+    @State private var fileURL: URL?
+    @State private var result: ExportGenerator.PartyImportResult?
+    @State private var importLog = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Import des tiers").font(.headline)
+                Spacer()
+            }.padding(12)
+            Divider()
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Sélectionnez un fichier CSV. Colonnes obligatoires : Raison sociale, SIREN. Toutes les autres colonnes sont optionnelles (Type, SIRET, TVA, Rue, Code postal, Ville, Pays, Contact (nom), Contact (email), Contact (tél.), Endpoint ID, Schéma endpoint, IBAN, BIC, Conditions paiement, Note).")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.commaSeparatedText]
+                    if panel.runModal() == .OK, let url = panel.url {
+                        do {
+                            let raw = try String(contentsOf: url, encoding: .utf8)
+                            let res = ExportGenerator().parseDirectoryCSV(raw)
+                            fileURL = url
+                            result = res
+                            importLog = "\(res.entries.count) tier(s) à importer\(res.errors.isEmpty ? "" : ", \(res.errors.count) avertissement(s)")"
+                        } catch {
+                            importLog = "Erreur de lecture : \(error)"
+                        }
+                    }
+                } label: { Label("Choisir un fichier CSV…", systemImage: "doc") }
+                    .buttonStyle(.bordered)
+                if let r = result {
+                    if !r.errors.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Avertissements :").font(.caption.bold())
+                            ForEach(Array(r.errors.enumerated()), id: \.offset) { _, msg in
+                                Text("• \(msg)").font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                    if !r.entries.isEmpty {
+                        Text(importLog).font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if !importLog.isEmpty {
+                    Text(importLog).font(.caption).foregroundStyle(.red)
+                }
+            }.padding(12)
+            Spacer()
+            Divider()
+            HStack {
+                Button("Fermer") { isPresented = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Importer") {
+                    if let r = result { onImport(r.entries) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(result?.entries.isEmpty ?? true)
+            }.padding(12)
+        }
+        .frame(width: 560, height: 420)
+    }
+}
+
 struct DirectoryView: View {
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
@@ -1592,6 +1708,9 @@ struct DirectoryView: View {
     @State private var creatingNew = false
     @State private var showArchived = false
     @State private var selectedEntry: DirectoryEntry?
+    @State private var showExport = false
+    @State private var showImport = false
+    @State private var importResult: ExportGenerator.PartyImportResult?
 
     private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
 
@@ -1629,6 +1748,10 @@ struct DirectoryView: View {
                         .buttonStyle(.borderedProminent)
                     Text("Annuaire des tiers").font(.title2.bold())
                     Spacer()
+                    Button { showImport = true } label: { Label("Importer", systemImage: "square.and.arrow.down") }
+                        .buttonStyle(.bordered)
+                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                        .buttonStyle(.bordered)
                     Toggle(isOn: $showArchived) {
                         Label("Archives", systemImage: "archivebox")
                     }
@@ -1758,6 +1881,18 @@ struct DirectoryView: View {
                 directory.upsert(newEntry)
                 creatingNew = false
             }
+        }
+        .sheet(isPresented: $showExport) {
+            PartyExportSheet(entries: filtered, isPresented: $showExport)
+        }
+        .sheet(isPresented: $showImport) {
+            PartyImportSheet(
+                isPresented: $showImport,
+                onImport: { newEntries in
+                    for e in newEntries { directory.upsert(e) }
+                    showImport = false
+                }
+            )
         }
     }
 

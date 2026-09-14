@@ -91,6 +91,39 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertTrue(csv.contains("360.00"))
     }
 
+    func testExportDirectoryCSVContainsEntry() {
+        let entry = DirectoryEntry(
+            kind: .client,
+            party: InvoiceParty(name: "Test SARL", street: "1 rue X", postcode: "75001", city: "Paris", country: "FR", siren: "111111111", vatNumber: "FR11111111111"),
+            contacts: [PartyContact(name: "Jean", email: "j@x.fr", phone: "0102", isActive: true, isDefault: true)],
+            note: "note test"
+        )
+        let csv = ExportGenerator().directoryCSV([entry])
+        XCTAssertTrue(csv.contains("Raison sociale;Type;SIREN"))
+        XCTAssertTrue(csv.contains("Test SARL"))
+        XCTAssertTrue(csv.contains("111111111"))
+        XCTAssertTrue(csv.contains("Jean"))
+    }
+
+    func testImportDirectoryCSVParsesEntries() {
+        let csv = "Raison sociale;SIREN;Ville;Contact (email)\r\nAlpha SARL;222222222;Lyon;a@x.fr\r\nBeta;333333333;Nice;\r\n;444444444;Paris;\r\n"
+        let res = ExportGenerator().parseDirectoryCSV(csv)
+        XCTAssertEqual(res.entries.count, 2)
+        XCTAssertEqual(res.entries[0].party.name, "Alpha SARL")
+        XCTAssertEqual(res.entries[0].party.siren, "222222222")
+        XCTAssertEqual(res.entries[0].party.city, "Lyon")
+        XCTAssertEqual(res.entries[0].defaultContact?.email, "a@x.fr")
+        XCTAssertEqual(res.entries[1].party.name, "Beta")
+        XCTAssertEqual(res.errors.count, 1)
+    }
+
+    func testImportDirectoryCSVMissingColumns() {
+        let csv = "Nom;Ville\r\nAlpha;Lyon\r\n"
+        let res = ExportGenerator().parseDirectoryCSV(csv)
+        XCTAssertTrue(res.entries.isEmpty)
+        XCTAssertFalse(res.errors.isEmpty)
+    }
+
     func testXMLContainsEN16931URN() throws {
         let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
         let s = String(data: xml, encoding: .utf8) ?? ""
