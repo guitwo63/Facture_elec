@@ -53,7 +53,7 @@ public struct CIIXMLGenerator {
   </rsm:ExchangedDocumentContext>
   <rsm:ExchangedDocument>
     <ram:ID>\(escape(invoice.number))</ram:ID>
-    <ram:TypeCode>\(invoice.type.rawValue)</ram:TypeCode>
+    <ram:TypeCode>\(xmlTypeCode(for: invoice.type))</ram:TypeCode>
     <ram:IssueDateTime>
       <udt:DateTimeString format="102">\(issue)</udt:DateTimeString>
     </ram:IssueDateTime>
@@ -310,7 +310,7 @@ public struct CIIXMLGenerator {
         let grand = String(format: "%.2f", invoice.grandTotal)
         let duePay = String(format: "%.2f", invoice.netToPay)
         let prepaidLine = invoice.prepaidAmount > 0
-            ? "        <ram:PrepaidAmount>\(String(format: "%.2f", invoice.prepaidAmount))</ram:PrepaidAmount>\n"
+            ? "        <ram:TotalPrepaidAmount>\(String(format: "%.2f", invoice.prepaidAmount))</ram:TotalPrepaidAmount>\n"
             : ""
 
         return """
@@ -395,6 +395,21 @@ public struct CIIXMLGenerator {
             return String(format: "%.0f", rate)
         }
         return String(format: "%.2f", rate)
+    }
+
+    private func xmlTypeCode(for type: InvoiceTypeCode) -> String {
+        // Codes acceptés par le flux FR EN16931 : 380, 389, 393, 501, 386, 500, 384,
+        // 471, 472, 473, 261, 262, 381, 396, 502, 503. Les acomptes (386) sont admis,
+        // mais le solde (387) ne l'est pas : on l'émet en 380 (facture commerciale)
+        // avec TotalPrepaidAmount renseigné pour les acomptes déjà payés.
+        switch type {
+        case .finalSettlement:
+            return InvoiceTypeCode.commercialInvoice.rawValue
+        case .internalCreditNote:
+            return InvoiceTypeCode.creditNote.rawValue
+        default:
+            return type.rawValue
+        }
     }
 
     private func indented(_ block: String) -> String {
