@@ -422,9 +422,9 @@ struct InvoicesTabView: View {
         case .all:
             break
         case .invoice:
-            result = result.filter { $0.type != .creditNote }
+            result = result.filter { !$0.type.isCreditNote }
         case .creditNote:
-            result = result.filter { $0.type == .creditNote }
+            result = result.filter { $0.type.isCreditNote }
         }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
@@ -511,8 +511,8 @@ struct InvoicesTabView: View {
                                     .font(.caption2)
                                 Text(invoice.status.label).font(.caption2)
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
-                                Text(invoice.type == .creditNote ? "Avoir" : "Facture")
-                                    .font(.caption2).foregroundStyle(invoice.type == .creditNote ? .orange : .accentColor)
+                                Text(invoice.type == .creditNote ? "Avoir" : invoice.type.isInternalCreditNote ? "Avoir interne" : "Facture")
+                                    .font(.caption2).foregroundStyle(invoice.type.isCreditNote ? .orange : .accentColor)
                                 Spacer()
                             }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
@@ -526,7 +526,7 @@ struct InvoicesTabView: View {
                                 store.upsert(credit)
                                 selectedID = credit.id
                             } label: { Label("Créer un avoir", systemImage: "arrow.uturn.backward.circle") }
-                            .disabled(invoice.type == .creditNote)
+                            .disabled(invoice.type.isCreditNote)
                             Divider()
                             Button(role: .destructive) {
                                 store.invoices.removeAll { $0.id == invoice.id }
@@ -655,10 +655,15 @@ struct InvoiceEditorView: View {
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(isLocked)
-                Button("Exporter XML") { exportXML() }
-                    .buttonStyle(.bordered)
-                Button("Générer le Factur-X") { export() }
-                    .buttonStyle(.borderedProminent)
+                if invoice.type.isInternalCreditNote {
+                    Button("Exporter PDF") { exportPlainPDF() }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Exporter XML") { exportXML() }
+                        .buttonStyle(.bordered)
+                    Button("Générer le Factur-X") { export() }
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .padding(12)
             Divider()
@@ -744,7 +749,7 @@ struct InvoiceEditorView: View {
                                     TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
                                     InfoBadge(text: "BT-13 — Référence de la commande acheteur. Remontée en haut de la facture.")
                                 }
-                                if invoice.type == .creditNote {
+                                if invoice.type == .creditNote || invoice.type.isInternalCreditNote {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Référence et date de la facture liée :").font(.caption.bold())
                                         HStack(spacing: 3) {
@@ -940,7 +945,7 @@ struct InvoiceEditorView: View {
         guard !invoice.number.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
         let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
         return store.invoices.filter { inv in
-            guard inv.type == .creditNote
+            guard inv.type.isCreditNote
                 && (inv.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) == invoice.number.trimmingCharacters(in: .whitespaces) else { return false }
             if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
             if scope != nil && inv.companyID == nil { return false }
@@ -994,6 +999,24 @@ struct InvoiceEditorView: View {
     private func runValidation() {
         validation = FacturXValidator().validate(invoice: invoice)
         showValidation = true
+    }
+
+    private func exportPlainPDF() {
+        exportError = nil
+        exportedURL = nil
+        store.upsert(invoice)
+        let data = FacturXGenerator().generateVisiblePDF(invoice: invoice)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = "avoir-interne-\(invoice.number).pdf"
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try data.write(to: url)
+                exportedURL = url
+            } catch {
+                exportError = "\(error)"
+            }
+        }
     }
 
     private func exportXML() {
@@ -3673,11 +3696,11 @@ struct OrderEditorView: View {
                         } else {
                             ForEach(Array(linkedInvoices.enumerated()), id: \.element.id) { _, inv in
                                 HStack {
-                                    Image(systemName: inv.type == .creditNote ? "arrow.uturn.backward.circle" : "doc.text")
-                                        .foregroundStyle(inv.type == .creditNote ? .orange : .accentColor)
+                                    Image(systemName: inv.type.isCreditNote ? "arrow.uturn.backward.circle" : "doc.text")
+                                        .foregroundStyle(inv.type.isCreditNote ? .orange : .accentColor)
                                     VStack(alignment: .leading) {
                                         Text(inv.number).font(.headline)
-                                        Text("\(inv.type == .creditNote ? "Avoir" : "Facture") — \(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))")
+                                        Text("\(inv.type == .creditNote ? "Avoir" : inv.type.isInternalCreditNote ? "Avoir interne" : "Facture") — \(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))")
                                             .font(.caption2).foregroundStyle(.secondary)
                                     }
                                     Spacer()
@@ -3709,7 +3732,7 @@ struct OrderEditorView: View {
 
     private var linkedInvoicesAmount: Double {
         linkedInvoices.reduce(0) { acc, inv in
-            inv.type == .creditNote ? acc - inv.grandTotal : acc + inv.grandTotal
+            inv.type.isCreditNote ? acc - inv.grandTotal : acc + inv.grandTotal
         }.rounded(toPlaces: 2)
     }
 

@@ -229,13 +229,23 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
     case commercialInvoice = "380"
     case correction = "384"
     case creditNote = "381"
+    case internalCreditNote = "INT"
 
     public var label: String {
         switch self {
         case .commercialInvoice: return "Facture commerciale (380)"
         case .correction: return "Facture rectificative (384)"
         case .creditNote: return "Avoir (381)"
+        case .internalCreditNote: return "Avoir interne (INT)"
         }
+    }
+
+    public var isCreditNote: Bool {
+        self == .creditNote || self == .internalCreditNote
+    }
+
+    public var isInternalCreditNote: Bool {
+        self == .internalCreditNote
     }
 }
 

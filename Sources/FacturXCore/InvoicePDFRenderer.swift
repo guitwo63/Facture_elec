@@ -37,7 +37,14 @@ public final class InvoicePDFRenderer {
     }
 
     private func drawHeader(context: CGContext, invoice: Invoice, y: CGFloat) {
-        let title = "FACTURE"
+        let title: String
+        if invoice.type.isInternalCreditNote {
+            title = "AVOIR INTERNE"
+        } else if invoice.type.isCreditNote {
+            title = "AVOIR"
+        } else {
+            title = "FACTURE"
+        }
         drawText(context: context, text: title, x: margin, y: y, font: boldFont(size: 24), color: .black)
         drawText(context: context, text: invoice.number, x: pageWidth - margin - 180, y: y, font: boldFont(size: 14), color: .black)
 
