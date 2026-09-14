@@ -1045,8 +1045,8 @@ struct InvoiceEditorView: View {
             }
             .padding(12)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil {
+                VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
                         .onChange(of: invoice.number) { _ in exportError = nil }
@@ -1079,7 +1079,11 @@ struct InvoiceEditorView: View {
                 if showValidation, let v = validation {
                     validationPanel(v)
                 }
-
+                }.padding(12)
+                Divider()
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         if !linkedCreditNotes.isEmpty {
@@ -4641,8 +4645,8 @@ struct OrderEditorView: View {
             }
             .padding(12)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || createdInvoiceNumber != nil {
+                VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
                         .onChange(of: order.number) { _ in exportError = nil }
@@ -4677,7 +4681,11 @@ struct OrderEditorView: View {
                 if showValidation, let v = validation {
                     orderValidationPanel(v)
                 }
-
+                }.padding(12)
+                Divider()
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .top, spacing: 24) {
