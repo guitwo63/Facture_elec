@@ -1032,7 +1032,8 @@ struct InvoiceEditorView: View {
                                             } label: {
                                                 HStack(spacing: 3) {
                                                     Image(systemName: "doc.text.magnifyingglass")
-                                                    if let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces), !ref.isEmpty {
+                                                    let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces)
+                                                    if !ref.isEmpty {
                                                         VStack(alignment: .leading, spacing: 1) {
                                                             Text(ref).font(.caption.bold())
                                                             if let d = invoice.precedingInvoiceDate {
