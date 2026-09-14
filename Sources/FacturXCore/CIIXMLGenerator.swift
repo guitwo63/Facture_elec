@@ -320,8 +320,8 @@ public struct CIIXMLGenerator {
         <ram:LineTotalAmount>\(lineTotal)</ram:LineTotalAmount>
         <ram:TaxBasisTotalAmount>\(taxBasis)</ram:TaxBasisTotalAmount>
         <ram:TaxTotalAmount currencyID="\(escape(invoice.currency))">\(taxTotal)</ram:TaxTotalAmount>
-\(prepaidLine)        <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
-        <ram:DuePayableAmount>\(duePay)</ram:DuePayableAmount>
+        <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
+\(prepaidLine)        <ram:DuePayableAmount>\(duePay)</ram:DuePayableAmount>
       </ram:SpecifiedTradeSettlementHeaderMonetarySummation>\(invoiceReferencedXML(invoice))
     </ram:ApplicableHeaderTradeSettlement>
 """
