@@ -493,8 +493,13 @@ struct ExportSheet: View {
         guard let dir = panel.url else { return }
         var ok = 0
         var failed = 0
+        var skipped = 0
         let gen = FacturXGenerator()
         for inv in selectedInvoices {
+            if inv.type.isInternalCreditNote {
+                skipped += 1
+                continue
+            }
             do {
                 let data = try gen.generate(invoice: inv)
                 let name = inv.type.isCreditNote ? "avoir-\(inv.number).pdf" : "facture-\(inv.number).pdf"
@@ -504,7 +509,7 @@ struct ExportSheet: View {
                 failed += 1
             }
         }
-        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
+        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
     }
 
     private func exportElectronicOrders() {

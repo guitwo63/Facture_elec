@@ -142,7 +142,7 @@ Sources/FacturXCore/
 ├── OrderXGenerator.swift      # Façade
 └── OrderStore.swift            # Persistance (UserDefaults, clés orderx.*)
 Tests/FacturXCoreTests/
-└── OrderXCoreTests.swift      # 17 tests (totaux, XML CIO, embarquement, validation)
+└── OrderXCoreTests.swift      # 14 tests (totaux, XML CIO, embarquement, validation)
 ```
 
 ### Utilisation
