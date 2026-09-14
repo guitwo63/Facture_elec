@@ -443,17 +443,23 @@ public final class SuperPDPService {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/xml", forHTTPHeaderField: "Content-Type")
+        let isPDF = fileData.count > 4 && fileData[0] == 0x25 && fileData[1] == 0x50 && fileData[2] == 0x44 && fileData[3] == 0x46
+        if isPDF {
+            req.setValue("application/pdf", forHTTPHeaderField: "Content-Type")
+        } else {
+            req.setValue("application/xml", forHTTPHeaderField: "Content-Type")
+        }
         req.httpBody = fileData
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
             throw SuperPDPError.decoding("Réponse non HTTP")
         }
         guard (200...299).contains(http.statusCode) else {
-            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            throw SuperPDPError.http(status: http.statusCode, body: bodyText.isEmpty ? "(corps vide)" : bodyText)
         }
         guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-            throw SuperPDPError.decoding("JSON dépôt illisible")
+            throw SuperPDPError.decoding("JSON dépôt illisible : \(String(data: data, encoding: .utf8) ?? "")")
         }
         let remoteID = (obj["id"] as? NSNumber)?.stringValue ?? obj["id"] as? String
         guard let rid = remoteID, !rid.isEmpty else { throw SuperPDPError.missingInvoiceID }

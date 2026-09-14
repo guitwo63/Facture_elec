@@ -1535,9 +1535,9 @@ struct InvoiceEditorView: View {
         }
         Task {
             do {
-                let xml = try CIIXMLGenerator().generate(invoice: invoice)
+                let facturx = try FacturXGenerator().generate(invoice: invoice)
                 let service = SuperPDPService()
-                let submission = try await service.submitInvoice(fileData: xml, credentials: superPDPSettings.credentials)
+                let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
                 superPDPSubmission = submission
                 superPDPMessage = "Facture déposée sur SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
             } catch let e as SuperPDPError {
