@@ -1208,7 +1208,13 @@ struct DirectoryDetailView: View {
     @EnvironmentObject var directory: PartyDirectory
     @State private var showRoutingEditor = false
     @State private var showContactEditor = false
+    @State private var editingAddress: PartyRoutingAddress?
     @State private var editingContact: PartyContact?
+
+    private var currentEntry: DirectoryEntry? {
+        guard let id = entry?.id else { return nil }
+        return directory.entries.first(where: { $0.id == id }) ?? entry
+    }
 
     private func routingBinding(entry: DirectoryEntry) -> Binding<[PartyRoutingAddress]> {
         Binding(
@@ -1235,7 +1241,7 @@ struct DirectoryDetailView: View {
     }
 
     var body: some View {
-        if let entry = entry {
+        if let entry = currentEntry {
             VStack(spacing: 0) {
                 HStack {
                     Text(entry.displayName).font(.headline)
@@ -1335,7 +1341,7 @@ struct DirectoryDetailView: View {
                         }
                         if !entry.contacts.isEmpty {
                             ForEach(entry.contacts) { ct in
-                                HStack(alignment: .top) {
+                                HStack(alignment: .top, spacing: 8) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         HStack {
                                             Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name).font(.callout.bold())
@@ -1353,6 +1359,22 @@ struct DirectoryDetailView: View {
                                         if let lbl = ct.label?.trimmingCharacters(in: .whitespaces), !lbl.isEmpty { Text("Libellé : \(lbl)").font(.caption).foregroundColor(.secondary) }
                                     }
                                     Spacer()
+                                    Button {
+                                        editingContact = ct
+                                        showContactEditor = true
+                                    } label: { Image(systemName: "pencil") }
+                                        .buttonStyle(.borderless)
+                                        .help("Modifier ce contact")
+                                    Button(role: .destructive) {
+                                        var e = entry
+                                        e.contacts.removeAll { $0.id == ct.id }
+                                        if e.contacts.allSatisfy({ !$0.isDefault }), !e.contacts.isEmpty {
+                                            e.contacts[0].isDefault = true
+                                        }
+                                        directory.upsert(e)
+                                    } label: { Image(systemName: "trash") }
+                                        .buttonStyle(.borderless)
+                                        .help("Supprimer ce contact")
                                 }
                                 .padding(8)
                                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
@@ -1376,34 +1398,50 @@ struct DirectoryDetailView: View {
                             } label: { Label("Adresses", systemImage: "envelope.badge") }
                                 .buttonStyle(.bordered).controlSize(.small)
                         }
-                        if !entry.routingAddresses.isEmpty {
-                            ForEach(entry.routingAddresses) { addr in
-                                HStack(alignment: .top) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack {
-                                            Text(addr.format.label).font(.callout.bold())
-                                            if addr.isDefault {
-                                                Text("défaut").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
-                                                    .background(Color.accentColor.opacity(0.2), in: Capsule())
-                                            }
-                                            if !addr.isActive {
-                                                Text("inactive").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
-                                                    .background(Color.gray.opacity(0.2), in: Capsule())
-                                            }
+                        if entry.routingAddresses.isEmpty {
+                            Text("Aucune adresse de facturation électronique renseignée").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(entry.routingAddresses) { addr in
+                            HStack(alignment: .top, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text(addr.format.label).font(.callout.bold())
+                                        if addr.isDefault {
+                                            Text("défaut").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
+                                                .background(Color.accentColor.opacity(0.2), in: Capsule())
                                         }
-                                        Text(addr.composedAddress).font(.system(.callout, design: .monospaced))
-                                        if let lbl = addr.label, !lbl.isEmpty {
-                                            Text("Libellé : \(lbl)").font(.caption).foregroundColor(.secondary)
+                                        if !addr.isActive {
+                                            Text("inactive").font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
+                                                .background(Color.gray.opacity(0.2), in: Capsule())
                                         }
-                                        if let s = addr.siret, !s.isEmpty { Text("SIRET : \(s)").font(.caption).foregroundColor(.secondary) }
-                                        if let suf = addr.suffixe, !suf.isEmpty { Text("Suffixe : \(suf)").font(.caption).foregroundColor(.secondary) }
-                                        if let cr = addr.codeRoutage, !cr.isEmpty { Text("Code routage : \(cr)").font(.caption).foregroundColor(.secondary) }
                                     }
-                                    Spacer()
+                                    Text(addr.composedAddress).font(.system(.callout, design: .monospaced))
+                                    if let lbl = addr.label, !lbl.isEmpty {
+                                        Text("Libellé : \(lbl)").font(.caption).foregroundColor(.secondary)
+                                    }
+                                    if let s = addr.siret, !s.isEmpty { Text("SIRET : \(s)").font(.caption).foregroundColor(.secondary) }
+                                    if let suf = addr.suffixe, !suf.isEmpty { Text("Suffixe : \(suf)").font(.caption).foregroundColor(.secondary) }
+                                    if let cr = addr.codeRoutage, !cr.isEmpty { Text("Code routage : \(cr)").font(.caption).foregroundColor(.secondary) }
                                 }
-                                .padding(8)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+                                Spacer()
+                                Button {
+                                    editingAddress = addr
+                                } label: { Image(systemName: "pencil") }
+                                    .buttonStyle(.borderless)
+                                    .help("Modifier cette adresse")
+                                Button(role: .destructive) {
+                                    var e = entry
+                                    e.routingAddresses.removeAll { $0.id == addr.id }
+                                    if e.routingAddresses.allSatisfy({ !$0.isDefault }), !e.routingAddresses.isEmpty {
+                                        e.routingAddresses[0].isDefault = true
+                                    }
+                                    directory.upsert(e)
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Supprimer cette adresse")
                             }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                         }
 
                         if let note = entry.note, !note.isEmpty {
@@ -1429,6 +1467,9 @@ struct DirectoryDetailView: View {
                     siren: entry.party.siren ?? "",
                     addresses: routingBinding(entry: entry)
                 )
+            }
+            .sheet(item: $editingAddress) { addr in
+                RoutingAddressFormView(addresses: routingBinding(entry: entry), editing: addr)
             }
             .sheet(isPresented: $showContactEditor) {
                 if let ct = editingContact {
