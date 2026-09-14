@@ -37,7 +37,7 @@ public final class InvoiceStore: ObservableObject {
             myCompany = decoded
         }
         defaultSellerEntryID = defaults.string(forKey: sellerEntryKey).flatMap { UUID(uuidString: $0) }
-        numberPrefix = defaults.string(forKey: numPrefixKey)
+        numberPrefix = defaults.string(forKey: numPrefixKey) ?? ""
         numberIncludeYear = defaults.object(forKey: numYearKey) as? Bool ?? true
         numberStart = defaults.object(forKey: numStartKey) as? Int ?? 1
         numberUseSeparator = defaults.object(forKey: numSepKey) as? Bool ?? true
