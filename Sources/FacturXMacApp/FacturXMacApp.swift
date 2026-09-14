@@ -330,7 +330,11 @@ struct RootView: View {
     private func defaultDraftCompanyID() -> UUID? {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
-        return nil
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
     }
 }
 
@@ -842,7 +846,11 @@ struct InvoicesTabView: View {
     private func defaultCompanyID() -> UUID? {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
-        return nil
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
     }
 }
 
@@ -4355,7 +4363,11 @@ struct OrdersTabView: View {
     private func defaultOrderCompanyID() -> UUID? {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
-        return nil
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
     }
 
     private func binding(for id: UUID) -> Binding<SalesOrder> {
