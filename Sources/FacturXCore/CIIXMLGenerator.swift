@@ -308,7 +308,10 @@ public struct CIIXMLGenerator {
         let taxBasis = String(format: "%.2f", invoice.lineTotal)
         let taxTotal = String(format: "%.2f", invoice.taxTotal)
         let grand = String(format: "%.2f", invoice.grandTotal)
-        let duePay = String(format: "%.2f", invoice.grandTotal)
+        let duePay = String(format: "%.2f", invoice.netToPay)
+        let prepaidLine = invoice.prepaidAmount > 0
+            ? "        <ram:PrepaidAmount>\(String(format: "%.2f", invoice.prepaidAmount))</ram:PrepaidAmount>\n"
+            : ""
 
         return """
     <ram:ApplicableHeaderTradeSettlement>
@@ -317,7 +320,7 @@ public struct CIIXMLGenerator {
         <ram:LineTotalAmount>\(lineTotal)</ram:LineTotalAmount>
         <ram:TaxBasisTotalAmount>\(taxBasis)</ram:TaxBasisTotalAmount>
         <ram:TaxTotalAmount currencyID="\(escape(invoice.currency))">\(taxTotal)</ram:TaxTotalAmount>
-        <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
+\(prepaidLine)        <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
         <ram:DuePayableAmount>\(duePay)</ram:DuePayableAmount>
       </ram:SpecifiedTradeSettlementHeaderMonetarySummation>\(invoiceReferencedXML(invoice))
     </ram:ApplicableHeaderTradeSettlement>

@@ -998,18 +998,27 @@ struct InvoiceEditorView: View {
                                     TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
                                     InfoBadge(text: "BT-13 — Référence de la commande acheteur. Remontée en haut de la facture.")
                                 }
-                                if invoice.type == .creditNote || invoice.type.isInternalCreditNote {
+                                if invoice.type.requiresPrecedingInvoice || invoice.type == .internalCreditNote {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Référence et date de la facture liée :").font(.caption.bold())
                                         HStack(spacing: 3) {
                                             TextField("N° facture liée", text: Binding($invoice.precedingInvoiceRef, replacingNilWith: "")).frame(width: 160)
-                                            InfoBadge(text: "BT-25 — Numéro de la facture antérieure référencée par cet avoir. Obligatoire pour un avoir (BR-FR-CO-05).")
+                                            InfoBadge(text: "BT-25 — Numéro de la facture antérieure référencée. Obligatoire pour un avoir, une rectificative ou un solde.")
                                             DatePicker("Date facture liée", selection: Binding(
                                                 get: { invoice.precedingInvoiceDate ?? Date() },
                                                 set: { invoice.precedingInvoiceDate = $0 }
                                             ), displayedComponents: .date)
                                             InfoBadge(text: "BT-26 — Date d'émission de la facture antérieure référencée.")
                                         }
+                                    }
+                                }
+                                if invoice.type.isDeposit || invoice.type.isFinalSettlement {
+                                    HStack(spacing: 3) {
+                                        Text("Acompte déjà payé").font(.caption)
+                                        TextField("0,00", value: $invoice.prepaidAmount, format: .number)
+                                            .frame(width: 120).textFieldStyle(.roundedBorder)
+                                        Text(invoice.currency).font(.caption).foregroundStyle(.secondary)
+                                        InfoBadge(text: "BT-105 — Montant des acomptes déjà payés (PrepaidAmount). Sert au calcul du net à payer sur une facture de solde.")
                                     }
                                 }
                                 HStack {
@@ -1056,6 +1065,10 @@ struct InvoiceEditorView: View {
                                     row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
                                 }
                                 row("Total TTC", invoice.grandTotal, bold: true)
+                                if invoice.prepaidAmount > 0 {
+                                    row("Acompte déjà payé", -invoice.prepaidAmount)
+                                    row("Net à payer", invoice.netToPay, bold: true)
+                                }
                             }
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))

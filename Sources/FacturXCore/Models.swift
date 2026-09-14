@@ -230,6 +230,8 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
     case correction = "384"
     case creditNote = "381"
     case internalCreditNote = "INT"
+    case deposit = "386"
+    case finalSettlement = "387"
 
     public var label: String {
         switch self {
@@ -237,6 +239,8 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
         case .correction: return "Facture rectificative (384)"
         case .creditNote: return "Avoir (381)"
         case .internalCreditNote: return "Avoir interne (INT)"
+        case .deposit: return "Facture d'acompte (386)"
+        case .finalSettlement: return "Facture de solde (387)"
         }
     }
 
@@ -246,6 +250,18 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
 
     public var isInternalCreditNote: Bool {
         self == .internalCreditNote
+    }
+
+    public var isDeposit: Bool {
+        self == .deposit
+    }
+
+    public var isFinalSettlement: Bool {
+        self == .finalSettlement
+    }
+
+    public var requiresPrecedingInvoice: Bool {
+        self == .creditNote || self == .correction || self == .finalSettlement
     }
 }
 
@@ -324,6 +340,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var legalNotePMT: String
     public var legalNotePMD: String
     public var legalNoteAAB: String
+    public var prepaidAmount: Double
 
     public init(
         id: UUID = UUID(),
@@ -353,7 +370,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         billingMode: BillingMode = .m1,
         legalNotePMT: String = "Indemnité forfaitaire pour frais de recouvrement due à compter du 1er jour de retard : 40 EUR",
         legalNotePMD: String = "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur",
-        legalNoteAAB: String = "Escompte pour paiement anticipé : aucun"
+        legalNoteAAB: String = "Escompte pour paiement anticipé : aucun",
+        prepaidAmount: Double = 0
     ) {
         self.id = id
         self.number = number
@@ -383,12 +401,13 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.legalNotePMT = legalNotePMT
         self.legalNotePMD = legalNotePMD
         self.legalNoteAAB = legalNoteAAB
+        self.prepaidAmount = prepaidAmount
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer, companyID
         case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
-        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB
+        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount
     }
 
     public init(from decoder: Decoder) throws {
@@ -421,6 +440,11 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNotePMT = try c.decodeIfPresent(String.self, forKey: .legalNotePMT) ?? "Indemnité forfaitaire pour frais de recouvrement due à compter du 1er jour de retard : 40 EUR"
         legalNotePMD = try c.decodeIfPresent(String.self, forKey: .legalNotePMD) ?? "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur"
         legalNoteAAB = try c.decodeIfPresent(String.self, forKey: .legalNoteAAB) ?? "Escompte pour paiement anticipé : aucun"
+        prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
+    }
+
+    public var netToPay: Double {
+        (grandTotal - prepaidAmount).rounded(toPlaces: 2)
     }
 
     public var lineTotal: Double {

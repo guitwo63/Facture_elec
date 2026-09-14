@@ -132,15 +132,19 @@ public enum EN16931BusinessRules {
                 message: "BR-13 : Le total TTC (BT-112) ≠ total HT + total TVA."))
         }
 
-        if invoice.type.isCreditNote {
+        if invoice.type.requiresPrecedingInvoice {
             let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces)
             if ref.isEmpty {
                 results.append(BusinessRuleResult(ruleId: "BR-FR-CO-05", severity: .error,
-                    message: "BR-FR-CO-05 / BT-25 : Un avoir doit référencer la facture antérieure (numéro + date)."))
+                    message: "BR-FR-CO-05 / BT-25 : Ce type de facture doit référencer la facture antérieure (numéro + date)."))
             } else if invoice.precedingInvoiceDate == nil {
                 results.append(BusinessRuleResult(ruleId: "BR-FR-CO-05", severity: .error,
-                    message: "BR-FR-CO-05 / BT-26 : La date de la facture antérieure référencée est obligatoire pour un avoir."))
+                    message: "BR-FR-CO-05 / BT-26 : La date de la facture antérieure référencée est obligatoire pour ce type de facture."))
             }
+        }
+        if invoice.type.isFinalSettlement, invoice.prepaidAmount <= 0 {
+            results.append(BusinessRuleResult(ruleId: "BR-AC-01", severity: .warning,
+                message: "BR-AC-01 : Une facture de solde devrait indiquer le montant des acomptes déjà payés (PrepaidAmount)."))
         }
 
         if invoice.legalNotePMT.trimmingCharacters(in: .whitespaces).isEmpty {

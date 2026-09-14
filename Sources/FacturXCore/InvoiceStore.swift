@@ -154,6 +154,34 @@ public final class InvoiceStore: ObservableObject {
         return credit
     }
 
+    public func newDeposit(from invoice: Invoice) -> Invoice {
+        var deposit = invoice
+        deposit.id = UUID()
+        deposit.number = nextNumber(prefix: "AC", companyID: invoice.companyID)
+        deposit.type = .deposit
+        deposit.status = .draft
+        deposit.issueDate = Date()
+        deposit.precedingInvoiceRef = nil
+        deposit.precedingInvoiceDate = nil
+        deposit.notes = "Facture d'acompte"
+        deposit.prepaidAmount = 0
+        return deposit
+    }
+
+    public func newFinalSettlement(from invoice: Invoice, deposits: [Invoice]) -> Invoice {
+        var final = invoice
+        final.id = UUID()
+        final.number = nextNumber(prefix: "FS", companyID: invoice.companyID)
+        final.type = .finalSettlement
+        final.status = .draft
+        final.issueDate = Date()
+        final.precedingInvoiceRef = deposits.first?.number
+        final.precedingInvoiceDate = deposits.first?.issueDate
+        final.prepaidAmount = deposits.reduce(0) { $0 + $1.grandTotal }.rounded(toPlaces: 2)
+        final.notes = "Facture de solde"
+        return final
+    }
+
     private func headKey(prefix: String) -> String {
         let sep = numberUseSeparator ? "-" : ""
         let year = String(Calendar.current.component(.year, from: Date()))
