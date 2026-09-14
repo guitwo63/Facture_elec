@@ -137,7 +137,7 @@ public final class InvoiceStore: ObservableObject {
     public func newCreditNote(from invoice: Invoice) -> Invoice {
         var credit = invoice
         credit.id = UUID()
-        credit.number = nextNumber(prefix: "AV", companyID: invoice.companyID)
+        credit.number = nextNumber(companyID: invoice.companyID)
         credit.type = .creditNote
         credit.status = .draft
         credit.issueDate = Date()
@@ -157,7 +157,7 @@ public final class InvoiceStore: ObservableObject {
     public func newDeposit(from invoice: Invoice) -> Invoice {
         var deposit = invoice
         deposit.id = UUID()
-        deposit.number = nextNumber(prefix: "AC", companyID: invoice.companyID)
+        deposit.number = nextNumber(companyID: invoice.companyID)
         deposit.type = .deposit
         deposit.status = .draft
         deposit.issueDate = Date()
@@ -171,7 +171,7 @@ public final class InvoiceStore: ObservableObject {
     public func newFinalSettlement(from invoice: Invoice, deposits: [Invoice]) -> Invoice {
         var final = invoice
         final.id = UUID()
-        final.number = nextNumber(prefix: "FS", companyID: invoice.companyID)
+        final.number = nextNumber(companyID: invoice.companyID)
         final.type = .finalSettlement
         final.status = .draft
         final.issueDate = Date()
