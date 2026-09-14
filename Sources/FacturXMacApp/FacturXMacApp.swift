@@ -1980,16 +1980,14 @@ struct PartyEditorView: View {
             HStack(spacing: 8) {
                 Text("SIRET").font(.caption)
                 TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
+                    .frame(width: 170)
                 if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
                     if SireneValidator.isValidSiret(st) {
-                        Label("Valide", systemImage: "checkmark.circle.fill")
+                        Label("SIRET valide", systemImage: "checkmark.circle.fill")
                             .font(.caption2).foregroundStyle(.green)
-                            .labelStyle(.iconOnly)
-                            .help("SIRET valide (clé Luhn correcte)")
                     } else {
-                        Label("Invalide", systemImage: "exclamationmark.triangle.fill")
+                        Label("SIRET invalide", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption2).foregroundStyle(.orange)
-                            .help("SIRET invalide (clé Luhn incorrecte)")
                     }
                 }
             }
