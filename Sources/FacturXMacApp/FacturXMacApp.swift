@@ -3135,7 +3135,7 @@ struct OrdersTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 0, alignment: .leading) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(filteredOrders.enumerated()), id: \.element.id) { _, order in
                                 VStack(alignment: .leading) {
                                     HStack {
