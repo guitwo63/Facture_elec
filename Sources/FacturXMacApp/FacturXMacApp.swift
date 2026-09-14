@@ -980,6 +980,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var auth: AuthStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
+    @State private var duplicatedNumber: String?
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
     @State private var isLocked = false
@@ -1043,6 +1044,13 @@ struct InvoiceEditorView: View {
                     .buttonStyle(.bordered)
                     .help("Protéger la facture validée en lecture seule")
                 }
+                Button {
+                    let copy = store.duplicate(from: invoice)
+                    store.upsert(copy)
+                    duplicatedNumber = copy.number
+                } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                    .buttonStyle(.bordered)
+                    .disabled(isLocked)
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(isLocked)
@@ -1058,7 +1066,7 @@ struct InvoiceEditorView: View {
             }
             .padding(12)
             Divider()
-            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil {
+            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || duplicatedNumber != nil {
                 VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
@@ -1072,6 +1080,10 @@ struct InvoiceEditorView: View {
                         .onChange(of: invoice.number) { _ in exportedURL = nil }
                         .onChange(of: invoice.seller.name) { _ in exportedURL = nil }
                         .onChange(of: invoice.buyer.name) { _ in exportedURL = nil }
+                }
+                if let n = duplicatedNumber {
+                    Text("Facture dupliquée : \(n) (disponible dans la liste)").font(.caption).foregroundStyle(.green)
+                        .onChange(of: invoice.number) { _ in duplicatedNumber = nil }
                 }
 
                 if hasMandatoryWarnings {
