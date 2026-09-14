@@ -1977,18 +1977,19 @@ struct PartyEditorView: View {
                     TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("SIRET").font(.caption)
-                    TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
-                }
+            HStack(spacing: 8) {
+                Text("SIRET").font(.caption)
+                TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
                 if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
                     if SireneValidator.isValidSiret(st) {
-                        Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
+                        Label("Valide", systemImage: "checkmark.circle.fill")
                             .font(.caption2).foregroundStyle(.green)
+                            .labelStyle(.iconOnly)
+                            .help("SIRET valide (clé Luhn correcte)")
                     } else {
-                        Label("SIRET invalide (clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                        Label("Invalide", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption2).foregroundStyle(.orange)
+                            .help("SIRET invalide (clé Luhn incorrecte)")
                     }
                 }
             }
