@@ -150,7 +150,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum RootTab: String, CaseIterable, Identifiable {
     case invoices = "Factures"
     case directory = "Annuaire"
-    case administration = "Administration"
     var id: String { rawValue }
 }
 
@@ -160,6 +159,7 @@ struct RootView: View {
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var showSettings = false
+    @State private var showUserManagement = false
 
     var body: some View {
         Group {
@@ -171,21 +171,14 @@ struct RootView: View {
         }
     }
 
-    private var availableTabs: [RootTab] {
-        if auth.currentUser?.role == .admin {
-            return RootTab.allCases
-        }
-        return [.invoices, .directory]
-    }
-
     private var mainBody: some View {
         VStack(spacing: 0) {
             HStack {
                 Picker("", selection: $tab) {
-                    ForEach(availableTabs) { Text($0.rawValue).tag($0) }
+                    ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 300)
+                .frame(width: 200)
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {
@@ -205,6 +198,16 @@ struct RootView: View {
                         .help("Se déconnecter")
                     }
                 }
+                if auth.currentUser?.role == .admin {
+                    Button {
+                        showUserManagement = true
+                    } label: {
+                        Image(systemName: "person.badge.shield.checkmark")
+                            .font(.title2)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Gestion utilisateurs")
+                }
                 Button {
                     showSettings = true
                 } label: {
@@ -221,8 +224,6 @@ struct RootView: View {
                 InvoicesTabView(selectedID: $selectedID)
             case .directory:
                 DirectoryView()
-            case .administration:
-                AdministrationView()
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -244,6 +245,27 @@ struct RootView: View {
                 Divider()
                 SettingsView()
                     .frame(minWidth: 720, minHeight: 640)
+            }
+        }
+        .sheet(isPresented: $showUserManagement) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Gestion utilisateurs").font(.title2.bold())
+                    Spacer()
+                    Button {
+                        showUserManagement = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Fermer")
+                }
+                .padding(12)
+                Divider()
+                UserManagementView()
+                    .frame(minWidth: 760, minHeight: 560)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in

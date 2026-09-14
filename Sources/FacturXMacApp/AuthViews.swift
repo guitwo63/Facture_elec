@@ -64,7 +64,7 @@ struct LoginView: View {
     }
 }
 
-struct AdministrationView: View {
+struct UserManagementView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @State private var selectedUserID: UUID?
@@ -76,7 +76,7 @@ struct AdministrationView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 HStack {
-                    Text("Administration").font(.title2.bold())
+                    Text("Gestion utilisateurs").font(.headline)
                     Spacer()
                 }
                 HStack(alignment: .top, spacing: 16) {

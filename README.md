@@ -38,12 +38,12 @@ FacturXMacApp/
 
 L'application intègre une connexion par **identifiant / mot de passe** (hachage SHA256 + sel itéré) et deux profils :
 
-- **Administrateur** : accès à toutes les factures et à l'onglet **Administration** (gestion des utilisateurs et des sociétés).
+- **Administrateur** : accès à toutes les factures et à la **Gestion utilisateurs** (bouton à droite de la barre d'outils).
 - **Comptable client** : ne voit et ne crée que les factures **rattachées à une des sociétés de son périmètre**.
 
 Le **périmètre** est fondé sur la **structure des tiers** de l'annuaire : une société du périmètre est une **fiche fournisseur** (`DirectoryEntry`) de l'annuaire. À la création d'un comptable, on lui associe une ou plusieurs fiches fournisseurs ; chaque facture est rattachée à une société (`Invoice.companyID`) et le sélecteur d'émetteur ne propose au comptable que les fournisseurs de son périmètre.
 
-Un **compte admin par défaut** (`admin` / `admin`) est créé au premier lancement — **à modifier dès la première connexion** via l'onglet Administration.
+Un **compte admin par défaut** (`admin` / `admin`) est créé au premier lancement — **à modifier dès la première connexion** via la Gestion utilisateurs.
 
 ## Compilation et exécution
 
