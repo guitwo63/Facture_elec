@@ -3134,38 +3134,38 @@ struct OrdersTabView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List(filteredOrders, selection: Binding(
-                        get: { selectedID },
-                        set: { id in selectedID = id }
-                    )) { order in
-                        VStack(alignment: .leading) {
-                            HStack {
-                                Text(order.number).font(.headline)
-                                Spacer()
-                                Text(order.issueDate, format: .dateTime.day().month().year())
+                    List(selection: $selectedID) {
+                        ForEach(filteredOrders) { order in
+                            VStack(alignment: .leading) {
+                                HStack {
+                                    Text(order.number).font(.headline)
+                                    Spacer()
+                                    Text(order.issueDate, format: .dateTime.day().month().year())
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                HStack(spacing: 6) {
+                                    Image(systemName: order.status.systemImage)
+                                        .foregroundColor(Color(hex: order.status.hexColor))
+                                        .font(.caption2)
+                                    Text(order.status.label).font(.caption2)
+                                        .foregroundColor(Color(hex: order.status.hexColor))
+                                    Text(order.type.label)
+                                        .font(.caption2).foregroundStyle(.accentColor)
+                                    Spacer()
+                                }
+                                Text("\(order.seller.name.isEmpty ? "Sans fournisseur" : order.seller.name)")
                                     .font(.caption).foregroundStyle(.secondary)
+                                Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
+                                    .font(.caption2).foregroundStyle(.secondary)
                             }
-                            HStack(spacing: 6) {
-                                Image(systemName: order.status.systemImage)
-                                    .foregroundColor(Color(hex: order.status.hexColor))
-                                    .font(.caption2)
-                                Text(order.status.label).font(.caption2)
-                                    .foregroundColor(Color(hex: order.status.hexColor))
-                                Text(order.type.label)
-                                    .font(.caption2).foregroundStyle(.accentColor)
-                                Spacer()
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    orderStore.orders.removeAll { $0.id == order.id }
+                                    orderStore.save()
+                                    if selectedID == order.id { selectedID = nil }
+                                } label: { Label("Supprimer", systemImage: "trash") }
                             }
-                            Text("\(order.seller.name.isEmpty ? "Sans fournisseur" : order.seller.name)")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                orderStore.orders.removeAll { $0.id == order.id }
-                                orderStore.save()
-                                if selectedID == order.id { selectedID = nil }
-                            } label: { Label("Supprimer", systemImage: "trash") }
+                            .tag(order.id)
                         }
                     }
                     .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
