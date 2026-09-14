@@ -262,6 +262,8 @@ public final class PartyDirectory: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private let storageKey = "facturx.directory.v1"
+    public weak var audit: AuditStore?
+    public var actorName: String = "system"
 
     public init() {
         self.entries = []
@@ -295,17 +297,20 @@ public final class PartyDirectory: ObservableObject {
     }
 
     public func upsert(_ entry: DirectoryEntry) {
+        let isNew = !entries.contains(where: { $0.id == entry.id })
         if let idx = entries.firstIndex(where: { $0.id == entry.id }) {
             entries[idx] = entry
         } else {
             entries.insert(entry, at: 0)
         }
         save()
+        audit?.record(actor: actorName, action: isNew ? "directory_entry_created" : "directory_entry_updated", target: entry.displayName)
     }
 
     public func delete(_ entry: DirectoryEntry) {
         entries.removeAll { $0.id == entry.id }
         save()
+        audit?.record(actor: actorName, action: "directory_entry_deleted", target: entry.displayName)
     }
 
     public func delete(at offsets: IndexSet) {

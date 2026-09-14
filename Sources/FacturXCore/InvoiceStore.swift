@@ -10,6 +10,8 @@ public final class InvoiceStore: ObservableObject {
     @Published public var numberIncludeYear: Bool = true
     @Published public var numberStart: Int = 1
     @Published public var numberUseSeparator: Bool = true
+    public weak var audit: AuditStore?
+    public var actorName: String = "system"
 
     private let defaults = UserDefaults.standard
     private let storageKey = "facturx.invoices.v1"
@@ -81,17 +83,21 @@ public final class InvoiceStore: ObservableObject {
     }
 
     public func upsert(_ invoice: Invoice) {
+        let isNew = !invoices.contains(where: { $0.id == invoice.id })
         if let idx = invoices.firstIndex(where: { $0.id == invoice.id }) {
             invoices[idx] = invoice
         } else {
             invoices.insert(invoice, at: 0)
         }
         save()
+        audit?.record(actor: actorName, action: isNew ? "invoice_created" : "invoice_updated",
+                       target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture")
     }
 
     public func delete(_ invoice: Invoice) {
         invoices.removeAll { $0.id == invoice.id }
         save()
+        audit?.record(actor: actorName, action: "invoice_deleted", target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture")
     }
 
     public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil, preferredSellerEntryID: UUID? = nil) -> Invoice {

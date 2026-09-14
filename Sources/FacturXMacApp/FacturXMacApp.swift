@@ -115,6 +115,12 @@ struct FacturXMacApp: App {
                 .onAppear {
                     auth.attachDirectory(directory)
                     auth.testBypassSecurity = true
+                    store.audit = AuditStore.shared
+                    orderStore.audit = AuditStore.shared
+                    directory.audit = AuditStore.shared
+                    store.actorName = auth.currentUser?.username ?? "system"
+                    orderStore.actorName = auth.currentUser?.username ?? "system"
+                    directory.actorName = auth.currentUser?.username ?? "system"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -309,7 +315,16 @@ struct RootView: View {
             if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur).contains(tab) {
                 tab = .orders
             }
+            syncAuditActor()
         }
+        .onChange(of: auth.currentUser) { _ in syncAuditActor() }
+    }
+
+    private func syncAuditActor() {
+        let name = auth.currentUser?.username ?? "system"
+        store.actorName = name
+        orderStore.actorName = name
+        directory.actorName = name
     }
 
     private func defaultDraftCompanyID() -> UUID? {
