@@ -52,6 +52,45 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertEqual(inv.grandTotal, 1620.00, accuracy: 0.001)
     }
 
+    func testExportInvoiceCSVContainsHeaderAndData() {
+        let csv = ExportGenerator().invoiceCSV([sampleInvoice()])
+        XCTAssertTrue(csv.contains("Numéro;Type;Statut"))
+        XCTAssertTrue(csv.contains("2026-0001"))
+        XCTAssertTrue(csv.contains("Mon Entreprise SARL"))
+        XCTAssertTrue(csv.contains("Client Exemple SAS"))
+        XCTAssertTrue(csv.contains("1620.00"))
+    }
+
+    func testExportInvoiceLinesCSVContainsLines() {
+        let csv = ExportGenerator().invoiceLinesCSV([sampleInvoice()])
+        XCTAssertTrue(csv.contains("N° facture;Type"))
+        XCTAssertTrue(csv.contains("Prestation de conseil"))
+        XCTAssertTrue(csv.contains("Frais de déplacement"))
+    }
+
+    func testExportWriteCSVBeginsWithBOM() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("export-bom-\(UUID().uuidString).csv")
+        try ExportGenerator().writeCSV("Numéro;Type\r\nA;B", to: tmp)
+        let data = try Data(contentsOf: tmp)
+        XCTAssertEqual(data.prefix(3), Data([0xEF, 0xBB, 0xBF]))
+        try? FileManager.default.removeItem(at: tmp)
+    }
+
+    func testExportOrderCSVContainsHeaderAndData() {
+        let order = SalesOrder(
+            number: "CMD-001",
+            buyer: InvoiceParty(name: "Acheteur SARL", street: "1 rue A", postcode: "75001", city: "Paris", country: "FR"),
+            seller: InvoiceParty(name: "Client SAS", street: "2 rue B", postcode: "75002", city: "Paris", country: "FR"),
+            lines: [InvoiceLine(name: "Article A", quantity: 3, unitPrice: 100, vatRate: 20)]
+        )
+        let csv = ExportGenerator().orderCSV([order])
+        XCTAssertTrue(csv.contains("Numéro;Type;Statut"))
+        XCTAssertTrue(csv.contains("CMD-001"))
+        XCTAssertTrue(csv.contains("Acheteur SARL"))
+        XCTAssertTrue(csv.contains("Client SAS"))
+        XCTAssertTrue(csv.contains("360.00"))
+    }
+
     func testXMLContainsEN16931URN() throws {
         let xml = try CIIXMLGenerator().generate(invoice: sampleInvoice())
         let s = String(data: xml, encoding: .utf8) ?? ""
