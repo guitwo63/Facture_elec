@@ -95,6 +95,7 @@ struct FacturXMacApp: App {
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
+    @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -105,6 +106,7 @@ struct FacturXMacApp: App {
                 .environmentObject(chorusSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
+                .environmentObject(auth)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -147,24 +149,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum RootTab: String, CaseIterable, Identifiable {
     case invoices = "Factures"
     case directory = "Annuaire"
+    case administration = "Administration"
     var id: String { rawValue }
 }
 
 struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var showSettings = false
 
     var body: some View {
+        Group {
+            if auth.currentUser == nil {
+                LoginView()
+            } else {
+                mainBody
+            }
+        }
+    }
+
+    private var availableTabs: [RootTab] {
+        if auth.currentUser?.role == .admin {
+            return RootTab.allCases
+        }
+        return [.invoices, .directory]
+    }
+
+    private var mainBody: some View {
         VStack(spacing: 0) {
             HStack {
                 Picker("", selection: $tab) {
-                    ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(availableTabs) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 200)
+                .frame(width: 300)
                 Spacer()
+                if let user = auth.currentUser {
+                    HStack(spacing: 6) {
+                        Image(systemName: user.role.systemImage)
+                            .foregroundStyle(.secondary)
+                        Text(user.effectiveDisplayName).font(.callout)
+                        Text(user.role.label).font(.caption).foregroundStyle(.secondary)
+                        Button {
+                            auth.logout()
+                            tab = .invoices
+                            selectedID = nil
+                        } label: {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.title2)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Se déconnecter")
+                    }
+                }
                 Button {
                     showSettings = true
                 } label: {
@@ -181,6 +220,8 @@ struct RootView: View {
                 InvoicesTabView(selectedID: $selectedID)
             case .directory:
                 DirectoryView()
+            case .administration:
+                AdministrationView()
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -206,10 +247,16 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
-            let draft = store.newDraft()
+            let draft = store.newDraft(companyID: defaultDraftCompanyID())
             store.upsert(draft)
             selectedID = draft.id
         }
+    }
+
+    private func defaultDraftCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
     }
 }
 
@@ -221,12 +268,19 @@ enum InvoiceTypeFilter: String, CaseIterable, Hashable {
 
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
 
     var filteredInvoices: [Invoice] {
         var result = store.invoices
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { inv in
+                if let cid = inv.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
         switch typeFilter {
         case .all:
             break
@@ -250,7 +304,7 @@ struct InvoicesTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let draft = store.newDraft()
+                        let draft = store.newDraft(companyID: defaultCompanyID())
                         store.upsert(draft)
                         selectedID = draft.id
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
@@ -290,7 +344,7 @@ struct InvoicesTabView: View {
                         Text("Aucune facture.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle facture") {
-                            let draft = store.newDraft()
+                            let draft = store.newDraft(companyID: defaultCompanyID())
                             store.upsert(draft)
                             selectedID = draft.id
                         }
@@ -368,11 +422,18 @@ struct InvoicesTabView: View {
             }
         )
     }
+
+    private func defaultCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
+    }
 }
 
 struct InvoiceEditorView: View {
     @Binding var invoice: Invoice
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var validation: FacturXValidationResult?
@@ -545,6 +606,7 @@ struct InvoiceEditorView: View {
                                         InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
                                     }
                                 }
+                                companyScopePicker
                                 DisclosureGroup("Autres références") {
                                     VStack(alignment: .leading, spacing: 6) {
                                         HStack(spacing: 3) {
@@ -676,6 +738,30 @@ struct InvoiceEditorView: View {
                 .font(bold ? .body.bold() : .body)
                 .monospacedDigit()
         }.frame(width: 280)
+    }
+
+    @ViewBuilder
+    private var companyScopePicker: some View {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count > 1 {
+            HStack(spacing: 3) {
+                Picker("Société (périmètre)", selection: Binding(
+                    get: { invoice.companyID ?? visible.first?.id ?? UUID() },
+                    set: { invoice.companyID = $0 }
+                )) {
+                    ForEach(visible) { s in Text(s.displayName).tag(s.id) }
+                }.frame(width: 320)
+                InfoBadge(text: "Société émettrice du périmètre de l'utilisateur. La facture est rattachée à cette société.")
+            }
+        } else if visible.count == 1, let s = visible.first, invoice.companyID == nil {
+            HStack(spacing: 3) {
+                Text("Société : \(s.displayName)").font(.caption).foregroundStyle(.secondary)
+                Button {
+                    invoice.companyID = s.id
+                } label: { Text("Rattacher") }
+                    .buttonStyle(.bordered)
+            }
+        }
     }
 
     private var linkedCreditNotes: [Invoice] {

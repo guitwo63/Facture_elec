@@ -94,13 +94,14 @@ public final class InvoiceStore: ObservableObject {
         save()
     }
 
-    public func newDraft(directory: PartyDirectory? = nil) -> Invoice {
+    public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil) -> Invoice {
         let dir = directory ?? PartyDirectory.shared
         let seller = resolveDefaultSeller(from: dir) ?? myCompany
         return Invoice(
             number: nextNumber(),
             seller: seller,
             buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""),
+            companyID: companyID,
             lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
             paymentIBAN: seller.iban,
             paymentBIC: seller.bic,

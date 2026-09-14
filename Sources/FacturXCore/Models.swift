@@ -293,6 +293,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var profile: FacturXProfile
     public var seller: InvoiceParty
     public var buyer: InvoiceParty
+    public var companyID: UUID?
     public var buyerReference: String?
     public var purchaseOrderRef: String?
     public var contractRef: String?
@@ -322,6 +323,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         profile: FacturXProfile = .en16931,
         seller: InvoiceParty,
         buyer: InvoiceParty,
+        companyID: UUID? = nil,
         buyerReference: String? = nil,
         purchaseOrderRef: String? = nil,
         contractRef: String? = nil,
@@ -350,6 +352,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.profile = profile
         self.seller = seller
         self.buyer = buyer
+        self.companyID = companyID
         self.buyerReference = buyerReference
         self.purchaseOrderRef = purchaseOrderRef
         self.contractRef = contractRef
@@ -370,7 +373,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer
+        case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer, companyID
         case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB
     }
@@ -387,6 +390,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         profile = try c.decodeIfPresent(FacturXProfile.self, forKey: .profile) ?? .en16931
         seller = try c.decodeIfPresent(InvoiceParty.self, forKey: .seller) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         buyer = try c.decodeIfPresent(InvoiceParty.self, forKey: .buyer) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
+        companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
         buyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
         purchaseOrderRef = try c.decodeIfPresent(String.self, forKey: .purchaseOrderRef)
         contractRef = try c.decodeIfPresent(String.self, forKey: .contractRef)
