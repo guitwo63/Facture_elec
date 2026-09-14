@@ -4,11 +4,13 @@ import CryptoKit
 public enum UserRole: String, Codable, CaseIterable {
     case admin
     case comptable
+    case acheteur
 
     public var label: String {
         switch self {
         case .admin: return "Administrateur"
         case .comptable: return "Comptable client"
+        case .acheteur: return "Acheteur"
         }
     }
 
@@ -16,6 +18,7 @@ public enum UserRole: String, Codable, CaseIterable {
         switch self {
         case .admin: return "person.badge.shield.checkmark"
         case .comptable: return "person.crop.rectangle.stack"
+        case .acheteur: return "cart"
         }
     }
 }
@@ -132,7 +135,7 @@ public enum AuthError: Error, LocalizedError {
         case .inactiveUser: return "Ce compte est désactivé."
         case .duplicateUsername: return "Cet identifiant existe déjà."
         case .emptyPassword: return "Le mot de passe ne peut pas être vide."
-        case .missingSociety: return "Un comptable doit être associé à au moins une société (fiche fournisseur de l'annuaire)."
+        case .missingSociety: return "Un utilisateur non-administrateur doit être associé à au moins une société (fiche fournisseur de l'annuaire)."
         case .invalidEmail: return "L'identifiant doit être une adresse e-mail valide."
         }
     }
@@ -274,7 +277,7 @@ public final class AuthStore: ObservableObject {
         guard !users.contains(where: { $0.username.lowercased() == trimmedName.lowercased() }) else {
             throw AuthError.duplicateUsername
         }
-        if role == .comptable, societyIDs.isEmpty {
+        if role == .comptable || role == .acheteur, societyIDs.isEmpty {
             throw AuthError.missingSociety
         }
         let salt = PasswordHasher.generateSalt()
@@ -353,6 +356,12 @@ public final class AuthStore: ObservableObject {
     }
 
     public func visibleInvoiceCompanyIDs(for user: User?) -> Set<UUID>? {
+        guard let user = user else { return nil }
+        if user.role == .admin { return nil }
+        return Set(user.societyIDs)
+    }
+
+    public func visibleOrderCompanyIDs(for user: User?) -> Set<UUID>? {
         guard let user = user else { return nil }
         if user.role == .admin { return nil }
         return Set(user.societyIDs)

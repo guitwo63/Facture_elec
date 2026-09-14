@@ -106,6 +106,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
     public var lines: [InvoiceLine]
     public var notes: String?
     public var requestedResponseTypeCode: String
+    public var companyID: UUID?
 
     public init(
         id: UUID = UUID(),
@@ -126,7 +127,8 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         previousOrderResponseRef: String? = nil,
         lines: [InvoiceLine] = [],
         notes: String? = nil,
-        requestedResponseTypeCode: String = "AC"
+        requestedResponseTypeCode: String = "AC",
+        companyID: UUID? = nil
     ) {
         self.id = id
         self.number = number
@@ -147,12 +149,13 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         self.lines = lines
         self.notes = notes
         self.requestedResponseTypeCode = requestedResponseTypeCode
+        self.companyID = companyID
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, requestedDeliveryDate, currency, profile, buyer, seller
         case buyerReference, quotationRef, contractRef, blanketOrderRef, previousOrderChangeRef, previousOrderResponseRef
-        case lines, notes, requestedResponseTypeCode
+        case lines, notes, requestedResponseTypeCode, companyID
     }
 
     public init(from decoder: Decoder) throws {
@@ -176,6 +179,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         lines = try c.decodeIfPresent([InvoiceLine].self, forKey: .lines) ?? []
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         requestedResponseTypeCode = try c.decodeIfPresent(String.self, forKey: .requestedResponseTypeCode) ?? "AC"
+        companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
     }
 
     public var lineTotal: Double {

@@ -348,7 +348,7 @@ struct UserEditorSheet: View {
                         ForEach(UserRole.allCases, id: \.self) { r in Text(r.label).tag(r) }
                     }.pickerStyle(.segmented).frame(width: 300)
                 }
-                if role == .comptable {
+                if role == .comptable || role == .acheteur {
                     Divider()
                     Text("Sociétés du périmètre (fiches fournisseurs de l'annuaire)").font(.headline)
                     if availableSocieties.isEmpty {
@@ -470,7 +470,7 @@ struct ProfileSettingsView: View {
                                     .padding(.horizontal, 6).padding(.vertical, 1)
                                     .background(.quaternary, in: Capsule())
                             }
-                            if user.role == .comptable, !user.societyIDs.isEmpty {
+                            if user.role == .comptable || user.role == .acheteur, !user.societyIDs.isEmpty {
                                 Divider()
                                 Text("Sociétés du périmètre").font(.caption.bold())
                                 ForEach(auth.visibleSocieties(for: user)) { s in

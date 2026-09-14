@@ -159,6 +159,15 @@ enum RootTab: String, CaseIterable, Identifiable {
     case orders = "Commandes"
     case directory = "Annuaire"
     var id: String { rawValue }
+
+    static func visible(for role: UserRole?) -> [RootTab] {
+        switch role {
+        case .acheteur:
+            return [.orders]
+        default:
+            return allCases
+        }
+    }
 }
 
 struct RootView: View {
@@ -185,7 +194,7 @@ struct RootView: View {
         VStack(spacing: 0) {
             HStack {
                 Picker("", selection: $tab) {
-                    ForEach(RootTab.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(RootTab.visible(for: auth.currentUser?.role)) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 300)
@@ -289,9 +298,14 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newOrderRequested)) { _ in
             tab = .orders
-            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID)
+            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultDraftCompanyID())
             orderStore.upsert(draft)
             selectedOrderID = draft.id
+        }
+        .onAppear {
+            if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur).contains(tab) {
+                tab = .orders
+            }
         }
     }
 
@@ -3083,7 +3097,13 @@ struct OrdersTabView: View {
     @State private var query = ""
 
     var filteredOrders: [SalesOrder] {
-        let result = orderStore.orders
+        var result = orderStore.orders
+        if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
+            result = result.filter { order in
+                if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
         return result.filter { order in
@@ -3099,7 +3119,7 @@ struct OrdersTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID)
+                        let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
                         orderStore.upsert(draft)
                         selectedID = draft.id
                     } label: { Label("Nouvelle commande", systemImage: "plus") }
@@ -3132,7 +3152,7 @@ struct OrdersTabView: View {
                         Text("Aucune commande.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle commande") {
-                            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID)
+                            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
                             orderStore.upsert(draft)
                             selectedID = draft.id
                         }
@@ -3196,6 +3216,12 @@ struct OrdersTabView: View {
                 }
             }
         }
+    }
+
+    private func defaultOrderCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
     }
 
     private func binding(for id: UUID) -> Binding<SalesOrder> {

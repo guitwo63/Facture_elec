@@ -83,7 +83,7 @@ public final class OrderStore: ObservableObject {
         save()
     }
 
-    public func newDraft(directory: PartyDirectory? = nil, preferredBuyerEntryID: UUID? = nil) -> SalesOrder {
+    public func newDraft(directory: PartyDirectory? = nil, preferredBuyerEntryID: UUID? = nil, companyID: UUID? = nil) -> SalesOrder {
         let dir = directory ?? PartyDirectory.shared
         let buyerEntryID = preferredBuyerEntryID ?? defaultBuyerEntryID
         let buyer: InvoiceParty = {
@@ -111,7 +111,8 @@ public final class OrderStore: ObservableObject {
             number: nextNumber(),
             buyer: buyer,
             seller: seller,
-            lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)]
+            lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
+            companyID: companyID
         )
     }
 
