@@ -27,7 +27,7 @@ public struct User: Codable, Hashable, Identifiable {
     public var id: UUID
     public var username: String
     public var displayName: String
-    public var role: UserRole
+    public var roles: [UserRole]
     public var passwordHash: String
     public var salt: String
     public var societyIDs: [UUID]
@@ -44,6 +44,7 @@ public struct User: Codable, Hashable, Identifiable {
         username: String,
         displayName: String = "",
         role: UserRole = .comptable,
+        roles: [UserRole]? = nil,
         passwordHash: String = "",
         salt: String = "",
         societyIDs: [UUID] = [],
@@ -58,7 +59,8 @@ public struct User: Codable, Hashable, Identifiable {
         self.id = id
         self.username = username
         self.displayName = displayName
-        self.role = role
+        self.roles = roles ?? [role]
+        if self.roles.isEmpty { self.roles = [.comptable] }
         self.passwordHash = passwordHash
         self.salt = salt
         self.societyIDs = societyIDs
@@ -71,13 +73,18 @@ public struct User: Codable, Hashable, Identifiable {
         self.lastActivityAt = lastActivityAt
     }
 
+    public var role: UserRole { roles.first ?? .comptable }
+    public var isAdmin: Bool { roles.contains(.admin) }
+    public func hasRole(_ r: UserRole) -> Bool { roles.contains(r) }
+    public var rolesLabel: String { roles.map { $0.label }.joined(separator: ", ") }
+
     public var effectiveDisplayName: String {
         let n = displayName.trimmingCharacters(in: .whitespaces)
         return n.isEmpty ? username : n
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, username, displayName, role, passwordHash, salt, societyIDs, defaultSellerEntryID, isActive, createdAt
+        case id, username, displayName, role, roles, passwordHash, salt, societyIDs, defaultSellerEntryID, isActive, createdAt
         case mustChangePassword, failedLoginAttempts, lockUntil, lastActivityAt
     }
 
@@ -86,7 +93,13 @@ public struct User: Codable, Hashable, Identifiable {
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         username = try c.decodeIfPresent(String.self, forKey: .username) ?? ""
         displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
-        role = try c.decodeIfPresent(UserRole.self, forKey: .role) ?? .comptable
+        if let arr = try c.decodeIfPresent([UserRole].self, forKey: .roles), !arr.isEmpty {
+            roles = arr
+        } else if let single = try c.decodeIfPresent(UserRole.self, forKey: .role) {
+            roles = [single]
+        } else {
+            roles = [.comptable]
+        }
         passwordHash = try c.decodeIfPresent(String.self, forKey: .passwordHash) ?? ""
         salt = try c.decodeIfPresent(String.self, forKey: .salt) ?? ""
         societyIDs = try c.decodeIfPresent([UUID].self, forKey: .societyIDs) ?? []
@@ -97,6 +110,25 @@ public struct User: Codable, Hashable, Identifiable {
         failedLoginAttempts = try c.decodeIfPresent(Int.self, forKey: .failedLoginAttempts) ?? 0
         lockUntil = try c.decodeIfPresent(Date.self, forKey: .lockUntil)
         lastActivityAt = try c.decodeIfPresent(Date.self, forKey: .lastActivityAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(username, forKey: .username)
+        try c.encode(displayName, forKey: .displayName)
+        try c.encode(role, forKey: .role)
+        try c.encode(roles, forKey: .roles)
+        try c.encode(passwordHash, forKey: .passwordHash)
+        try c.encode(salt, forKey: .salt)
+        try c.encode(societyIDs, forKey: .societyIDs)
+        try c.encodeIfPresent(defaultSellerEntryID, forKey: .defaultSellerEntryID)
+        try c.encode(isActive, forKey: .isActive)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(mustChangePassword, forKey: .mustChangePassword)
+        try c.encode(failedLoginAttempts, forKey: .failedLoginAttempts)
+        try c.encodeIfPresent(lockUntil, forKey: .lockUntil)
+        try c.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
     }
 }
 
@@ -464,6 +496,7 @@ public final class AuthStore: ObservableObject {
         password: String,
         displayName: String = "",
         role: UserRole = .comptable,
+        roles: [UserRole]? = nil,
         societyIDs: [UUID] = [],
         defaultSellerEntryID: UUID? = nil,
         mustChangePassword: Bool = false
@@ -479,7 +512,9 @@ public final class AuthStore: ObservableObject {
         guard !users.contains(where: { $0.username.lowercased() == trimmedName.lowercased() }) else {
             throw AuthError.duplicateUsername
         }
-        if role == .comptable || role == .acheteur, societyIDs.isEmpty {
+        let effectiveRoles = (roles ?? [role]).filter { UserRole.allCases.contains($0) }
+        let finalRoles = effectiveRoles.isEmpty ? [role] : effectiveRoles
+        if finalRoles.contains(.comptable) || finalRoles.contains(.acheteur), societyIDs.isEmpty {
             throw AuthError.missingSociety
         }
         let salt = PasswordHasher.generateSalt()
@@ -488,6 +523,7 @@ public final class AuthStore: ObservableObject {
             username: trimmedName,
             displayName: displayName,
             role: role,
+            roles: finalRoles,
             passwordHash: hash,
             salt: salt,
             societyIDs: societyIDs,
@@ -497,7 +533,7 @@ public final class AuthStore: ObservableObject {
         )
         users.append(user)
         save()
-        audit.record(actor: currentUser?.username ?? "system", action: "user_created", target: trimmedName, details: role.label)
+        audit.record(actor: currentUser?.username ?? "system", action: "user_created", target: trimmedName, details: user.rolesLabel)
         return user
     }
 
@@ -523,7 +559,7 @@ public final class AuthStore: ObservableObject {
     }
 
     public func upsert(_ user: User) {
-        let wasRole = users.first(where: { $0.id == user.id })?.role
+        let wasRoles = users.first(where: { $0.id == user.id })?.roles
         let wasScope = users.first(where: { $0.id == user.id })?.societyIDs
         if let idx = users.firstIndex(where: { $0.id == user.id }) {
             users[idx] = user
@@ -533,9 +569,9 @@ public final class AuthStore: ObservableObject {
         if currentUser?.id == user.id { currentUser = user }
         save()
         // B1 : trace des modifications de rôle / périmètre
-        if wasRole != user.role {
+        if wasRoles != user.roles {
             audit.record(actor: currentUser?.username ?? "system", action: "role_changed",
-                         target: user.username, details: "\(wasRole?.label ?? "—") → \(user.role.label)")
+                         target: user.username, details: "\(wasRoles?.map { $0.label }.joined(separator: ", ") ?? "—") → \(user.rolesLabel)")
         }
         if wasScope != nil, wasScope != user.societyIDs {
             audit.record(actor: currentUser?.username ?? "system", action: "scope_changed",
@@ -544,7 +580,7 @@ public final class AuthStore: ObservableObject {
     }
 
     public func delete(_ user: User) {
-        guard user.role != .admin || users.filter({ $0.role == .admin }).count > 1 else { return }
+        guard !user.isAdmin || users.filter({ $0.isAdmin }).count > 1 else { return }
         users.removeAll { $0.id == user.id }
         if currentUser?.id == user.id { currentUser = nil }
         save()
@@ -565,7 +601,7 @@ public final class AuthStore: ObservableObject {
     public func visibleSocieties(for user: User?) -> [DirectoryEntry] {
         guard let user = user else { return [] }
         let all = availableSocieties()
-        if user.role == .admin { return all }
+        if user.isAdmin { return all }
         let scope = Set(user.societyIDs)
         return all.filter { scope.contains($0.id) }
     }
@@ -577,26 +613,26 @@ public final class AuthStore: ObservableObject {
 
     public func userCanAccessSociety(_ user: User?, societyID: UUID?) -> Bool {
         guard let user = user else { return false }
-        if user.role == .admin { return true }
+        if user.isAdmin { return true }
         guard let sid = societyID else { return false }
         return user.societyIDs.contains(sid)
     }
 
     public func visibleInvoiceCompanyIDs(for user: User?) -> Set<UUID>? {
         guard let user = user else { return nil }
-        if user.role == .admin { return nil }
+        if user.isAdmin { return nil }
         return Set(user.societyIDs)
     }
 
     public func visibleOrderCompanyIDs(for user: User?) -> Set<UUID>? {
         guard let user = user else { return nil }
-        if user.role == .admin { return nil }
+        if user.isAdmin { return nil }
         return Set(user.societyIDs)
     }
 
     public func visibleDirectoryEntryIDs(for user: User?) -> Set<UUID>? {
         guard let user = user else { return nil }
-        if user.role == .admin { return nil }
+        if user.isAdmin { return nil }
         return Set(user.societyIDs)
     }
 }

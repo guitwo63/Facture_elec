@@ -220,7 +220,7 @@ struct RootView: View {
                         .help("Se déconnecter")
                     }
                 }
-                if auth.currentUser?.role == .admin {
+                if auth.currentUser?.isAdmin == true {
                     Button {
                         showUserManagement = true
                     } label: {
@@ -1500,7 +1500,7 @@ struct PartyPickerSheet: View {
     }
 
     private var canCreateNew: Bool {
-        if role == .seller { return auth.currentUser?.role == .admin }
+        if role == .seller { return auth.currentUser?.isAdmin == true }
         return true
     }
 
@@ -1720,7 +1720,7 @@ struct DirectoryView: View {
 
     private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
 
-    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -2256,7 +2256,7 @@ struct DirectoryEditorView: View {
         return isEditing ? "Modifier : \(entry.party.name)" : "Nouveau tiers : \(entry.party.name)"
     }
 
-    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
 
     private var availableKinds: [DirectoryEntryKind] {
         if canManageFournisseurs { return DirectoryEntryKind.allCases }
@@ -2666,7 +2666,7 @@ struct SettingsTabView: View {
         VStack(spacing: 0) {
             Picker("", selection: $settingsTab) {
                 Text("Profil").tag(0)
-                if auth.currentUser?.role == .admin {
+                if auth.currentUser?.isAdmin == true {
                     Text("Commandes").tag(1)
                     Text("Application").tag(2)
                     Text("Journal").tag(3)
