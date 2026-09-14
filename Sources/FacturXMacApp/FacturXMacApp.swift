@@ -158,9 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum RootTab: String, CaseIterable, Identifiable {
-    case invoices = "Factures"
-    case orders = "Commandes"
     case directory = "Annuaire"
+    case orders = "Commandes"
+    case invoices = "Factures"
     var id: String { rawValue }
 
     static func visible(for role: UserRole?) -> [RootTab] {
@@ -3193,38 +3193,46 @@ struct PartyEditorView: View {
             HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
                 .onChange(of: party.name) { _ in scheduleDinumSearch() }
-            TextField("Adresse", text: $party.street)
-            HStack {
-                TextField("Code postal", text: $party.postcode)
-                TextField("Ville", text: $party.city)
-            }
-            HStack {
-                Text("Pays").font(.caption); star
-                NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 200)
-            }
-            HStack {
-                Text("SIREN").font(.caption); star
-                TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
-                    .onChange(of: party.siren) { _ in scheduleDinumSearch() }
-                HStack(spacing: 4) {
-                    Text("TVA intra").font(.caption)
-                    TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
-                }
-            }
-            HStack {
-                Text("SIRET").font(.caption)
-                TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
-                    .frame(maxWidth: 200)
-                if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
-                    if SireneValidator.isValidSiret(st) {
-                        Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
-                            .font(.caption2).foregroundStyle(.green)
-                    } else {
-                        Label("SIRET invalide (clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption2).foregroundStyle(.orange)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Adresse", text: $party.street)
+                    HStack {
+                        TextField("Code postal", text: $party.postcode)
+                        TextField("Ville", text: $party.city)
+                    }
+                    HStack {
+                        Text("Pays").font(.caption); star
+                        NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 200)
                     }
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("SIREN").font(.caption); star
+                        TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
+                            .onChange(of: party.siren) { _ in scheduleDinumSearch() }
+                    }
+                    HStack(spacing: 4) {
+                        Text("TVA intra").font(.caption)
+                        TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
+                    }
+                    HStack {
+                        Text("SIRET").font(.caption)
+                        TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
+                            .frame(maxWidth: 200)
+                        if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
+                            if SireneValidator.isValidSiret(st) {
+                                Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
+                                    .font(.caption2).foregroundStyle(.green)
+                            } else {
+                                Label("SIRET invalide (clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
+                        Spacer()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
                 Text("Ident. élec. (BT-49/34)").font(.caption)

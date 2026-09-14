@@ -155,7 +155,6 @@ struct UserManagementView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @State private var selectedUserID: UUID?
-    @State private var selectedEntryID: UUID?
     @State private var editingUser: User?
     @State private var creatingUser = false
 
@@ -166,12 +165,7 @@ struct UserManagementView: View {
                     Text("Gestion utilisateurs").font(.headline)
                     Spacer()
                 }
-                HStack(alignment: .top, spacing: 16) {
-                    usersSection
-                        .frame(maxWidth: .infinity)
-                    companiesSection
-                        .frame(maxWidth: .infinity)
-                }
+                usersSection
             }
             .padding(12)
             Divider()
@@ -179,13 +173,10 @@ struct UserManagementView: View {
                 UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
                                onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw, forceChange: true) })
                     .padding(12)
-            } else if let id = selectedEntryID, let entry = directory.entries.first(where: { $0.id == id }) {
-                CompanyDetailCard(entry: entry)
-                    .padding(12)
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "person.badge.shield.checkmark").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("Sélectionnez un utilisateur ou une société.").foregroundStyle(.secondary)
+                    Text("Sélectionnez un utilisateur.").foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -230,7 +221,7 @@ struct UserManagementView: View {
             }
             List(auth.users, selection: Binding(
                 get: { selectedUserID },
-                set: { selectedUserID = $0; selectedEntryID = nil }
+                set: { selectedUserID = $0 }
             )) { user in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -239,7 +230,8 @@ struct UserManagementView: View {
                         HStack(spacing: 6) {
                             Text(user.role.label).font(.caption2)
                                 .padding(.horizontal, 6).padding(.vertical, 1)
-                                .background(.quaternary, in: Capsule())
+                                .background(roleColor(user.role).opacity(0.18), in: Capsule())
+                                .foregroundStyle(roleColor(user.role))
                             Text("\(user.societyIDs.count) société(s)").font(.caption2).foregroundStyle(.secondary)
                             if !user.isActive {
                                 Text("Désactivé").font(.caption2).foregroundStyle(.red)
@@ -269,36 +261,12 @@ struct UserManagementView: View {
         }
     }
 
-    private var companiesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Sociétés (annuaire)").font(.headline)
-                Spacer()
-                Text("Fournisseurs de l'annuaire").font(.caption2).foregroundStyle(.secondary)
-            }
-            List(availableSocieties, selection: Binding(
-                get: { selectedEntryID },
-                set: { selectedEntryID = $0; selectedUserID = nil }
-            )) { entry in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.displayName).font(.body.weight(.medium))
-                    if let s = entry.party.siren, !s.isEmpty {
-                        Text("SIREN : \(s)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Text("\(auth.users.filter { $0.societyIDs.contains(entry.id) }.count) utilisateur(s)")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-            .frame(minHeight: 240)
-            if availableSocieties.isEmpty {
-                Text("Aucune société. Créez une fiche fournisseur dans l'onglet Annuaire pour la proposer comme périmètre.")
-                    .font(.caption).foregroundStyle(.secondary).padding(.top, 4)
-            }
+    private func roleColor(_ role: UserRole) -> Color {
+        switch role {
+        case .admin: return .red
+        case .comptable: return .blue
+        case .acheteur: return .green
         }
-    }
-
-    private var availableSocieties: [DirectoryEntry] {
-        directory.entries.filter { !$0.isArchived && ($0.kind == .fournisseur || $0.kind == .both) }
     }
 }
 
