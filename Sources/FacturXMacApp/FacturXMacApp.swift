@@ -633,6 +633,121 @@ struct OrderToInvoiceSheet: View {
     }
 }
 
+struct InvoicePickerSheet: View {
+    let invoices: [Invoice]
+    let selectedID: UUID?
+    let onPick: (Invoice) -> Void
+    let onClear: () -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var companyFilter: UUID?
+    @State private var localSelectedID: UUID?
+
+    private var companies: [DirectoryEntry] {
+        let dir = PartyDirectory.shared
+        let ids = Set(invoices.compactMap { $0.companyID })
+        return dir.entries.filter { ids.contains($0.id) }.sorted { $0.party.name < $1.party.name }
+    }
+
+    private var filtered: [Invoice] {
+        var result = invoices
+        if let cid = companyFilter {
+            result = result.filter { $0.companyID == cid }
+        }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return result.sorted { $0.issueDate > $1.issueDate } }
+        return result.filter { inv in
+            inv.number.lowercased().contains(q)
+                || inv.seller.name.lowercased().contains(q)
+                || inv.buyer.name.lowercased().contains(q)
+                || (inv.buyer.siren ?? "").lowercased().contains(q)
+        }.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sélectionner la facture antérieure").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, client, SIREN…)", text: $query)
+                    .textFieldStyle(.plain)
+                if !companies.isEmpty {
+                    Picker("Société", selection: $companyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(companies) { c in
+                            Text(c.party.name.isEmpty ? "Sans nom" : c.party.name).tag(Optional(c.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 200)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filtered.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucune facture disponible dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(filtered) { inv in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(inv.number).font(.headline)
+                                if (localSelectedID ?? selectedID) == inv.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Color.accentColor)
+                                        .font(.caption)
+                                }
+                            }
+                            Text("\(inv.seller.name.isEmpty ? "Sans émetteur" : inv.seller.name) → \(inv.buyer.name.isEmpty ? "Sans client" : inv.buyer.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(inv.issueDate, format: .dateTime.day().month().year())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { localSelectedID = inv.id }
+                    .background((localSelectedID ?? selectedID) == inv.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Effacer", role: .destructive, action: onClear)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Sélectionner") {
+                    let id = localSelectedID ?? selectedID
+                    if let picked = filtered.first(where: { $0.id == id }) {
+                        onPick(picked)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(localSelectedID == nil && selectedID == nil)
+            }
+            .padding(12)
+        }
+        .frame(width: 620, height: 460)
+        .onAppear {
+            localSelectedID = selectedID
+            companyFilter = nil
+        }
+    }
+}
+
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
@@ -864,6 +979,7 @@ struct InvoiceEditorView: View {
     @State private var showValidation = false
     @State private var isLocked = false
     @State private var showUnlockAlert = false
+    @State private var showPrecedingInvoicePicker = false
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1010,48 +1126,46 @@ struct InvoiceEditorView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Facture antérieure référencée :").font(.caption.bold())
                                         HStack(spacing: 6) {
-                                            Menu {
-                                                Button("Aucune") {
-                                                    invoice.precedingInvoiceRef = nil
-                                                    invoice.precedingInvoiceDate = nil
-                                                }
-                                                Divider()
-                                                ForEach(linkableInvoices) { inv in
-                                                    Button {
-                                                        invoice.precedingInvoiceRef = inv.number
-                                                        invoice.precedingInvoiceDate = inv.issueDate
-                                                    } label: {
-                                                        HStack {
-                                                            Text(inv.number)
-                                                            Spacer()
-                                                            Text(inv.issueDate, format: .dateTime.day().month().year())
-                                                                .foregroundStyle(.secondary)
-                                                        }
-                                                    }
-                                                }
+                                            Button {
+                                                showPrecedingInvoicePicker = true
                                             } label: {
-                                                HStack(spacing: 3) {
+                                                HStack(spacing: 6) {
                                                     Image(systemName: "doc.text.magnifyingglass")
-                                                    let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces)
-                                                    if !ref.isEmpty {
-                                                        VStack(alignment: .leading, spacing: 1) {
+                                                    VStack(alignment: .leading, spacing: 1) {
+                                                        let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces)
+                                                        if !ref.isEmpty {
                                                             Text(ref).font(.caption.bold())
                                                             if let d = invoice.precedingInvoiceDate {
-                                                                Text(d, format: .dateTime.day().month().year())
+                                                                Text("Date : \(d, format: .dateTime.day().month().year())")
                                                                     .font(.caption2).foregroundStyle(.secondary)
+                                                            } else {
+                                                                Text("Date : non renseignée")
+                                                                    .font(.caption2).foregroundStyle(.orange)
                                                             }
+                                                        } else {
+                                                            Text("Sélectionner une facture…").foregroundStyle(.secondary)
                                                         }
-                                                    } else {
-                                                        Text("Sélectionner une facture…").foregroundStyle(.secondary)
                                                     }
+                                                    Spacer()
+                                                    Image(systemName: "chevron.right")
+                                                        .font(.caption2).foregroundStyle(.secondary)
                                                 }
-                                                .frame(maxWidth: 320, alignment: .leading)
+                                                .frame(maxWidth: 360, alignment: .leading)
                                             }
-                                            .menuStyle(.borderlessButton)
-                                            .padding(.horizontal, 8).padding(.vertical, 4)
-                                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+                                            .buttonStyle(.bordered)
                                             if linkableInvoices.isEmpty {
                                                 Text("Aucune facture disponible").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                            if (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) != "" {
+                                                Button {
+                                                    invoice.precedingInvoiceRef = nil
+                                                    invoice.precedingInvoiceDate = nil
+                                                } label: {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                .buttonStyle(.borderless)
+                                                .help("Effacer la référence")
                                             }
                                             InfoBadge(text: "BT-25/BT-26 — Numéro et date de la facture antérieure référencée. Sélection dans les factures du périmètre (hors avoirs).")
                                         }
@@ -1210,6 +1324,25 @@ struct InvoiceEditorView: View {
                 Button("Modifier", role: .destructive) { isLocked = false }
             } message: {
                 Text("La facture était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout dépôt PDP.")
+            }
+            .sheet(isPresented: $showPrecedingInvoicePicker) {
+                InvoicePickerSheet(
+                    invoices: linkableInvoices,
+                    selectedID: invoice.precedingInvoiceRef.flatMap { ref in
+                        linkableInvoices.first(where: { $0.number == ref })?.id
+                    },
+                    onPick: { inv in
+                        invoice.precedingInvoiceRef = inv.number
+                        invoice.precedingInvoiceDate = inv.issueDate
+                        showPrecedingInvoicePicker = false
+                    },
+                    onClear: {
+                        invoice.precedingInvoiceRef = nil
+                        invoice.precedingInvoiceDate = nil
+                        showPrecedingInvoicePicker = false
+                    },
+                    onCancel: { showPrecedingInvoicePicker = false }
+                )
             }
         }
     }
