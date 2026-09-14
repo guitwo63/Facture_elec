@@ -8,7 +8,7 @@ public enum AppEnvironmentMode: String, Codable, CaseIterable {
 
     public var label: String { self == .test ? "Test (bac à sable)" : "Production" }
     public var shortLabel: String { self == .test ? "TEST" : "PROD" }
-    public var keySuffix: String { self == .test ? ".test" : "" }
+    public var keySuffix: String { self == .test ? "" : ".production" }
 }
 
 public final class AppEnvironment: ObservableObject {
