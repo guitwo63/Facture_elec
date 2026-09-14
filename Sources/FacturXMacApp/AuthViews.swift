@@ -22,7 +22,6 @@ struct LoginView: View {
                 TextField("Adresse e-mail", text: $username)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 280)
-                    .textContentType(.emailAddress)
                     .disableAutocorrection(true)
                 SecureField("Mot de passe", text: $password)
                     .textFieldStyle(.roundedBorder)
