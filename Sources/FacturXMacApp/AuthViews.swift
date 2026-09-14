@@ -348,30 +348,30 @@ struct UserEditorSheet: View {
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(availableSocieties) { s in
-                                Toggle(isOn: Binding(
-                                    get: { societyIDs.contains(s.id) },
-                                    set: { checked in
-                                        if checked { societyIDs.insert(s.id) }
-                                        else {
-                                            societyIDs.remove(s.id)
-                                            if defaultSellerEntryID == s.id { defaultSellerEntryID = nil }
-                                        }
-                                    }
-                                )) {
-                                    HStack {
-                                        Text(s.displayName)
-                                        if societyIDs.contains(s.id) {
-                                            Spacer()
-                                            Toggle(isOn: Binding(
-                                                get: { defaultSellerEntryID == s.id },
-                                                set: { isDefault in
-                                                    defaultSellerEntryID = isDefault ? s.id : nil
-                                                }
-                                            )) {
-                                                Text("Émetteur par défaut").font(.caption)
+                                HStack {
+                                    Toggle(isOn: Binding(
+                                        get: { societyIDs.contains(s.id) },
+                                        set: { checked in
+                                            if checked { societyIDs.insert(s.id) }
+                                            else {
+                                                societyIDs.remove(s.id)
+                                                if defaultSellerEntryID == s.id { defaultSellerEntryID = nil }
                                             }
-                                            .toggleStyle(.checkbox)
                                         }
+                                    )) {
+                                        Text(s.displayName)
+                                    }
+                                    Spacer()
+                                    if societyIDs.contains(s.id) {
+                                        Toggle(isOn: Binding(
+                                            get: { defaultSellerEntryID == s.id },
+                                            set: { isDefault in
+                                                defaultSellerEntryID = isDefault ? s.id : nil
+                                            }
+                                        )) {
+                                            Text("Émetteur par défaut").font(.caption)
+                                        }
+                                        .toggleStyle(.checkbox)
                                     }
                                 }
                             }
