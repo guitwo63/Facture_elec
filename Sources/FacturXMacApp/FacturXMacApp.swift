@@ -2052,6 +2052,7 @@ struct PartyEditorView: View {
     @Binding var contacts: [PartyContact]
     var showWebButton: Bool
     var isFournisseur: Bool = false
+    var isMultiContact: Bool
     @State private var showRoutingEditor = false
     @State private var editingAddress: PartyRoutingAddress?
     @State private var showContactEditor = false
@@ -2065,6 +2066,7 @@ struct PartyEditorView: View {
         self._party = party
         self.showWebButton = showWebButton
         self.isFournisseur = isFournisseur
+        self.isMultiContact = contacts != nil
         if let ra = routingAddresses {
             self._routingAddresses = ra
         } else {
@@ -2142,50 +2144,58 @@ struct PartyEditorView: View {
                 TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
                 NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
             }
-            Button {
-                editingContact = nil
-                showContactEditor = true
-            } label: {
-                Label("Contacts", systemImage: "person.crop.circle.badge.plus")
-            }
-            .buttonStyle(.bordered)
-            if !contacts.isEmpty {
-                ForEach(contacts) { ct in
-                    HStack(spacing: 8) {
-                        if ct.isDefault {
-                            Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Color.accentColor.opacity(0.2), in: Capsule())
-                        }
-                        Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
-                            .font(.caption.bold())
-                        if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
-                            Text(e).font(.caption).foregroundStyle(.secondary)
-                        }
-                        if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
-                            Text(p).font(.caption).foregroundStyle(.secondary)
-                        }
-                        if !ct.isActive {
-                            Text("inactif").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(Color.gray.opacity(0.2), in: Capsule())
-                        }
-                        Spacer()
-                        Button {
-                            editingContact = ct
-                            showContactEditor = true
-                        } label: { Image(systemName: "pencil") }
-                            .buttonStyle(.borderless)
-                            .help("Modifier ce contact")
-                        Button(role: .destructive) {
-                            contacts.removeAll { $0.id == ct.id }
-                            if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
-                                contacts[0].isDefault = true
+            if isMultiContact {
+                Button {
+                    editingContact = nil
+                    showContactEditor = true
+                } label: {
+                    Label("Contacts", systemImage: "person.crop.circle.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                if !contacts.isEmpty {
+                    ForEach(contacts) { ct in
+                        HStack(spacing: 8) {
+                            if ct.isDefault {
+                                Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.accentColor.opacity(0.2), in: Capsule())
                             }
-                        } label: { Image(systemName: "trash") }
-                            .buttonStyle(.borderless)
-                            .help("Supprimer ce contact")
+                            Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
+                                .font(.caption.bold())
+                            if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
+                                Text(e).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+                                Text(p).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if !ct.isActive {
+                                Text("inactif").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.gray.opacity(0.2), in: Capsule())
+                            }
+                            Spacer()
+                            Button {
+                                editingContact = ct
+                                showContactEditor = true
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce contact")
+                            Button(role: .destructive) {
+                                contacts.removeAll { $0.id == ct.id }
+                                if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
+                                    contacts[0].isDefault = true
+                                }
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer ce contact")
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.08)))
+                }
+            } else {
+                HStack {
+                    TextField("Contact", text: Binding($party.contactName, replacingNilWith: ""))
+                    TextField("Email", text: Binding($party.contactEmail, replacingNilWith: ""))
+                    TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
                 }
             }
             Button {
