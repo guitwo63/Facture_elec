@@ -2183,6 +2183,9 @@ struct SettingsTabView: View {
 
 struct OrderStatusSettingsView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
+    @State private var newLabel = ""
+    @State private var newIcon = "doc"
+    @State private var newColor = "6E6E73"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2200,9 +2203,10 @@ struct OrderStatusSettingsView: View {
                 .font(.caption).foregroundStyle(.secondary).padding(12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    ForEach(statusStore.overrides.indices, id: \.self) { idx in
-                        statusRow(idx)
+                    ForEach(statusStore.overrides) { override in
+                        statusRow(override)
                     }
+                    addRow
                 }
                 .padding(12)
             }
@@ -2210,7 +2214,41 @@ struct OrderStatusSettingsView: View {
         .frame(minWidth: 480, minHeight: 420)
     }
 
-    private func statusRow(_ idx: Int) -> some View {
+    private var addRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: newIcon)
+                .frame(width: 22)
+                .foregroundStyle(Color(hex: newColor))
+            TextField("Nouveau statut", text: $newLabel)
+                .frame(minWidth: 180)
+            TextField("Icône SF", text: $newIcon)
+                .frame(width: 120)
+            ColorPicker(selection: Binding(
+                get: { Color(hex: newColor) },
+                set: { newColor = hexString(from: $0) }
+            )) {
+                Text("Couleur")
+            }
+            .labelsHidden()
+            Spacer()
+            Button {
+                let trimmed = newLabel.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return }
+                let id = "custom-\(UUID().uuidString.prefix(8))"
+                statusStore.append(OrderStatusOverride(id: id, label: trimmed, systemImage: newIcon, hexColor: newColor))
+                newLabel = ""
+                newIcon = "doc"
+                newColor = "6E6E73"
+            } label: {
+                Image(systemName: "plus.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .help("Ajouter ce statut")
+        }
+    }
+
+    private func statusRow(_ override: OrderStatusOverride) -> some View {
+        let idx = statusStore.overrides.firstIndex(where: { $0.id == override.id }) ?? 0
         let binding = Binding<OrderStatusOverride>(
             get: { statusStore.overrides[idx] },
             set: { statusStore.overrides[idx] = $0 }
@@ -2234,7 +2272,9 @@ struct OrderStatusSettingsView: View {
             .labelsHidden()
             Spacer()
             Button(role: .destructive) {
-                statusStore.remove(at: idx)
+                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    statusStore.remove(at: i)
+                }
             } label: {
                 Image(systemName: "minus.circle.fill")
             }
@@ -3239,7 +3279,7 @@ struct OrdersTabView: View {
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     HStack(spacing: 6) {
-                                        let so = statusStore.override(for: order.status)
+                                        let so = statusStore.override(for: order)
                                         Image(systemName: so.systemImage)
                                             .foregroundColor(Color(hex: so.hexColor))
                                             .font(.caption2)
@@ -3633,14 +3673,23 @@ struct OrderEditorView: View {
                     }
                     Spacer()
                     HStack(spacing: 4) {
-                        let so = statusStore.override(for: order.status)
-                        Image(systemName: so.systemImage)
-                            .foregroundColor(Color(hex: so.hexColor))
+                        let current = statusStore.override(for: order)
+                        Image(systemName: current.systemImage)
+                            .foregroundColor(Color(hex: current.hexColor))
                             .font(.caption2)
-                        Picker("Statut", selection: $order.status) {
-                            ForEach(OrderStatus.allCases, id: \.self) { s in
-                                let o = statusStore.override(for: s)
-                                Label(o.label, systemImage: o.systemImage).tag(s)
+                        Picker("Statut", selection: Binding<String>(
+                            get: { order.customStatusID ?? order.status.rawValue },
+                            set: { selectedID in
+                                if let s = OrderStatus(rawValue: selectedID) {
+                                    order.status = s
+                                    order.customStatusID = nil
+                                } else {
+                                    order.customStatusID = selectedID
+                                }
+                            }
+                        )) {
+                            ForEach(statusStore.overrides) { o in
+                                Label(o.label, systemImage: o.systemImage).tag(o.id)
                             }
                         }
                         .labelsHidden()

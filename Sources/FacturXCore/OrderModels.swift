@@ -107,6 +107,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
     public var notes: String?
     public var requestedResponseTypeCode: String
     public var companyID: UUID?
+    public var customStatusID: String?
 
     public init(
         id: UUID = UUID(),
@@ -128,7 +129,8 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         lines: [InvoiceLine] = [],
         notes: String? = nil,
         requestedResponseTypeCode: String = "AC",
-        companyID: UUID? = nil
+        companyID: UUID? = nil,
+        customStatusID: String? = nil
     ) {
         self.id = id
         self.number = number
@@ -150,12 +152,13 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         self.notes = notes
         self.requestedResponseTypeCode = requestedResponseTypeCode
         self.companyID = companyID
+        self.customStatusID = customStatusID
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, requestedDeliveryDate, currency, profile, buyer, seller
         case buyerReference, quotationRef, contractRef, blanketOrderRef, previousOrderChangeRef, previousOrderResponseRef
-        case lines, notes, requestedResponseTypeCode, companyID
+        case lines, notes, requestedResponseTypeCode, companyID, customStatusID
     }
 
     public init(from decoder: Decoder) throws {
@@ -179,6 +182,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         lines = try c.decodeIfPresent([InvoiceLine].self, forKey: .lines) ?? []
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         requestedResponseTypeCode = try c.decodeIfPresent(String.self, forKey: .requestedResponseTypeCode) ?? "AC"
+        customStatusID = try c.decodeIfPresent(String.self, forKey: .customStatusID)
         companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
     }
 
@@ -281,5 +285,13 @@ public final class OrderStatusStore: ObservableObject {
 
     public func override(for status: OrderStatus) -> OrderStatusOverride {
         overrides.first { $0.id == status.rawValue } ?? OrderStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
+    }
+
+    public func override(for order: SalesOrder) -> OrderStatusOverride {
+        if let cid = order.customStatusID,
+           let custom = overrides.first(where: { $0.id == cid }) {
+            return custom
+        }
+        return override(for: order.status)
     }
 }
