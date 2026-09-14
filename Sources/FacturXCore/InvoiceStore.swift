@@ -56,6 +56,11 @@ public final class InvoiceStore: ObservableObject {
                 p.endpointSchemeID = "0225"
             }
         }
+        if let contact = entry.defaultContact, contact.isActive {
+            p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+            p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+            p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+        }
         return p
     }
 

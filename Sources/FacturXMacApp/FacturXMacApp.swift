@@ -864,6 +864,11 @@ struct PartySection: View {
                         p.endpointSchemeID = "0225"
                     }
                 }
+                if let contact = selected.defaultContact, contact.isActive {
+                    p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+                    p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+                    p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+                }
                 party = p
                 onPartyPicked?(p)
                 showPicker = false
@@ -1200,6 +1205,34 @@ struct DirectoryDetailView: View {
     let onDelete: (DirectoryEntry) -> Void
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var showRoutingEditor = false
+    @State private var showContactEditor = false
+    @State private var editingContact: PartyContact?
+
+    private func routingBinding(entry: DirectoryEntry) -> Binding<[PartyRoutingAddress]> {
+        Binding(
+            get: { directory.entries.first(where: { $0.id == entry.id })?.routingAddresses ?? entry.routingAddresses },
+            set: { newValue in
+                if var e = directory.entries.first(where: { $0.id == entry.id }) {
+                    e.routingAddresses = newValue
+                    directory.upsert(e)
+                }
+            }
+        )
+    }
+
+    private func contactsBinding(entry: DirectoryEntry) -> Binding<[PartyContact]> {
+        Binding(
+            get: { directory.entries.first(where: { $0.id == entry.id })?.contacts ?? entry.contacts },
+            set: { newValue in
+                if var e = directory.entries.first(where: { $0.id == entry.id }) {
+                    e.contacts = newValue
+                    directory.upsert(e)
+                }
+            }
+        )
+    }
 
     var body: some View {
         if let entry = entry {
@@ -1291,7 +1324,15 @@ struct DirectoryDetailView: View {
                         }
 
                         Divider()
-                        Text("Contact(s)").font(.headline)
+                        HStack {
+                            Text("Contact(s)").font(.headline)
+                            Spacer()
+                            Button {
+                                editingContact = nil
+                                showContactEditor = true
+                            } label: { Label("Contacts", systemImage: "person.crop.circle.badge.plus") }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        }
                         if !entry.contacts.isEmpty {
                             ForEach(entry.contacts) { ct in
                                 HStack(alignment: .top) {
@@ -1326,9 +1367,16 @@ struct DirectoryDetailView: View {
                             if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
                         }
 
-                        if !entry.routingAddresses.isEmpty {
-                            Divider()
+                        Divider()
+                        HStack {
                             Text("Adresses de facturation électronique").font(.headline)
+                            Spacer()
+                            Button {
+                                showRoutingEditor = true
+                            } label: { Label("Adresses", systemImage: "envelope.badge") }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        }
+                        if !entry.routingAddresses.isEmpty {
                             ForEach(entry.routingAddresses) { addr in
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 3) {
@@ -1383,6 +1431,26 @@ struct DirectoryDetailView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .sheet(isPresented: $showRoutingEditor) {
+            if let e = entry {
+                RoutingAddressQuickEditor(
+                    siren: e.party.siren ?? "",
+                    addresses: routingBinding(entry: e)
+                )
+            }
+        }
+        .sheet(isPresented: $showContactEditor) {
+            if let e = entry {
+                if let ct = editingContact {
+                    ContactFormView(contacts: contactsBinding(entry: e), editing: ct)
+                } else {
+                    ContactFormView(contacts: contactsBinding(entry: e), editing: PartyContact())
+                }
+            }
+        }
+        .onChange(of: showContactEditor) { showing in
+            if !showing { editingContact = nil }
         }
     }
 
