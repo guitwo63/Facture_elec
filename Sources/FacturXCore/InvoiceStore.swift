@@ -6,11 +6,19 @@ public final class InvoiceStore: ObservableObject {
     @Published public var invoices: [Invoice]
     @Published public var myCompany: InvoiceParty
     public var defaultSellerEntryID: UUID?
+    @Published public var numberPrefix: String = ""
+    @Published public var numberIncludeYear: Bool = true
+    @Published public var numberStart: Int = 1
+    @Published public var numberUseSeparator: Bool = true
 
     private let defaults = UserDefaults.standard
     private let storageKey = "facturx.invoices.v1"
     private let companyKey = "facturx.mycompany.v1"
     private let sellerEntryKey = "facturx.defaultseller.entryid.v1"
+    private let numPrefixKey = "facturx.number.prefix.v1"
+    private let numYearKey = "facturx.number.includeyear.v1"
+    private let numStartKey = "facturx.number.start.v1"
+    private let numSepKey = "facturx.number.useseparator.v1"
 
     public init() {
         self.invoices = []
@@ -29,6 +37,10 @@ public final class InvoiceStore: ObservableObject {
             myCompany = decoded
         }
         defaultSellerEntryID = defaults.string(forKey: sellerEntryKey).flatMap { UUID(uuidString: $0) }
+        numberPrefix = defaults.string(forKey: numPrefixKey)
+        numberIncludeYear = defaults.object(forKey: numYearKey) as? Bool ?? true
+        numberStart = defaults.object(forKey: numStartKey) as? Int ?? 1
+        numberUseSeparator = defaults.object(forKey: numSepKey) as? Bool ?? true
     }
 
     public func save() {
@@ -43,6 +55,10 @@ public final class InvoiceStore: ObservableObject {
         } else {
             defaults.removeObject(forKey: sellerEntryKey)
         }
+        defaults.set(numberPrefix, forKey: numPrefixKey)
+        defaults.set(numberIncludeYear, forKey: numYearKey)
+        defaults.set(numberStart, forKey: numStartKey)
+        defaults.set(numberUseSeparator, forKey: numSepKey)
     }
 
     public func resolveDefaultSeller(from directory: PartyDirectory) -> InvoiceParty? {
@@ -113,11 +129,42 @@ public final class InvoiceStore: ObservableObject {
     }
 
     public func nextNumber(prefix: String = "") -> String {
-        let year = Calendar.current.component(.year, from: Date())
-        let key = "\(year)-\(prefix)"
-        let seq = invoices.filter { $0.number.hasPrefix(key) }.count + 1
-        let p = prefix.isEmpty ? "" : "\(prefix)"
-        return String(format: "%d-%@%04d", year, p, seq)
+        let sep = numberUseSeparator ? "-" : ""
+        let year = String(Calendar.current.component(.year, from: Date()))
+        var built: [String] = []
+        let textPrefix = prefix.isEmpty ? (numberPrefix.trimmingCharacters(in: .whitespaces)) : prefix.trimmingCharacters(in: .whitespaces)
+        if !textPrefix.isEmpty {
+            built.append(textPrefix)
+            built.append(sep)
+        }
+        if numberIncludeYear {
+            built.append(year)
+            built.append(sep)
+        }
+        let headKey = built.joined()
+        let paddedStart = max(1, numberStart)
+        let existing = invoices.filter { $0.number.hasPrefix(headKey) }.count
+        let seq = paddedStart + existing
+        let chrono = String(format: "%04d", seq)
+        return headKey + chrono
+    }
+
+    public func previewNextNumber(prefix: String = "") -> String {
+        let sep = numberUseSeparator ? "-" : ""
+        let year = String(Calendar.current.component(.year, from: Date()))
+        var built: [String] = []
+        let textPrefix = prefix.isEmpty ? (numberPrefix.trimmingCharacters(in: .whitespaces)) : prefix.trimmingCharacters(in: .whitespaces)
+        if !textPrefix.isEmpty {
+            built.append(textPrefix)
+            built.append(sep)
+        }
+        if numberIncludeYear {
+            built.append(year)
+            built.append(sep)
+        }
+        let headKey = built.joined()
+        let chrono = String(format: "%04d", max(1, numberStart))
+        return headKey + chrono
     }
 
 
