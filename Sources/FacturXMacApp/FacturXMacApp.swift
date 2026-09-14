@@ -416,7 +416,7 @@ struct ExportSheet: View {
             List(Array(filteredList.enumerated()), id: \.element.id) { _, item in
                 HStack {
                     Image(systemName: selectedIDs.contains(item.id) ? "checkmark.square.fill" : "square")
-                        .foregroundStyle(selectedIDs.contains(item.id) ? .accentColor : .secondary)
+                        .foregroundStyle(selectedIDs.contains(item.id) ? Color.accentColor : Color.secondary)
                         .onTapGesture {
                             if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
                             else { selectedIDs.insert(item.id) }
@@ -728,7 +728,7 @@ struct InvoicesTabView: View {
                                 Text(invoice.status.label).font(.caption2)
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
                                 Text(invoice.type == .creditNote ? "Avoir" : invoice.type.isInternalCreditNote ? "Avoir interne" : "Facture")
-                                    .font(.caption2).foregroundStyle(invoice.type.isCreditNote ? .orange : .accentColor)
+                                    .font(.caption2).foregroundStyle(invoice.type.isCreditNote ? Color.orange : Color.accentColor)
                                 Spacer()
                             }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
@@ -4102,7 +4102,7 @@ struct OrderEditorView: View {
                             ForEach(Array(linkedInvoices.enumerated()), id: \.element.id) { _, inv in
                                 HStack {
                                     Image(systemName: inv.type.isCreditNote ? "arrow.uturn.backward.circle" : "doc.text")
-                                        .foregroundStyle(inv.type.isCreditNote ? .orange : .accentColor)
+                                        .foregroundStyle(inv.type.isCreditNote ? Color.orange : Color.accentColor)
                                     VStack(alignment: .leading) {
                                         Text(inv.number).font(.headline)
                                         Text("\(inv.type == .creditNote ? "Avoir" : inv.type.isInternalCreditNote ? "Avoir interne" : "Facture") — \(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))")
