@@ -211,4 +211,43 @@ final class AuthTests: XCTestCase {
         let decoded2 = try JSONDecoder().decode(DirectoryEntry.self, from: data2)
         XCTAssertNil(decoded2.companyID)
     }
+
+    func testInvoiceNumberingIsPerCompany() {
+        let store = InvoiceStore()
+        store.invoices = []
+        store.numberPrefix = "FAC"
+        store.numberIncludeYear = true
+        store.numberStart = 1
+        store.numberUseSeparator = true
+
+        let companyA = UUID()
+        let companyB = UUID()
+
+        // Aucune facture: chaque société démarre à 0001
+        XCTAssertEqual(String(store.nextNumber(companyID: companyA).suffix(4)), "0001")
+        XCTAssertEqual(String(store.nextNumber(companyID: companyB).suffix(4)), "0001")
+
+        // On crée une facture pour la société A
+        let invA1 = Invoice(number: store.nextNumber(companyID: companyA),
+                            seller: InvoiceParty(name: "A", street: "", postcode: "", city: ""),
+                            buyer: InvoiceParty(name: "B", street: "", postcode: "", city: ""),
+                            companyID: companyA)
+        store.invoices.append(invA1)
+
+        // A doit passer à 0002, B reste à 0001
+        XCTAssertEqual(String(store.nextNumber(companyID: companyA).suffix(4)), "0002")
+        XCTAssertEqual(String(store.nextNumber(companyID: companyB).suffix(4)), "0001")
+
+        // Une facture pour B
+        let invB1 = Invoice(number: store.nextNumber(companyID: companyB),
+                            seller: InvoiceParty(name: "A", street: "", postcode: "", city: ""),
+                            buyer: InvoiceParty(name: "B", street: "", postcode: "", city: ""),
+                            companyID: companyB)
+        store.invoices.append(invB1)
+        XCTAssertEqual(String(store.nextNumber(companyID: companyB).suffix(4)), "0002")
+        XCTAssertEqual(String(store.nextNumber(companyID: companyA).suffix(4)), "0002")
+
+        // Le chrono sans société est distinct (companyID nil)
+        XCTAssertEqual(String(store.nextNumber(companyID: nil).suffix(4)), "0001")
+    }
 }
