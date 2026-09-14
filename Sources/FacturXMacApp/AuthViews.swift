@@ -155,9 +155,19 @@ struct UserManagementView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @State private var selectedUserID: UUID?
-    @State private var selectedEntryID: UUID?
     @State private var editingUser: User?
     @State private var creatingUser = false
+    @State private var searchQuery = ""
+
+    private var filteredUsers: [User] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return auth.users }
+        return auth.users.filter {
+            $0.username.lowercased().contains(q) ||
+            $0.effectiveDisplayName.lowercased().contains(q) ||
+            $0.rolesLabel.lowercased().contains(q)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -165,13 +175,14 @@ struct UserManagementView: View {
                 HStack {
                     Text("Gestion utilisateurs").font(.headline)
                     Spacer()
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Rechercher un utilisateur", text: $searchQuery)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 240)
+                    }
                 }
-                HStack(alignment: .top, spacing: 16) {
-                    usersSection
-                        .frame(maxWidth: .infinity)
-                    companiesSection
-                        .frame(maxWidth: .infinity)
-                }
+                usersSection
             }
             .padding(12)
             Divider()
@@ -179,23 +190,20 @@ struct UserManagementView: View {
                 UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
                                onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw, forceChange: true) })
                     .padding(12)
-            } else if let id = selectedEntryID, let entry = directory.entries.first(where: { $0.id == id }) {
-                CompanyDetailCard(entry: entry)
-                    .padding(12)
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "person.badge.shield.checkmark").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("Sélectionnez un utilisateur ou une société.").foregroundStyle(.secondary)
+                    Text("Sélectionnez un utilisateur.").foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Spacer()
         }
         .sheet(isPresented: $creatingUser) {
-            UserEditorSheet { username, displayName, password, role, societyIDs, defaultSeller in
+            UserEditorSheet { username, displayName, password, roles, societyIDs, defaultSeller in
                 do {
                     _ = try auth.createUser(username: username, password: password,
-                                            displayName: displayName, role: role, societyIDs: societyIDs,
+                                            displayName: displayName, roles: roles, societyIDs: societyIDs,
                                             defaultSellerEntryID: defaultSeller)
                 } catch {
                     return
@@ -204,11 +212,11 @@ struct UserManagementView: View {
             }
         }
         .sheet(item: $editingUser) { user in
-            UserEditorSheet(existing: user) { username, displayName, password, role, societyIDs, defaultSeller in
+            UserEditorSheet(existing: user) { username, displayName, password, roles, societyIDs, defaultSeller in
                 var updated = user
                 updated.username = username
                 updated.displayName = displayName
-                updated.role = role
+                updated.roles = roles
                 updated.societyIDs = societyIDs
                 updated.defaultSellerEntryID = defaultSeller
                 auth.upsert(updated)
@@ -228,18 +236,19 @@ struct UserManagementView: View {
                 Button { creatingUser = true } label: { Label("Nouveau", systemImage: "plus") }
                     .buttonStyle(.bordered)
             }
-            List(auth.users, selection: Binding(
+            List(filteredUsers, selection: Binding(
                 get: { selectedUserID },
-                set: { selectedUserID = $0; selectedEntryID = nil }
+                set: { selectedUserID = $0 }
             )) { user in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(user.effectiveDisplayName).font(.body.weight(.medium))
                         Text("@\(user.username)").font(.caption2).foregroundStyle(.secondary)
                         HStack(spacing: 6) {
-                            Text(user.role.label).font(.caption2)
+                            Text(user.rolesLabel).font(.caption2)
                                 .padding(.horizontal, 6).padding(.vertical, 1)
-                                .background(.quaternary, in: Capsule())
+                                .background(roleColor(user.role).opacity(0.18), in: Capsule())
+                                .foregroundStyle(roleColor(user.role))
                             Text("\(user.societyIDs.count) société(s)").font(.caption2).foregroundStyle(.secondary)
                             if !user.isActive {
                                 Text("Désactivé").font(.caption2).foregroundStyle(.red)
@@ -256,7 +265,7 @@ struct UserManagementView: View {
                         var u = user; u.isActive.toggle(); auth.upsert(u)
                     } label: { Label(user.isActive ? "Désactiver" : "Activer",
                                     systemImage: user.isActive ? "minus.circle" : "checkmark.circle") }
-                    if user.role != .admin || auth.users.filter({ $0.role == .admin }).count > 1 {
+                    if !user.isAdmin || auth.users.filter({ $0.isAdmin }).count > 1 {
                         Divider()
                         Button(role: .destructive) {
                             auth.delete(user)
@@ -269,36 +278,12 @@ struct UserManagementView: View {
         }
     }
 
-    private var companiesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Sociétés (annuaire)").font(.headline)
-                Spacer()
-                Text("Fournisseurs de l'annuaire").font(.caption2).foregroundStyle(.secondary)
-            }
-            List(availableSocieties, selection: Binding(
-                get: { selectedEntryID },
-                set: { selectedEntryID = $0; selectedUserID = nil }
-            )) { entry in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.displayName).font(.body.weight(.medium))
-                    if let s = entry.party.siren, !s.isEmpty {
-                        Text("SIREN : \(s)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Text("\(auth.users.filter { $0.societyIDs.contains(entry.id) }.count) utilisateur(s)")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-            .frame(minHeight: 240)
-            if availableSocieties.isEmpty {
-                Text("Aucune société. Créez une fiche fournisseur dans l'onglet Annuaire pour la proposer comme périmètre.")
-                    .font(.caption).foregroundStyle(.secondary).padding(.top, 4)
-            }
+    private func roleColor(_ role: UserRole) -> Color {
+        switch role {
+        case .admin: return .red
+        case .comptable: return .blue
+        case .acheteur: return .green
         }
-    }
-
-    private var availableSocieties: [DirectoryEntry] {
-        directory.entries.filter { !$0.isArchived && ($0.kind == .fournisseur || $0.kind == .both) }
     }
 }
 
@@ -313,14 +298,29 @@ struct UserDetailCard: View {
         GroupBox("Utilisateur : \(user.effectiveDisplayName)") {
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("Identifiant") { Text("@\(user.username)") }
-                LabeledContent("Rôle") { Text(user.role.label) }
+                LabeledContent("Profils") { Text(user.rolesLabel) }
                 LabeledContent("Statut") {
-                    Text(user.isActive ? "Actif" : "Désactivé")
-                        .foregroundStyle(user.isActive ? .green : .red)
+                    HStack(spacing: 8) {
+                        Toggle(isOn: Binding(
+                            get: { user.isActive },
+                            set: { active in
+                                var u = user
+                                u.isActive = active
+                                onChange(u)
+                            }
+                        )) {
+                            Text(user.isActive ? "Actif" : "Désactivé")
+                                .foregroundStyle(user.isActive ? .green : .red)
+                        }
+                        .toggleStyle(.switch)
+                        if !user.isActive {
+                            Text("connexion bloquée").font(.caption).foregroundStyle(.red)
+                        }
+                    }
                 }
                 Divider()
                 Text("Sociétés du périmètre").font(.headline)
-                if user.role == .admin {
+                if user.isAdmin {
                     Text("L'administrateur accède à toutes les sociétés.").font(.caption).foregroundStyle(.secondary)
                 } else if auth.availableSocieties().isEmpty {
                     Text("Aucune société (fiche fournisseur) définie dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
@@ -392,7 +392,7 @@ struct CompanyDetailCard: View {
 
 struct UserEditorSheet: View {
     var existing: User?
-    let onSave: (String, String, String, UserRole, [UUID], UUID?) -> Void
+    let onSave: (String, String, String, [UserRole], [UUID], UUID?) -> Void
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @Environment(\.dismiss) private var dismiss
@@ -400,7 +400,7 @@ struct UserEditorSheet: View {
     @State private var username = ""
     @State private var displayName = ""
     @State private var password = ""
-    @State private var role: UserRole = .comptable
+    @State private var selectedRoles: Set<UserRole> = [.comptable]
     @State private var societyIDs: Set<UUID> = []
     @State private var defaultSellerEntryID: UUID? = nil
 
@@ -429,12 +429,23 @@ struct UserEditorSheet: View {
                     SecureField("mot de passe", text: $password).textFieldStyle(.roundedBorder)
                 }
                 HStack {
-                    Text("Rôle").frame(width: 140, alignment: .leading)
-                    Picker("Rôle", selection: $role) {
-                        ForEach(UserRole.allCases, id: \.self) { r in Text(r.label).tag(r) }
-                    }.pickerStyle(.segmented).frame(width: 300)
+                    Text("Profils").frame(width: 140, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(UserRole.allCases, id: \.self) { r in
+                            Toggle(isOn: Binding(
+                                get: { selectedRoles.contains(r) },
+                                set: { checked in
+                                    if checked { selectedRoles.insert(r) }
+                                    else if selectedRoles.count > 1 { selectedRoles.remove(r) }
+                                }
+                            )) {
+                                Text(r.label)
+                            }
+                            .toggleStyle(.checkbox)
+                        }
+                    }
                 }
-                if role == .comptable || role == .acheteur {
+                if selectedRoles.contains(.comptable) || selectedRoles.contains(.acheteur) {
                     Divider()
                     Text("Sociétés du périmètre (fiches fournisseurs de l'annuaire)").font(.headline)
                     if availableSocieties.isEmpty {
@@ -484,7 +495,8 @@ struct UserEditorSheet: View {
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, role, Array(societyIDs), defaultSellerEntryID)
+                    let ordered = UserRole.allCases.filter { selectedRoles.contains($0) }
+                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, ordered, Array(societyIDs), defaultSellerEntryID)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -497,7 +509,7 @@ struct UserEditorSheet: View {
             if let u = existing {
                 username = u.username
                 displayName = u.displayName
-                role = u.role
+                selectedRoles = Set(u.roles)
                 societyIDs = Set(u.societyIDs)
                 defaultSellerEntryID = u.defaultSellerEntryID
             }
@@ -522,7 +534,7 @@ struct UserEditorSheet: View {
         let trimmed = username.trimmingCharacters(in: .whitespaces)
         let nameOK = EmailValidator.isValid(trimmed)
         let pwOK = existing != nil || !password.isEmpty
-        let scopeOK = role == .admin || !societyIDs.isEmpty
+        let scopeOK = selectedRoles.contains(.admin) || !societyIDs.isEmpty
         let noDup = validationError == nil
         return nameOK && pwOK && scopeOK && noDup
     }
@@ -556,7 +568,7 @@ struct ProfileSettingsView: View {
                                     .padding(.horizontal, 6).padding(.vertical, 1)
                                     .background(.quaternary, in: Capsule())
                             }
-                            if user.role == .comptable || user.role == .acheteur, !user.societyIDs.isEmpty {
+                            if user.hasRole(.comptable) || user.hasRole(.acheteur), !user.societyIDs.isEmpty {
                                 Divider()
                                 Text("Sociétés du périmètre").font(.caption.bold())
                                 ForEach(auth.visibleSocieties(for: user)) { s in

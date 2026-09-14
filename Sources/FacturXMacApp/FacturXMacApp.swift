@@ -115,6 +115,12 @@ struct FacturXMacApp: App {
                 .onAppear {
                     auth.attachDirectory(directory)
                     auth.testBypassSecurity = true
+                    store.audit = AuditStore.shared
+                    orderStore.audit = AuditStore.shared
+                    directory.audit = AuditStore.shared
+                    store.actorName = auth.currentUser?.username ?? "system"
+                    orderStore.actorName = auth.currentUser?.username ?? "system"
+                    directory.actorName = auth.currentUser?.username ?? "system"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -158,9 +164,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum RootTab: String, CaseIterable, Identifiable {
-    case invoices = "Factures"
-    case orders = "Commandes"
     case directory = "Annuaire"
+    case orders = "Commandes"
+    case invoices = "Factures"
     var id: String { rawValue }
 
     static func visible(for role: UserRole?) -> [RootTab] {
@@ -220,7 +226,7 @@ struct RootView: View {
                         .help("Se déconnecter")
                     }
                 }
-                if auth.currentUser?.role == .admin {
+                if auth.currentUser?.isAdmin == true {
                     Button {
                         showUserManagement = true
                     } label: {
@@ -309,13 +315,26 @@ struct RootView: View {
             if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur).contains(tab) {
                 tab = .orders
             }
+            syncAuditActor()
         }
+        .onChange(of: auth.currentUser) { _ in syncAuditActor() }
+    }
+
+    private func syncAuditActor() {
+        let name = auth.currentUser?.username ?? "system"
+        store.actorName = name
+        orderStore.actorName = name
+        PartyDirectory.shared.actorName = name
     }
 
     private func defaultDraftCompanyID() -> UUID? {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
-        return nil
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
     }
 }
 
@@ -614,6 +633,121 @@ struct OrderToInvoiceSheet: View {
     }
 }
 
+struct InvoicePickerSheet: View {
+    let invoices: [Invoice]
+    let selectedID: UUID?
+    let onPick: (Invoice) -> Void
+    let onClear: () -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var companyFilter: UUID?
+    @State private var localSelectedID: UUID?
+
+    private var companies: [DirectoryEntry] {
+        let dir = PartyDirectory.shared
+        let ids = Set(invoices.compactMap { $0.companyID })
+        return dir.entries.filter { ids.contains($0.id) }.sorted { $0.party.name < $1.party.name }
+    }
+
+    private var filtered: [Invoice] {
+        var result = invoices
+        if let cid = companyFilter {
+            result = result.filter { $0.companyID == cid }
+        }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return result.sorted { $0.issueDate > $1.issueDate } }
+        return result.filter { inv in
+            inv.number.lowercased().contains(q)
+                || inv.seller.name.lowercased().contains(q)
+                || inv.buyer.name.lowercased().contains(q)
+                || (inv.buyer.siren ?? "").lowercased().contains(q)
+        }.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sélectionner la facture antérieure").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, client, SIREN…)", text: $query)
+                    .textFieldStyle(.plain)
+                if !companies.isEmpty {
+                    Picker("Société", selection: $companyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(companies) { c in
+                            Text(c.party.name.isEmpty ? "Sans nom" : c.party.name).tag(Optional(c.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 200)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filtered.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucune facture disponible dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(filtered) { inv in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(inv.number).font(.headline)
+                                if (localSelectedID ?? selectedID) == inv.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Color.accentColor)
+                                        .font(.caption)
+                                }
+                            }
+                            Text("\(inv.seller.name.isEmpty ? "Sans émetteur" : inv.seller.name) → \(inv.buyer.name.isEmpty ? "Sans client" : inv.buyer.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(inv.issueDate, format: .dateTime.day().month().year())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { localSelectedID = inv.id }
+                    .background((localSelectedID ?? selectedID) == inv.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Effacer", role: .destructive, action: onClear)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Sélectionner") {
+                    let id = localSelectedID ?? selectedID
+                    if let picked = filtered.first(where: { $0.id == id }) {
+                        onPick(picked)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(localSelectedID == nil && selectedID == nil)
+            }
+            .padding(12)
+        }
+        .frame(width: 620, height: 460)
+        .onAppear {
+            localSelectedID = selectedID
+            companyFilter = nil
+        }
+    }
+}
+
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
@@ -738,6 +872,11 @@ struct InvoicesTabView: View {
                         }
                         .contextMenu {
                             Button {
+                                let copy = store.duplicate(from: invoice)
+                                store.upsert(copy)
+                                selectedID = copy.id
+                            } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                            Button {
                                 let credit = store.newCreditNote(from: invoice)
                                 store.upsert(credit)
                                 selectedID = credit.id
@@ -827,7 +966,11 @@ struct InvoicesTabView: View {
     private func defaultCompanyID() -> UUID? {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
-        return nil
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
     }
 }
 
@@ -837,10 +980,13 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var auth: AuthStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
+    @State private var duplicatedNumber: String?
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
     @State private var isLocked = false
     @State private var showUnlockAlert = false
+    @State private var showPrecedingInvoicePicker = false
+    @State private var showMandatoryDetails = false
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -859,6 +1005,18 @@ struct InvoiceEditorView: View {
             !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && $0.quantity > 0 && $0.unitPrice >= 0
         }
         return !(sellerOk && buyerOk && headerOk && linesOk)
+    }
+
+    private var errorRuleIDs: Set<String> {
+        guard let v = validation, showValidation else { return [] }
+        return Set(v.businessRules.filter { $0.severity == .error }.map { $0.ruleId })
+    }
+
+    private func fieldHighlight<V: View>(_ view: V, forRuleIDs ids: [String]) -> some View {
+        view.overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.red, lineWidth: ids.contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0)
+        )
     }
 
     var body: some View {
@@ -886,6 +1044,13 @@ struct InvoiceEditorView: View {
                     .buttonStyle(.bordered)
                     .help("Protéger la facture validée en lecture seule")
                 }
+                Button {
+                    let copy = store.duplicate(from: invoice)
+                    store.upsert(copy)
+                    duplicatedNumber = copy.number
+                } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                    .buttonStyle(.bordered)
+                    .disabled(isLocked)
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(isLocked)
@@ -901,8 +1066,8 @@ struct InvoiceEditorView: View {
             }
             .padding(12)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || duplicatedNumber != nil {
+                VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
                         .onChange(of: invoice.number) { _ in exportError = nil }
@@ -916,26 +1081,35 @@ struct InvoiceEditorView: View {
                         .onChange(of: invoice.seller.name) { _ in exportedURL = nil }
                         .onChange(of: invoice.buyer.name) { _ in exportedURL = nil }
                 }
+                if let n = duplicatedNumber {
+                    Text("Facture dupliquée : \(n) (disponible dans la liste)").font(.caption).foregroundStyle(.green)
+                        .onChange(of: invoice.number) { _ in duplicatedNumber = nil }
+                }
 
                 if hasMandatoryWarnings {
-                    GroupBox {
+                    DisclosureGroup(isExpanded: $showMandatoryDetails) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("Données obligatoires pour la conformité Factur-X", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption.bold())
-                                .foregroundStyle(.orange)
                             Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-49/34), n° TVA si applicable.").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
                             Text("En-tête : numéro de facture, date, échéance, devise (EUR), mode de facturation (BT-23).").font(.caption)
                             Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
                             Text("Paiement : IBAN et BIC si virement SEPA.").font(.caption)
-                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } label: {
+                        Label("Données obligatoires pour la conformité Factur-X", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     }
                 }
 
                 if showValidation, let v = validation {
                     validationPanel(v)
                 }
-
+                }.padding(12)
+                Divider()
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         if !linkedCreditNotes.isEmpty {
@@ -955,7 +1129,7 @@ struct InvoiceEditorView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     LabeledContent {
-                                        TextField("", text: $invoice.number).frame(width: 160)
+                                        fieldHighlight(TextField("", text: $invoice.number).frame(width: 160), forRuleIDs: ["BR-1"])
                                     } label: {
                                         HStack(spacing: 3) {
                                             Text("Numéro *").foregroundColor(.red)
@@ -983,25 +1157,71 @@ struct InvoiceEditorView: View {
                                     TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
                                     InfoBadge(text: "BT-13 — Référence de la commande acheteur. Remontée en haut de la facture.")
                                 }
-                                if invoice.type == .creditNote || invoice.type.isInternalCreditNote {
+                                if invoice.type.requiresPrecedingInvoice || invoice.type == .internalCreditNote {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Référence et date de la facture liée :").font(.caption.bold())
-                                        HStack(spacing: 3) {
-                                            TextField("N° facture liée", text: Binding($invoice.precedingInvoiceRef, replacingNilWith: "")).frame(width: 160)
-                                            InfoBadge(text: "BT-25 — Numéro de la facture antérieure référencée par cet avoir. Obligatoire pour un avoir (BR-FR-CO-05).")
-                                            DatePicker("Date facture liée", selection: Binding(
-                                                get: { invoice.precedingInvoiceDate ?? Date() },
-                                                set: { invoice.precedingInvoiceDate = $0 }
-                                            ), displayedComponents: .date)
-                                            InfoBadge(text: "BT-26 — Date d'émission de la facture antérieure référencée.")
+                                        Text("Facture antérieure référencée :").font(.caption.bold())
+                                        HStack(spacing: 6) {
+                                            Button {
+                                                showPrecedingInvoicePicker = true
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    Image(systemName: "doc.text.magnifyingglass")
+                                                    VStack(alignment: .leading, spacing: 1) {
+                                                        let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces)
+                                                        if !ref.isEmpty {
+                                                            Text(ref).font(.caption.bold())
+                                                            if let d = invoice.precedingInvoiceDate {
+                                                                Text("Date : \(d, format: .dateTime.day().month().year())")
+                                                                    .font(.caption2).foregroundStyle(.secondary)
+                                                            } else {
+                                                                Text("Date : non renseignée")
+                                                                    .font(.caption2).foregroundStyle(.orange)
+                                                            }
+                                                        } else {
+                                                            Text("Sélectionner une facture…").foregroundStyle(.secondary)
+                                                        }
+                                                    }
+                                                    Spacer()
+                                                    Image(systemName: "chevron.right")
+                                                        .font(.caption2).foregroundStyle(.secondary)
+                                                }
+                                                .frame(maxWidth: 360, alignment: .leading)
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .overlay(RoundedRectangle(cornerRadius: 4)
+                                                .stroke(Color.red, lineWidth: errorRuleIDs.contains("BR-FR-CO-05") ? 1.5 : 0))
+                                            if linkableInvoices.isEmpty {
+                                                Text("Aucune facture disponible").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                            if (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces) != "" {
+                                                Button {
+                                                    invoice.precedingInvoiceRef = nil
+                                                    invoice.precedingInvoiceDate = nil
+                                                } label: {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                .buttonStyle(.borderless)
+                                                .help("Effacer la référence")
+                                            }
+                                            InfoBadge(text: "BT-25/BT-26 — Numéro et date de la facture antérieure référencée. Sélection dans les factures du périmètre (hors avoirs).")
                                         }
+                                    }
+                                }
+                                if invoice.type.isDeposit || invoice.type.isFinalSettlement {
+                                    HStack(spacing: 3) {
+                                        Text("Acompte déjà payé").font(.caption)
+                                        TextField("0,00", value: $invoice.prepaidAmount, format: .number)
+                                            .frame(width: 120).textFieldStyle(.roundedBorder)
+                                        Text(invoice.currency).font(.caption).foregroundStyle(.secondary)
+                                        InfoBadge(text: "BT-105 — Montant des acomptes déjà payés (PrepaidAmount). Sert au calcul du net à payer sur une facture de solde.")
                                     }
                                 }
                                 HStack {
                                     Picker("Profil Factur-X", selection: $invoice.profile) {
                                         ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                                     }
-                                    NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160)
+                                    fieldHighlight(NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160), forRuleIDs: ["BR-5"])
                                     TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
                                 }
                                 HStack {
@@ -1041,6 +1261,10 @@ struct InvoiceEditorView: View {
                                     row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
                                 }
                                 row("Total TTC", invoice.grandTotal, bold: true)
+                                if invoice.prepaidAmount > 0 {
+                                    row("Acompte déjà payé", -invoice.prepaidAmount)
+                                    row("Net à payer", invoice.netToPay, bold: true)
+                                }
                             }
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
@@ -1056,9 +1280,13 @@ struct InvoiceEditorView: View {
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
                         })
                     }.lockable(isLocked)
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
                         PartySection(party: $invoice.buyer, role: .buyer)
                     }.lockable(isLocked)
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.red, lineWidth: ["BR-25", "BR-26", "BR-46"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                 }
 
                 GroupBox("Lignes") {
@@ -1066,7 +1294,7 @@ struct InvoiceEditorView: View {
                         ForEach($invoice.lines) { $line in
                             HStack {
                                 HStack(spacing: 2) {
-                                    TextField("Désignation *", text: $line.name).frame(minWidth: 220)
+                                    fieldHighlight(TextField("Désignation *", text: $line.name).frame(minWidth: 220), forRuleIDs: ["BR-21"])
                                     InfoBadge(text: "BT-153 — Désignation de la ligne. Obligatoire.")
                                 }
                                 HStack(spacing: 2) {
@@ -1075,7 +1303,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-132 — Référence de commande liée à la ligne.")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("Qté", value: $line.quantity, format: .number)
+                                    fieldHighlight(DoubleField("Qté", value: $line.quantity, format: .number), forRuleIDs: ["BR-16"])
                                     InfoBadge(text: "BT-149 — Quantité. Doit être positive (facture) ou négative (avoir).")
                                 }
                                 HStack(spacing: 2) {
@@ -1083,7 +1311,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-150 — Unité de mesure (UN/ECE Rec 20).")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
+                                    fieldHighlight(DoubleField("P.U. HT", value: $line.unitPrice, format: .number), forRuleIDs: ["BR-17"])
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
@@ -1138,6 +1366,25 @@ struct InvoiceEditorView: View {
             } message: {
                 Text("La facture était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout dépôt PDP.")
             }
+            .sheet(isPresented: $showPrecedingInvoicePicker) {
+                InvoicePickerSheet(
+                    invoices: linkableInvoices,
+                    selectedID: invoice.precedingInvoiceRef.flatMap { ref in
+                        linkableInvoices.first(where: { $0.number == ref })?.id
+                    },
+                    onPick: { inv in
+                        invoice.precedingInvoiceRef = inv.number
+                        invoice.precedingInvoiceDate = inv.issueDate
+                        showPrecedingInvoicePicker = false
+                    },
+                    onClear: {
+                        invoice.precedingInvoiceRef = nil
+                        invoice.precedingInvoiceDate = nil
+                        showPrecedingInvoicePicker = false
+                    },
+                    onCancel: { showPrecedingInvoicePicker = false }
+                )
+            }
         }
     }
 
@@ -1185,6 +1432,19 @@ struct InvoiceEditorView: View {
             if scope != nil && inv.companyID == nil { return false }
             return true
         }
+    }
+
+    private var linkableInvoices: [Invoice] {
+        let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
+        var result = store.invoices.filter { inv in
+            guard !inv.type.isCreditNote else { return false }
+            guard inv.id != invoice.id else { return false }
+            if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
+            if scope != nil && inv.companyID == nil { return false }
+            return true
+        }
+        result.sort { $0.issueDate > $1.issueDate }
+        return result
     }
 
     private func export() {
@@ -1272,14 +1532,16 @@ struct InvoiceEditorView: View {
     }
 
     private func validationPanel(_ v: FacturXValidationResult) -> some View {
-        GroupBox {
+        let ruleErrors = v.businessRules.filter { $0.severity == .error }
+        let ruleWarnings = v.businessRules.filter { $0.severity == .warning }
+        return GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     if v.isValid {
                         Label("Conforme", systemImage: "checkmark.seal.fill")
                             .foregroundStyle(.green)
                     } else {
-                        Label("Non conforme — \(v.errors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                        Label("Non conforme — \(ruleErrors.count) erreur(s)", systemImage: "xmark.seal.fill")
                             .foregroundStyle(.red)
                     }
                     Spacer()
@@ -1300,30 +1562,32 @@ struct InvoiceEditorView: View {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
                 }
-                if !v.errors.isEmpty {
+                if !ruleErrors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
-                    ForEach(v.errors, id: \.self) { e in
-                        Text("• \(e)").font(.caption).foregroundStyle(.red)
-                    }
-                }
-                if !v.warnings.isEmpty {
-                    Text("Avertissements :").font(.caption.bold())
-                    ForEach(v.warnings, id: \.self) { w in
-                        Text("• \(w)").font(.caption).foregroundStyle(.orange)
-                    }
-                }
-                if !v.businessRules.isEmpty {
-                    Divider().padding(.vertical, 2)
-                    Text("Règles métier EN 16931 :").font(.caption.bold())
-                    ForEach(v.businessRules) { br in
+                    ForEach(ruleErrors) { br in
                         HStack(alignment: .top, spacing: 4) {
                             Text(br.ruleId)
                                 .font(.caption.bold().monospaced())
-                                .foregroundStyle(br.severity == .error ? .red : .orange)
-                                .frame(width: 84, alignment: .leading)
+                                .foregroundStyle(.red)
+                                .frame(width: 96, alignment: .leading)
                             Text(br.message)
                                 .font(.caption)
-                                .foregroundStyle(br.severity == .error ? .red : .orange)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                if !ruleWarnings.isEmpty {
+                    if !ruleErrors.isEmpty { Divider().padding(.vertical, 2) }
+                    Text("Avertissements :").font(.caption.bold())
+                    ForEach(ruleWarnings) { br in
+                        HStack(alignment: .top, spacing: 4) {
+                            Text(br.ruleId)
+                                .font(.caption.bold().monospaced())
+                                .foregroundStyle(.orange)
+                                .frame(width: 96, alignment: .leading)
+                            Text(br.message)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
                         }
                     }
                 }
@@ -1500,7 +1764,7 @@ struct PartyPickerSheet: View {
     }
 
     private var canCreateNew: Bool {
-        if role == .seller { return auth.currentUser?.role == .admin }
+        if role == .seller { return auth.currentUser?.isAdmin == true }
         return true
     }
 
@@ -1720,7 +1984,7 @@ struct DirectoryView: View {
 
     private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
 
-    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -2256,7 +2520,7 @@ struct DirectoryEditorView: View {
         return isEditing ? "Modifier : \(entry.party.name)" : "Nouveau tiers : \(entry.party.name)"
     }
 
-    private var canManageFournisseurs: Bool { auth.currentUser?.role == .admin }
+    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
 
     private var availableKinds: [DirectoryEntryKind] {
         if canManageFournisseurs { return DirectoryEntryKind.allCases }
@@ -2666,8 +2930,8 @@ struct SettingsTabView: View {
         VStack(spacing: 0) {
             Picker("", selection: $settingsTab) {
                 Text("Profil").tag(0)
-                if auth.currentUser?.role == .admin {
-                    Text("Commandes").tag(1)
+                if auth.currentUser?.isAdmin == true {
+                    Text("Tables").tag(1)
                     Text("Application").tag(2)
                     Text("Journal").tag(3)
                 }
@@ -2679,7 +2943,7 @@ struct SettingsTabView: View {
             case 0:
                 ProfileSettingsView()
             case 1:
-                OrderStatusSettingsView()
+                ValueTablesView()
             case 3:
                 AuditLogView()
             default:
@@ -3002,6 +3266,489 @@ struct ApplicationSettingsView: View {
     }
 }
 
+// MARK: - Tables de valeurs paramétrées
+
+extension DirectoryEntryKind: Identifiable {
+    public var id: String { rawValue }
+}
+
+enum ValueTable: String, CaseIterable, Identifiable {
+    case orderStatuses
+    case tags
+    case kindColors
+    case currencies
+    case units
+    case countries
+    case endpointSchemes
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .orderStatuses: return "Statuts des commandes"
+        case .tags: return "Tags des tiers"
+        case .kindColors: return "Couleurs des types de tiers"
+        case .currencies: return "Devises"
+        case .units: return "Unités"
+        case .countries: return "Pays"
+        case .endpointSchemes: return "Schémas d'identifiant"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .orderStatuses: return "list.bullet.rectangle"
+        case .tags: return "tag"
+        case .kindColors: return "paintpalette"
+        case .currencies: return "dollarsign.circle"
+        case .units: return "ruler"
+        case .countries: return "globe"
+        case .endpointSchemes: return "number"
+        }
+    }
+
+    var isEditable: Bool {
+        switch self {
+        case .orderStatuses, .tags, .kindColors: return true
+        default: return false
+        }
+    }
+}
+
+struct ValueTablesView: View {
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColors: KindColorStore
+    @State private var selectedTable: ValueTable = .orderStatuses
+    @State private var searchQuery = ""
+    @State private var editingStatus: OrderStatusOverride?
+    @State private var editingTag: PartyTag?
+    @State private var editingKind: DirectoryEntryKind?
+    @State private var newTagName = ""
+    @State private var newTagHex = "555555"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Filtrer les tables et les valeurs", text: $searchQuery)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(10)
+            Divider()
+            HStack(alignment: .top, spacing: 0) {
+                tablesList
+                    .frame(width: 220)
+                Divider()
+                valuesPanel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .sheet(item: $editingStatus) { override in
+            OrderStatusEditorSheet(override: override) { updated in
+                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    statusStore.overrides[i] = updated
+                    statusStore.save()
+                }
+            }
+        }
+        .sheet(item: $editingTag) { tag in
+            TagEditorSheet(tag: tag) { updated in tagStore.upsert(updated) }
+        }
+        .sheet(item: $editingKind) { kind in
+            KindColorEditorSheet(kind: kind, hex: kindColors.hexColor(for: kind)) { newHex in
+                kindColors.colors[kind] = newHex
+                kindColors.save()
+            }
+        }
+    }
+
+    private var filteredTables: [ValueTable] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return ValueTable.allCases }
+        return ValueTable.allCases.filter { $0.label.lowercased().contains(q) }
+    }
+
+    private var tablesList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(filteredTables) { table in
+                    Button {
+                        selectedTable = table
+                    } label: {
+                        HStack {
+                            Image(systemName: table.systemImage)
+                                .foregroundStyle(selectedTable == table ? Color.accentColor : .secondary)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(table.label).font(.body.weight(selectedTable == table ? .semibold : .regular))
+                                Text(table.isEditable ? "modifiable" : "lecture seule")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            if selectedTable == table {
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(selectedTable == table ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    @ViewBuilder
+    private var valuesPanel: some View {
+        switch selectedTable {
+        case .orderStatuses: orderStatusesPanel
+        case .tags: tagsPanel
+        case .kindColors: kindColorsPanel
+        case .currencies: refPanel(NormRefs.currencies)
+        case .units: refPanel(NormRefs.units)
+        case .countries: refPanel(NormRefs.countries)
+        case .endpointSchemes: refPanel(NormRefs.endpointSchemes)
+        }
+    }
+
+    private var orderStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des commandes").font(.title3.bold())
+                Spacer()
+                Button {
+                    let id = "custom-\(UUID().uuidString.prefix(8))"
+                    statusStore.append(OrderStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
+                } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredStatuses) { override in
+                        HStack(spacing: 10) {
+                            Image(systemName: override.systemImage)
+                                .frame(width: 22)
+                                .foregroundStyle(Color(hex: override.hexColor))
+                            Text(override.label).font(.body)
+                            Text(override.systemImage).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                editingStatus = override
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce statut")
+                            Button(role: .destructive) {
+                                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                                    statusStore.remove(at: i)
+                                }
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer ce statut")
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.06)))
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private var filteredStatuses: [OrderStatusOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return statusStore.overrides }
+        return statusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    private var tagsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Tags des tiers").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredTags) { tag in
+                        HStack(spacing: 10) {
+                            Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
+                            Text(tag.name).font(.body)
+                            Spacer()
+                            Button {
+                                editingTag = tag
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce tag")
+                            Button(role: .destructive) {
+                                tagStore.delete(tag)
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer ce tag")
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.06)))
+                    }
+                    Divider().padding(.vertical, 6)
+                    Text("Ajouter un tag").font(.caption.bold())
+                    HStack {
+                        ColorPicker("", selection: Binding(
+                            get: { Color(hex: newTagHex) },
+                            set: { newTagHex = hexString(from: $0) }
+                        )).labelsHidden().frame(width: 30)
+                        TextField("Nom du nouveau tag", text: $newTagName)
+                        Button {
+                            guard !newTagName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                            tagStore.upsert(PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex))
+                            newTagName = ""
+                            newTagHex = "555555"
+                        } label: { Label("Ajouter", systemImage: "plus.circle.fill") }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private var filteredTags: [PartyTag] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return tagStore.tags }
+        return tagStore.tags.filter { $0.name.lowercased().contains(q) }
+    }
+
+    private var kindColorsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Couleurs des types de tiers").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(DirectoryEntryKind.allCases, id: \.self) { kind in
+                        HStack(spacing: 10) {
+                            Circle().fill(Color(hex: kindColors.hexColor(for: kind))).frame(width: 14, height: 14)
+                            Text(kind.label).font(.body)
+                            Text(kindColors.hexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
+                            Spacer()
+                            Button {
+                                editingKind = kind
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier cette couleur")
+                            Button(role: .destructive) {
+                                kindColors.colors[kind] = kind.defaultHexColor
+                                kindColors.save()
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Réinitialiser cette couleur")
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.06)))
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func refPanel(_ refs: [NormRef]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(selectedTable.label).font(.title3.bold())
+                Spacer()
+                Text("Lecture seule (référentiel normatif)").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(filteredRefs(refs)) { ref in
+                        HStack {
+                            Text(ref.code).font(.body.monospaced()).frame(width: 100, alignment: .leading)
+                            Text(ref.label).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func filteredRefs(_ refs: [NormRef]) -> [NormRef] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return refs }
+        return refs.filter { $0.code.lowercased().contains(q) || $0.label.lowercased().contains(q) }
+    }
+}
+
+struct OrderStatusEditorSheet: View {
+    var override: OrderStatusOverride
+    let onSave: (OrderStatusOverride) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var systemImage: String
+    @State private var hexColor: String
+
+    init(override: OrderStatusOverride, onSave: @escaping (OrderStatusOverride) -> Void) {
+        self.override = override
+        self.onSave = onSave
+        _label = State(initialValue: override.label)
+        _systemImage = State(initialValue: override.systemImage)
+        _hexColor = State(initialValue: override.hexColor)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le statut").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Icône SF").frame(width: 100, alignment: .leading)
+                    TextField("Icône SF", text: $systemImage).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(OrderStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 300)
+    }
+}
+
+struct TagEditorSheet: View {
+    var tag: PartyTag
+    let onSave: (PartyTag) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var hexColor: String
+
+    init(tag: PartyTag, onSave: @escaping (PartyTag) -> Void) {
+        self.tag = tag
+        self.onSave = onSave
+        _name = State(initialValue: tag.name)
+        _hexColor = State(initialValue: tag.hexColor)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le tag").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Nom").frame(width: 100, alignment: .leading)
+                    TextField("Nom du tag", text: $name).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(PartyTag(id: tag.id, name: name, hexColor: hexColor))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 260)
+    }
+}
+
+struct KindColorEditorSheet: View {
+    let kind: DirectoryEntryKind
+    var hex: String
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var hexColor: String
+
+    init(kind: DirectoryEntryKind, hex: String, onSave: @escaping (String) -> Void) {
+        self.kind = kind
+        self.hex = hex
+        self.onSave = onSave
+        _hexColor = State(initialValue: hex)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier la couleur").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Type").frame(width: 100, alignment: .leading)
+                    Text(kind.label)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(hexColor)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 240)
+    }
+}
+
 struct ChorusProSearchSheet: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @Environment(\.dismiss) private var dismiss
@@ -3193,38 +3940,46 @@ struct PartyEditorView: View {
             HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
                 .onChange(of: party.name) { _ in scheduleDinumSearch() }
-            TextField("Adresse", text: $party.street)
-            HStack {
-                TextField("Code postal", text: $party.postcode)
-                TextField("Ville", text: $party.city)
-            }
-            HStack {
-                Text("Pays").font(.caption); star
-                NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 200)
-            }
-            HStack {
-                Text("SIREN").font(.caption); star
-                TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
-                    .onChange(of: party.siren) { _ in scheduleDinumSearch() }
-                HStack(spacing: 4) {
-                    Text("TVA intra").font(.caption)
-                    TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
-                }
-            }
-            HStack {
-                Text("SIRET").font(.caption)
-                TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
-                    .frame(maxWidth: 200)
-                if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
-                    if SireneValidator.isValidSiret(st) {
-                        Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
-                            .font(.caption2).foregroundStyle(.green)
-                    } else {
-                        Label("SIRET invalide (clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption2).foregroundStyle(.orange)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Adresse", text: $party.street)
+                    HStack {
+                        TextField("Code postal", text: $party.postcode)
+                        TextField("Ville", text: $party.city)
+                    }
+                    HStack {
+                        Text("Pays").font(.caption); star
+                        NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 200)
                     }
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("SIREN").font(.caption); star
+                        TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
+                            .onChange(of: party.siren) { _ in scheduleDinumSearch() }
+                    }
+                    HStack(spacing: 4) {
+                        Text("TVA intra").font(.caption)
+                        TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
+                    }
+                    HStack {
+                        Text("SIRET").font(.caption)
+                        TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
+                            .frame(maxWidth: 200)
+                        if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
+                            if SireneValidator.isValidSiret(st) {
+                                Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
+                                    .font(.caption2).foregroundStyle(.green)
+                            } else {
+                                Label("SIRET invalide (clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
+                        Spacer()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
                 Text("Ident. élec. (BT-49/34)").font(.caption)
@@ -3836,7 +4591,11 @@ struct OrdersTabView: View {
     private func defaultOrderCompanyID() -> UUID? {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
-        return nil
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
     }
 
     private func binding(for id: UUID) -> Binding<SalesOrder> {
@@ -3865,6 +4624,7 @@ struct OrderEditorView: View {
     @State private var isLocked = false
     @State private var showUnlockAlert = false
     @State private var createdInvoiceNumber: String?
+    @State private var showMandatoryDetails = false
 
     private var hasMandatoryWarnings: Bool {
         let b = order.buyer
@@ -3922,8 +4682,8 @@ struct OrderEditorView: View {
             }
             .padding(12)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || createdInvoiceNumber != nil {
+                VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
                         .onChange(of: order.number) { _ in exportError = nil }
@@ -3943,22 +4703,27 @@ struct OrderEditorView: View {
                 }
 
                 if hasMandatoryWarnings {
-                    GroupBox {
+                    DisclosureGroup(isExpanded: $showMandatoryDetails) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("Données obligatoires pour la conformité Order-X", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption.bold())
-                                .foregroundStyle(.orange)
                             Text("Acheteur et client : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique, n° TVA si applicable.").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
                             Text("En-tête : numéro de commande, date d'émission, date de livraison souhaitée, devise (EUR).").font(.caption)
-                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } label: {
+                        Label("Données obligatoires pour la conformité Order-X", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     }
                 }
 
                 if showValidation, let v = validation {
                     orderValidationPanel(v)
                 }
-
+                }.padding(12)
+                Divider()
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .top, spacing: 24) {

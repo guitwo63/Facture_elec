@@ -10,6 +10,8 @@ public final class InvoiceStore: ObservableObject {
     @Published public var numberIncludeYear: Bool = true
     @Published public var numberStart: Int = 1
     @Published public var numberUseSeparator: Bool = true
+    public weak var audit: AuditStore?
+    public var actorName: String = "system"
 
     private let defaults = UserDefaults.standard
     private let storageKey = "facturx.invoices.v1"
@@ -81,17 +83,21 @@ public final class InvoiceStore: ObservableObject {
     }
 
     public func upsert(_ invoice: Invoice) {
+        let isNew = !invoices.contains(where: { $0.id == invoice.id })
         if let idx = invoices.firstIndex(where: { $0.id == invoice.id }) {
             invoices[idx] = invoice
         } else {
             invoices.insert(invoice, at: 0)
         }
         save()
+        audit?.record(actor: actorName, action: isNew ? "invoice_created" : "invoice_updated",
+                       target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture")
     }
 
     public func delete(_ invoice: Invoice) {
         invoices.removeAll { $0.id == invoice.id }
         save()
+        audit?.record(actor: actorName, action: "invoice_deleted", target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture")
     }
 
     public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil, preferredSellerEntryID: UUID? = nil) -> Invoice {
@@ -128,10 +134,26 @@ public final class InvoiceStore: ObservableObject {
         )
     }
 
+    public func duplicate(from invoice: Invoice) -> Invoice {
+        var copy = invoice
+        copy.id = UUID()
+        copy.number = nextNumber(companyID: invoice.companyID)
+        copy.status = .draft
+        copy.issueDate = Date()
+        copy.precedingInvoiceRef = nil
+        copy.precedingInvoiceDate = nil
+        copy.lines = invoice.lines.map { line in
+            var l = line
+            l.id = UUID()
+            return l
+        }
+        return copy
+    }
+
     public func newCreditNote(from invoice: Invoice) -> Invoice {
         var credit = invoice
         credit.id = UUID()
-        credit.number = nextNumber(prefix: "AV", companyID: invoice.companyID)
+        credit.number = nextNumber(companyID: invoice.companyID)
         credit.type = .creditNote
         credit.status = .draft
         credit.issueDate = Date()
@@ -146,6 +168,34 @@ public final class InvoiceStore: ObservableObject {
             return l
         }
         return credit
+    }
+
+    public func newDeposit(from invoice: Invoice) -> Invoice {
+        var deposit = invoice
+        deposit.id = UUID()
+        deposit.number = nextNumber(companyID: invoice.companyID)
+        deposit.type = .deposit
+        deposit.status = .draft
+        deposit.issueDate = Date()
+        deposit.precedingInvoiceRef = nil
+        deposit.precedingInvoiceDate = nil
+        deposit.notes = "Facture d'acompte"
+        deposit.prepaidAmount = 0
+        return deposit
+    }
+
+    public func newFinalSettlement(from invoice: Invoice, deposits: [Invoice]) -> Invoice {
+        var final = invoice
+        final.id = UUID()
+        final.number = nextNumber(companyID: invoice.companyID)
+        final.type = .finalSettlement
+        final.status = .draft
+        final.issueDate = Date()
+        final.precedingInvoiceRef = deposits.first?.number
+        final.precedingInvoiceDate = deposits.first?.issueDate
+        final.prepaidAmount = deposits.reduce(0) { $0 + $1.grandTotal }.rounded(toPlaces: 2)
+        final.notes = "Facture de solde"
+        return final
     }
 
     private func headKey(prefix: String) -> String {

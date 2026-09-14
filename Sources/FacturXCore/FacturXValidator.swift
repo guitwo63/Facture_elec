@@ -117,8 +117,9 @@ public struct FacturXValidator {
             break
         }
 
+        let hasRuleErrors = rules.contains { $0.severity == .error }
         return FacturXValidationResult(
-            isValid: errors.isEmpty,
+            isValid: errors.isEmpty && !hasRuleErrors,
             errors: errors,
             warnings: warnings,
             businessRules: rules

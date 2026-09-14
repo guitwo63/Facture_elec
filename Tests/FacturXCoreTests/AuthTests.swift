@@ -155,6 +155,24 @@ final class AuthTests: XCTestCase {
                      "availableSocieties ne doit renvoyer que les fiches fournisseurs")
     }
 
+    func testMultiRoleCumulatesProfiles() throws {
+        let (store, _, entries) = makeDirectoryStore()
+        let s1 = entries[0]
+        let multi = User(username: "multi", role: .comptable, roles: [.comptable, .admin], societyIDs: [s1.id])
+        XCTAssertTrue(multi.hasRole(.comptable))
+        XCTAssertTrue(multi.hasRole(.admin))
+        XCTAssertTrue(multi.isAdmin)
+        XCTAssertEqual(multi.rolesLabel, "Comptable client, Administrateur")
+        // un admin cumulé voit toutes les sociétés même avec un périmètre défini
+        XCTAssertEqual(Set(store.visibleSocieties(for: multi).map(\.displayName)), Set(["Société A", "Société B"]))
+        XCTAssertNil(store.visibleInvoiceCompanyIDs(for: multi), "Le cumul admin lève le filtre de périmètre")
+        // rétrocompatibilité : User(role:) donne un seul profil
+        let single = User(username: "single", role: .acheteur, societyIDs: [s1.id])
+        XCTAssertFalse(single.isAdmin)
+        XCTAssertTrue(single.hasRole(.acheteur))
+        XCTAssertEqual(single.roles.count, 1)
+    }
+
     func testCreateComptableRequiresSociety() throws {
         let (store, _, _) = makeDirectoryStore()
         XCTAssertThrowsError(try store.createUser(username: "nocompta@exemple.fr", password: "pw", role: .comptable, societyIDs: [])) { error in
