@@ -324,12 +324,91 @@ enum InvoiceTypeFilter: String, CaseIterable, Hashable {
     case creditNote = "Avoirs"
 }
 
+struct OrderToInvoiceSheet: View {
+    let orders: [SalesOrder]
+    let onCreate: (SalesOrder) -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var selectedOrderID: UUID?
+
+    private var filteredOrders: [SalesOrder] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return orders }
+        return orders.filter { order in
+            order.number.lowercased().contains(q)
+                || order.buyer.name.lowercased().contains(q)
+                || order.seller.name.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Créer une facture depuis une commande").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, acheteur, client…)", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filteredOrders.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "cart").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucune commande disponible dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(Array(filteredOrders.enumerated()), id: \.element.id) { _, order in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(order.number).font(.headline)
+                            Text("\(order.seller.name.isEmpty ? "Sans client" : order.seller.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(order.issueDate, format: .dateTime.day().month().year())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedOrderID = order.id }
+                    .background(selectedOrderID == order.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Créer la facture") {
+                    if let order = filteredOrders.first(where: { $0.id == selectedOrderID }) {
+                        onCreate(order)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedOrderID == nil)
+            }
+            .padding(12)
+        }
+        .frame(width: 520, height: 420)
+    }
+}
+
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var orderStore: OrderStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
+    @State private var showOrderPicker = false
 
     var filteredInvoices: [Invoice] {
         var result = store.invoices
@@ -361,11 +440,16 @@ struct InvoicesTabView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 HStack {
-                    Button {
-                        let draft = store.newDraft(companyID: defaultCompanyID(),
-                                                   preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
-                        store.upsert(draft)
-                        selectedID = draft.id
+                    Menu {
+                        Button {
+                            let draft = store.newDraft(companyID: defaultCompanyID(),
+                                                       preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
+                            store.upsert(draft)
+                            selectedID = draft.id
+                        } label: { Label("Facture vierge", systemImage: "doc") }
+                        Button {
+                            showOrderPicker = true
+                        } label: { Label("Facture depuis une commande", systemImage: "cart") }
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Factures").font(.title2.bold())
@@ -468,6 +552,30 @@ struct InvoicesTabView: View {
                 }
             }
         }
+        .sheet(isPresented: $showOrderPicker) {
+            OrderToInvoiceSheet(
+                orders: scopedOrders,
+                onCreate: { order in
+                    let number = store.nextNumber(companyID: order.companyID)
+                    let invoice = order.toInvoice(number: number)
+                    store.upsert(invoice)
+                    selectedID = invoice.id
+                    showOrderPicker = false
+                },
+                onCancel: { showOrderPicker = false }
+            )
+        }
+    }
+
+    private var scopedOrders: [SalesOrder] {
+        var result = orderStore.orders
+        if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
+            result = result.filter { order in
+                if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
     }
 
     private func binding(for id: UUID) -> Binding<Invoice> {
