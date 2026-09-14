@@ -192,23 +192,37 @@ public final class AuthStore: ObservableObject {
         }
     }
 
+    private static let defaultAdminUsername = "admin@facturx.local"
+    private static let defaultAdminPassword = "admin"
+
     public func seedDefaultAdminIfEmpty() {
-        if defaults.bool(forKey: seededKey) { return }
-        if users.isEmpty {
+        if let idx = users.firstIndex(where: { $0.username.lowercased() == Self.defaultAdminUsername.lowercased() }) {
+            // Réinitialise le mot de passe de l'admin par défaut à chaque lancement
+            // pour garantir un accès de secours reproductible.
             let salt = PasswordHasher.generateSalt()
-            let hash = PasswordHasher.hash(password: "admin", salt: salt)
-            let admin = User(
-                username: "admin@facturx.local",
-                displayName: "Administrateur",
-                role: .admin,
-                passwordHash: hash,
-                salt: salt,
-                societyIDs: [],
-                isActive: true
-            )
-            users = [admin]
+            users[idx].salt = salt
+            users[idx].passwordHash = PasswordHasher.hash(password: Self.defaultAdminPassword, salt: salt)
+            users[idx].isActive = true
             save()
+            return
         }
+        let salt = PasswordHasher.generateSalt()
+        let hash = PasswordHasher.hash(password: Self.defaultAdminPassword, salt: salt)
+        let admin = User(
+            username: Self.defaultAdminUsername,
+            displayName: "Administrateur",
+            role: .admin,
+            passwordHash: hash,
+            salt: salt,
+            societyIDs: [],
+            isActive: true
+        )
+        if let idx = users.firstIndex(where: { $0.id == admin.id }) {
+            users[idx] = admin
+        } else {
+            users.append(admin)
+        }
+        save()
         defaults.set(true, forKey: seededKey)
     }
 
