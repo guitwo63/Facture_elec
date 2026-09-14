@@ -106,10 +106,11 @@ struct UserManagementView: View {
             Spacer()
         }
         .sheet(isPresented: $creatingUser) {
-            UserEditorSheet { username, displayName, password, role, societyIDs in
+            UserEditorSheet { username, displayName, password, role, societyIDs, defaultSeller in
                 do {
                     _ = try auth.createUser(username: username, password: password,
-                                            displayName: displayName, role: role, societyIDs: societyIDs)
+                                            displayName: displayName, role: role, societyIDs: societyIDs,
+                                            defaultSellerEntryID: defaultSeller)
                 } catch {
                     return
                 }
@@ -117,12 +118,13 @@ struct UserManagementView: View {
             }
         }
         .sheet(item: $editingUser) { user in
-            UserEditorSheet(existing: user) { username, displayName, password, role, societyIDs in
+            UserEditorSheet(existing: user) { username, displayName, password, role, societyIDs, defaultSeller in
                 var updated = user
                 updated.username = username
                 updated.displayName = displayName
                 updated.role = role
                 updated.societyIDs = societyIDs
+                updated.defaultSellerEntryID = defaultSeller
                 auth.upsert(updated)
                 if !password.isEmpty {
                     try? auth.updatePassword(updated, newPassword: password)
@@ -239,16 +241,25 @@ struct UserDetailCard: View {
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(auth.availableSocieties()) { s in
-                            Toggle(isOn: Binding(
-                                get: { user.societyIDs.contains(s.id) },
-                                set: { checked in
-                                    var u = user
-                                    if checked { u.societyIDs.append(s.id) }
-                                    else { u.societyIDs.removeAll { $0 == s.id } }
-                                    onChange(u)
+                            HStack {
+                                Toggle(isOn: Binding(
+                                    get: { user.societyIDs.contains(s.id) },
+                                    set: { checked in
+                                        var u = user
+                                        if checked { u.societyIDs.append(s.id) }
+                                        else {
+                                            u.societyIDs.removeAll { $0 == s.id }
+                                            if u.defaultSellerEntryID == s.id { u.defaultSellerEntryID = nil }
+                                        }
+                                        onChange(u)
+                                    }
+                                )) {
+                                    Text(s.displayName)
                                 }
-                            )) {
-                                Text(s.displayName)
+                                Spacer()
+                                if user.defaultSellerEntryID == s.id {
+                                    Text("(société par défaut)").font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -295,7 +306,7 @@ struct CompanyDetailCard: View {
 
 struct UserEditorSheet: View {
     var existing: User?
-    let onSave: (String, String, String, UserRole, [UUID]) -> Void
+    let onSave: (String, String, String, UserRole, [UUID], UUID?) -> Void
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @Environment(\.dismiss) private var dismiss
@@ -305,6 +316,7 @@ struct UserEditorSheet: View {
     @State private var password = ""
     @State private var role: UserRole = .comptable
     @State private var societyIDs: Set<UUID> = []
+    @State private var defaultSellerEntryID: UUID? = nil
 
     var body: some View {
         VStack(spacing: 16) {
@@ -345,14 +357,31 @@ struct UserEditorSheet: View {
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(availableSocieties) { s in
-                                Toggle(isOn: Binding(
-                                    get: { societyIDs.contains(s.id) },
-                                    set: { checked in
-                                        if checked { societyIDs.insert(s.id) }
-                                        else { societyIDs.remove(s.id) }
+                                HStack {
+                                    Toggle(isOn: Binding(
+                                        get: { societyIDs.contains(s.id) },
+                                        set: { checked in
+                                            if checked { societyIDs.insert(s.id) }
+                                            else {
+                                                societyIDs.remove(s.id)
+                                                if defaultSellerEntryID == s.id { defaultSellerEntryID = nil }
+                                            }
+                                        }
+                                    )) {
+                                        Text(s.displayName)
                                     }
-                                )) {
-                                    Text(s.displayName)
+                                    Spacer()
+                                    if societyIDs.contains(s.id) {
+                                        Toggle(isOn: Binding(
+                                            get: { defaultSellerEntryID == s.id },
+                                            set: { isDefault in
+                                                defaultSellerEntryID = isDefault ? s.id : nil
+                                            }
+                                        )) {
+                                            Text("Émetteur par défaut").font(.caption)
+                                        }
+                                        .toggleStyle(.checkbox)
+                                    }
                                 }
                             }
                         }
@@ -369,7 +398,7 @@ struct UserEditorSheet: View {
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, role, Array(societyIDs))
+                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, role, Array(societyIDs), defaultSellerEntryID)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -384,6 +413,7 @@ struct UserEditorSheet: View {
                 displayName = u.displayName
                 role = u.role
                 societyIDs = Set(u.societyIDs)
+                defaultSellerEntryID = u.defaultSellerEntryID
             }
         }
     }
@@ -414,10 +444,13 @@ struct UserEditorSheet: View {
 
 struct ProfileSettingsView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var directory: PartyDirectory
     @State private var newPw = ""
     @State private var confirmPw = ""
     @State private var saved = false
     @State private var error: String?
+    @State private var showSellerPicker = false
 
     var body: some View {
         ScrollView {
@@ -445,6 +478,57 @@ struct ProfileSettingsView: View {
                                 }
                             }
                         }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Émetteur par défaut").font(.headline)
+                            Text("L’émetteur par défaut est un lien vers une fiche fournisseur de l’annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            let linkedEntry: DirectoryEntry? = (user.defaultSellerEntryID ?? store.defaultSellerEntryID).flatMap { id in directory.entries.first { $0.id == id } }
+                            if let entry = linkedEntry {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.party.name).font(.body.weight(.semibold))
+                                    if let s = entry.party.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
+                                    if let st = entry.party.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
+                                    if let v = entry.party.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
+                                    if let iban = entry.party.iban, !iban.isEmpty { Text("IBAN : \(iban)").font(.caption).foregroundStyle(.secondary) }
+                                    if let bic = entry.party.bic, !bic.isEmpty { Text("BIC : \(bic)").font(.caption).foregroundStyle(.secondary) }
+                                    if let pt = entry.party.paymentTerms, !pt.isEmpty { Text("Conditions : \(pt)").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                HStack {
+                                    Button {
+                                        showSellerPicker = true
+                                    } label: { Label("Changer", systemImage: "person.crop.circle.badge.plus") }
+                                        .buttonStyle(.bordered)
+                                    Button(role: .destructive) {
+                                        var u = user
+                                        u.defaultSellerEntryID = nil
+                                        auth.upsert(u)
+                                        if store.defaultSellerEntryID != nil {
+                                            store.defaultSellerEntryID = nil
+                                            store.save()
+                                        }
+                                    } label: { Label("Dissocier", systemImage: "minus.circle") }
+                                        .buttonStyle(.bordered)
+                                    Spacer()
+                                }
+                            } else {
+                                Text("Aucun émetteur par défaut défini.").font(.caption).foregroundStyle(.tertiary)
+                                Button {
+                                    showSellerPicker = true
+                                } label: { Label("Choisir un fournisseur dans l’annuaire", systemImage: "person.crop.circle.badge.plus") }
+                                    .buttonStyle(.bordered)
+                            }
+                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .sheet(isPresented: $showSellerPicker) {
+                        PartyPickerSheet(role: .seller) { selected in
+                            var u = user
+                            u.defaultSellerEntryID = selected.id
+                            auth.upsert(u)
+                            showSellerPicker = false
+                        }
                     }
 
                     GroupBox {

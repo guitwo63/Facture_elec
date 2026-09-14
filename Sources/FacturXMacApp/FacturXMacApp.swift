@@ -270,7 +270,8 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
-            let draft = store.newDraft(companyID: defaultDraftCompanyID())
+            let draft = store.newDraft(companyID: defaultDraftCompanyID(),
+                                       preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
             store.upsert(draft)
             selectedID = draft.id
         }
@@ -327,7 +328,8 @@ struct InvoicesTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let draft = store.newDraft(companyID: defaultCompanyID())
+                        let draft = store.newDraft(companyID: defaultCompanyID(),
+                                                   preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
                         store.upsert(draft)
                         selectedID = draft.id
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
@@ -2145,7 +2147,6 @@ struct SettingsTabView: View {
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var store: InvoiceStore
-    @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var auth: AuthStore
@@ -2153,8 +2154,6 @@ struct ApplicationSettingsView: View {
     @State private var testing = false
     @State private var dinumExpanded = true
     @State private var pisteExpanded = false
-    @State private var sellerExpanded = true
-    @State private var showSellerPicker = false
     @State private var appearanceExpanded = true
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
@@ -2164,46 +2163,6 @@ struct ApplicationSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                DisclosureGroup(isExpanded: $sellerExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("L'émetteur par défaut est un lien vers une fiche fournisseur de l'annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        let linkedEntry: DirectoryEntry? = store.defaultSellerEntryID.flatMap { id in directory.entries.first { $0.id == id } }
-                        if let entry = linkedEntry {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.party.name).font(.body.weight(.semibold))
-                                if let s = entry.party.siren, !s.isEmpty { Text("SIREN : \(s)").font(.caption).foregroundStyle(.secondary) }
-                                if let st = entry.party.siret, !st.isEmpty { Text("SIRET : \(st)").font(.caption).foregroundStyle(.secondary) }
-                                if let v = entry.party.vatNumber, !v.isEmpty { Text("TVA : \(v)").font(.caption).foregroundStyle(.secondary) }
-                                if let iban = entry.party.iban, !iban.isEmpty { Text("IBAN : \(iban)").font(.caption).foregroundStyle(.secondary) }
-                                if let bic = entry.party.bic, !bic.isEmpty { Text("BIC : \(bic)").font(.caption).foregroundStyle(.secondary) }
-                                if let pt = entry.party.paymentTerms, !pt.isEmpty { Text("Conditions : \(pt)").font(.caption).foregroundStyle(.secondary) }
-                            }
-                            HStack {
-                                Button {
-                                    showSellerPicker = true
-                                } label: { Label("Changer", systemImage: "person.crop.circle.badge.plus") }
-                                    .buttonStyle(.bordered)
-                                Button(role: .destructive) {
-                                    store.defaultSellerEntryID = nil
-                                    store.save()
-                                } label: { Label("Dissocier", systemImage: "minus.circle") }
-                                    .buttonStyle(.bordered)
-                                Spacer()
-                            }
-                        } else {
-                            Text("Aucun émetteur par défaut défini.").font(.caption).foregroundStyle(.tertiary)
-                            Button {
-                                showSellerPicker = true
-                            } label: { Label("Choisir un fournisseur dans l'annuaire", systemImage: "person.crop.circle.badge.plus") }
-                                .buttonStyle(.bordered)
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Émetteur par défaut", systemImage: "building.2")
-                        .font(.headline)
-                }
-
                 DisclosureGroup(isExpanded: $dinumExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("L'API recherche-entreprises.api.gouv.fr (DINUM) pré-remplit la désignation et l'adresse postale d'un tiers à partir d'un SIREN, SIRET ou nom. Gratuite, publique, sans compte ni jeton. Ne donne pas l'adresse de routage PPF.")
@@ -2412,7 +2371,7 @@ struct ApplicationSettingsView: View {
 
                 Divider()
                 HStack {
-                    Text("Facture_elec v0.2.1").font(.caption).foregroundStyle(.secondary)
+                    Text("Facture_elec v0.3.0").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     if let repo = URL(string: "https://github.com/guitwo63/Facture_elec") {
                         Link("GitHub", destination: repo).font(.caption)
@@ -2421,13 +2380,6 @@ struct ApplicationSettingsView: View {
 
                 Spacer()
             }.padding()
-        }
-        .sheet(isPresented: $showSellerPicker) {
-            PartyPickerSheet(role: .seller) { selected in
-                store.defaultSellerEntryID = selected.id
-                store.save()
-                showSellerPicker = false
-            }
         }
     }
 

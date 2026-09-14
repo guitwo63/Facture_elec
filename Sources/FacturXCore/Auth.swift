@@ -28,6 +28,7 @@ public struct User: Codable, Hashable, Identifiable {
     public var passwordHash: String
     public var salt: String
     public var societyIDs: [UUID]
+    public var defaultSellerEntryID: UUID?
     public var isActive: Bool
     public var createdAt: Date
 
@@ -39,6 +40,7 @@ public struct User: Codable, Hashable, Identifiable {
         passwordHash: String = "",
         salt: String = "",
         societyIDs: [UUID] = [],
+        defaultSellerEntryID: UUID? = nil,
         isActive: Bool = true,
         createdAt: Date = Date()
     ) {
@@ -49,6 +51,7 @@ public struct User: Codable, Hashable, Identifiable {
         self.passwordHash = passwordHash
         self.salt = salt
         self.societyIDs = societyIDs
+        self.defaultSellerEntryID = defaultSellerEntryID
         self.isActive = isActive
         self.createdAt = createdAt
     }
@@ -59,7 +62,7 @@ public struct User: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, username, displayName, role, passwordHash, salt, societyIDs, isActive, createdAt
+        case id, username, displayName, role, passwordHash, salt, societyIDs, defaultSellerEntryID, isActive, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -71,6 +74,7 @@ public struct User: Codable, Hashable, Identifiable {
         passwordHash = try c.decodeIfPresent(String.self, forKey: .passwordHash) ?? ""
         salt = try c.decodeIfPresent(String.self, forKey: .salt) ?? ""
         societyIDs = try c.decodeIfPresent([UUID].self, forKey: .societyIDs) ?? []
+        defaultSellerEntryID = try c.decodeIfPresent(UUID.self, forKey: .defaultSellerEntryID)
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
@@ -260,7 +264,8 @@ public final class AuthStore: ObservableObject {
         password: String,
         displayName: String = "",
         role: UserRole = .comptable,
-        societyIDs: [UUID] = []
+        societyIDs: [UUID] = [],
+        defaultSellerEntryID: UUID? = nil
     ) throws -> User {
         let trimmedName = username.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { throw AuthError.unknownUser }
@@ -281,6 +286,7 @@ public final class AuthStore: ObservableObject {
             passwordHash: hash,
             salt: salt,
             societyIDs: societyIDs,
+            defaultSellerEntryID: defaultSellerEntryID,
             isActive: true
         )
         users.append(user)
