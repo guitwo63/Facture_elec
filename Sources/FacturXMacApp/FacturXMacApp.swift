@@ -3135,7 +3135,8 @@ struct OrdersTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $selectedID) {
-                        ForEach(filteredOrders, id: \.id) { order in
+                        ForEach(0..<filteredOrders.count, id: \.self) { index in
+                            let order = filteredOrders[index]
                             VStack(alignment: .leading) {
                                 HStack {
                                     Text(order.number).font(.headline)
