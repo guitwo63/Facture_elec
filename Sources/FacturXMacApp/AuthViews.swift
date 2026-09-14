@@ -19,9 +19,12 @@ struct LoginView: View {
                 Text("Connexion").font(.title3).foregroundStyle(.secondary)
             }
             VStack(spacing: 12) {
-                TextField("Identifiant", text: $username)
+                TextField("Adresse e-mail", text: $username)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 280)
+                    .textContentType(.emailAddress)
+                    .disableAutocorrection(true)
+                    .textInputAutocapitalization(.never)
                 SecureField("Mot de passe", text: $password)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 280)
@@ -41,7 +44,7 @@ struct LoginView: View {
                 .disabled(username.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty || attempting)
             }
             VStack(spacing: 4) {
-                Text("Compte admin par défaut : admin / admin")
+                Text("Compte admin par défaut : [email protected] / admin")
                     .font(.caption2).foregroundStyle(.tertiary)
                 Text("Pensez à modifier le mot de passe après la première connexion.")
                     .font(.caption2).foregroundStyle(.tertiary)
@@ -315,8 +318,11 @@ struct UserEditorSheet: View {
             }
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Identifiant").frame(width: 140, alignment: .leading)
-                    TextField("identifiant", text: $username).textFieldStyle(.roundedBorder)
+                    Text("Identifiant (e-mail)").frame(width: 140, alignment: .leading)
+                    TextField("[email protected]", text: $username)
+                        .textFieldStyle(.roundedBorder)
+                        .disableAutocorrection(true)
+                        .textInputAutocapitalization(.never)
                 }
                 HStack {
                     Text("Nom affiché").frame(width: 140, alignment: .leading)
@@ -360,10 +366,13 @@ struct UserEditorSheet: View {
                     }
                 }
             }
+            if let err = validationError {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(username, displayName, password, role, Array(societyIDs))
+                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, role, Array(societyIDs))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -386,10 +395,105 @@ struct UserEditorSheet: View {
         directory.entries.filter { !$0.isArchived && ($0.kind == .fournisseur || $0.kind == .both) }
     }
 
+    private var validationError: String? {
+        let trimmed = username.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        guard EmailValidator.isValid(trimmed) else { return "Identifiant invalide : doit être une adresse e-mail." }
+        if auth.users.contains(where: { $0.username.lowercased() == trimmed.lowercased() && $0.id != existing?.id }) {
+            return "Cet identifiant est déjà utilisé."
+        }
+        return nil
+    }
+
     private var canSave: Bool {
-        let nameOK = !username.trimmingCharacters(in: .whitespaces).isEmpty
+        let trimmed = username.trimmingCharacters(in: .whitespaces)
+        let nameOK = EmailValidator.isValid(trimmed)
         let pwOK = existing != nil || !password.isEmpty
         let scopeOK = role == .admin || !societyIDs.isEmpty
-        return nameOK && pwOK && scopeOK
+        let noDup = validationError == nil
+        return nameOK && pwOK && scopeOK && noDup
+    }
+}
+
+struct ProfileSettingsView: View {
+    @EnvironmentObject var auth: AuthStore
+    @State private var newPw = ""
+    @State private var confirmPw = ""
+    @State private var saved = false
+    @State private var error: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let user = auth.currentUser {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: user.role.systemImage)
+                                    .font(.title2).foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(user.effectiveDisplayName).font(.body.weight(.semibold))
+                                    Text(user.username).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(user.role.label).font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(.quaternary, in: Capsule())
+                            }
+                            if user.role == .comptable, !user.societyIDs.isEmpty {
+                                Divider()
+                                Text("Sociétés du périmètre").font(.caption.bold())
+                                ForEach(auth.visibleSocieties(for: user)) { s in
+                                    Text("• \(s.displayName)").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Changer le mot de passe").font(.headline)
+                            SecureField("Nouveau mot de passe", text: $newPw)
+                                .textFieldStyle(.roundedBorder).frame(width: 280)
+                            SecureField("Confirmer le mot de passe", text: $confirmPw)
+                                .textFieldStyle(.roundedBorder).frame(width: 280)
+                            HStack {
+                                Button {
+                                    savePassword(user)
+                                } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(newPw.isEmpty || newPw != confirmPw)
+                                if saved {
+                                    Text("Mot de passe mis à jour").font(.caption).foregroundStyle(.green)
+                                }
+                                if let error = error {
+                                    Text(error).font(.caption).foregroundStyle(.red)
+                                }
+                            }
+                            if !newPw.isEmpty && newPw != confirmPw {
+                                Text("Les mots de passe ne correspondent pas.")
+                                    .font(.caption).foregroundStyle(.orange)
+                            }
+                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    Text("Aucun utilisateur connecté.").foregroundStyle(.secondary)
+                }
+                Spacer()
+            }.padding()
+        }
+    }
+
+    private func savePassword(_ user: User) {
+        error = nil
+        saved = false
+        do {
+            try auth.updatePassword(user, newPassword: newPw)
+            saved = true
+            newPw = ""
+            confirmPw = ""
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }

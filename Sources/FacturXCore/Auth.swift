@@ -119,6 +119,7 @@ public enum AuthError: Error, LocalizedError {
     case duplicateUsername
     case emptyPassword
     case missingSociety
+    case invalidEmail
 
     public var errorDescription: String? {
         switch self {
@@ -128,7 +129,23 @@ public enum AuthError: Error, LocalizedError {
         case .duplicateUsername: return "Cet identifiant existe déjà."
         case .emptyPassword: return "Le mot de passe ne peut pas être vide."
         case .missingSociety: return "Un comptable doit être associé à au moins une société (fiche fournisseur de l'annuaire)."
+        case .invalidEmail: return "L'identifiant doit être une adresse e-mail valide."
         }
+    }
+}
+
+public enum EmailValidator {
+    public static func isValid(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard trimmed.lowercased() == trimmed.lowercased(), trimmed.contains("@") else { return false }
+        let at = trimmed.firstIndex(of: "@") ?? trimmed.endIndex
+        let local = trimmed[..<at]
+        let domain = trimmed[trimmed.index(after: at)...]
+        guard !local.isEmpty, domain.contains(".") else { return false }
+        let domainParts = domain.split(separator: ".", omittingEmptySubsequences: true)
+        guard domainParts.count >= 2 else { return false }
+        guard domainParts.last?.count ?? 0 >= 2 else { return false }
+        return true
     }
 }
 
@@ -181,7 +198,7 @@ public final class AuthStore: ObservableObject {
             let salt = PasswordHasher.generateSalt()
             let hash = PasswordHasher.hash(password: "admin", salt: salt)
             let admin = User(
-                username: "admin",
+                username: "[email protected]",
                 displayName: "Administrateur",
                 role: .admin,
                 passwordHash: hash,
@@ -233,6 +250,7 @@ public final class AuthStore: ObservableObject {
     ) throws -> User {
         let trimmedName = username.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { throw AuthError.unknownUser }
+        guard EmailValidator.isValid(trimmedName) else { throw AuthError.invalidEmail }
         guard !password.isEmpty else { throw AuthError.emptyPassword }
         guard !users.contains(where: { $0.username.lowercased() == trimmedName.lowercased() }) else {
             throw AuthError.duplicateUsername

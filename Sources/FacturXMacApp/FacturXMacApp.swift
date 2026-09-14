@@ -243,7 +243,7 @@ struct RootView: View {
                 }
                 .padding(12)
                 Divider()
-                SettingsView()
+                SettingsTabView()
                     .frame(minWidth: 720, minHeight: 640)
             }
         }
@@ -2040,7 +2040,32 @@ struct RoutingPickerSheet: View {
     }
 }
 
-struct SettingsView: View {
+struct SettingsTabView: View {
+    @EnvironmentObject var auth: AuthStore
+    @State private var settingsTab = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $settingsTab) {
+                Text("Profil").tag(0)
+                if auth.currentUser?.role == .admin {
+                    Text("Application").tag(1)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(10)
+            Divider()
+            switch settingsTab {
+            case 0:
+                ProfileSettingsView()
+            default:
+                ApplicationSettingsView()
+            }
+        }
+    }
+}
+
+struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var directory: PartyDirectory

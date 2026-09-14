@@ -43,7 +43,11 @@ L'application intègre une connexion par **identifiant / mot de passe** (hachage
 
 Le **périmètre** est fondé sur la **structure des tiers** de l'annuaire : une société du périmètre est une **fiche fournisseur** (`DirectoryEntry`) de l'annuaire. À la création d'un comptable, on lui associe une ou plusieurs fiches fournisseurs ; chaque facture est rattachée à une société (`Invoice.companyID`) et le sélecteur d'émetteur ne propose au comptable que les fournisseurs de son périmètre.
 
-Un **compte admin par défaut** (`admin` / `admin`) est créé au premier lancement — **à modifier dès la première connexion** via la Gestion utilisateurs.
+Un **compte admin par défaut** (`[email protected]` / `admin`) est créé au premier lancement — **à modifier dès la première connexion**. L'identifiant d'un utilisateur doit être une **adresse e-mail** valide.
+
+Les **Réglages** sont découpés en deux onglets :
+- **Profil** (tous les utilisateurs) : informations du compte et changement de mot de passe.
+- **Application** (admin uniquement) : recherche DINUM, annuaire Chorus Pro (PISTE), apparence, tags, numérotation.
 
 ## Compilation et exécution
 

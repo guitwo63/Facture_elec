@@ -63,15 +63,20 @@ final class AuthTests: XCTestCase {
     func testCreateUserDuplicateRejected() throws {
         let store = AuthStore()
         store.users = []
-        _ = try store.createUser(username: "alice", password: "pw", role: .admin)
-        XCTAssertThrowsError(try store.createUser(username: "alice", password: "pw", role: .admin)) { error in
+        _ = try store.createUser(username: "[email protected]", password: "pw", role: .admin)
+        XCTAssertThrowsError(try store.createUser(username: "[email protected]", password: "pw", role: .admin)) { error in
             guard case AuthError.duplicateUsername = error else {
                 return XCTFail("Attendu AuthError.duplicateUsername, eu \(error)")
             }
         }
-        XCTAssertThrowsError(try store.createUser(username: "bob", password: "", role: .admin)) { error in
+        XCTAssertThrowsError(try store.createUser(username: "[email protected]", password: "", role: .admin)) { error in
             guard case AuthError.emptyPassword = error else {
                 return XCTFail("Attendu AuthError.emptyPassword, eu \(error)")
+            }
+        }
+        XCTAssertThrowsError(try store.createUser(username: "pasunemail", password: "pw", role: .admin)) { error in
+            guard case AuthError.invalidEmail = error else {
+                return XCTFail("Attendu AuthError.invalidEmail, eu \(error)")
             }
         }
     }
@@ -79,13 +84,13 @@ final class AuthTests: XCTestCase {
     func testUpdatePasswordRehashes() throws {
         let store = AuthStore()
         store.users = []
-        let user = try store.createUser(username: "jo", password: "oldpw", role: .admin)
+        let user = try store.createUser(username: "[email protected]", password: "oldpw", role: .admin)
         let oldHash = store.users.first(where: { $0.id == user.id })?.passwordHash
         try store.updatePassword(user, newPassword: "newpw")
         let updated = store.users.first(where: { $0.id == user.id })
         XCTAssertNotEqual(updated?.passwordHash, oldHash)
-        XCTAssertThrowsError(try store.login(username: "jo", password: "oldpw")) { _ in }
-        let logged = try store.login(username: "jo", password: "newpw")
+        XCTAssertThrowsError(try store.login(username: "[email protected]", password: "oldpw")) { _ in }
+        let logged = try store.login(username: "[email protected]", password: "newpw")
         XCTAssertEqual(logged.id, user.id)
     }
 
@@ -134,7 +139,7 @@ final class AuthTests: XCTestCase {
 
     func testCreateComptableRequiresSociety() throws {
         let (store, _, _) = makeDirectoryStore()
-        XCTAssertThrowsError(try store.createUser(username: "c", password: "pw", role: .comptable, societyIDs: [])) { error in
+        XCTAssertThrowsError(try store.createUser(username: "[email protected]", password: "pw", role: .comptable, societyIDs: [])) { error in
             guard case AuthError.missingSociety = error else {
                 return XCTFail("Attendu AuthError.missingSociety, eu \(error)")
             }
