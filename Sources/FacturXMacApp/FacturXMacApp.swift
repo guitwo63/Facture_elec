@@ -1937,6 +1937,7 @@ struct SettingsView: View {
     @State private var showSellerPicker = false
     @State private var appearanceExpanded = true
     @State private var tagsExpanded = true
+    @State private var numberingExpanded = true
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
 
@@ -2153,6 +2154,41 @@ struct SettingsView: View {
                     Label("Tags personnalisés", systemImage: "tag")
                         .font(.headline)
                 }
+
+                DisclosureGroup(isExpanded: $numberingExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text("Préfixe texte").font(.caption)
+                            TextField("ex. FAC", text: $store.numberPrefix)
+                                .frame(width: 140)
+                        }
+                        Toggle("Inclure l'année", isOn: $store.numberIncludeYear)
+                        HStack {
+                            Text("Numéro de début").font(.caption)
+                            Stepper(value: $store.numberStart, in: 1...999999) {
+                                Text("\(store.numberStart)")
+                            }
+                        }
+                        Toggle("Séparer par un \"-\"", isOn: $store.numberUseSeparator)
+                        Divider()
+                        HStack {
+                            Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
+                            Text(store.previewNextNumber()).monospaced().font(.caption.bold())
+                            Spacer()
+                            Button("Appliquer") { store.save() }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Numérotation des factures", systemImage: "number")
+                        .font(.headline)
+                }
+                .onChange(of: store.numberPrefix) { _ in store.save() }
+                .onChange(of: store.numberIncludeYear) { _ in store.save() }
+                .onChange(of: store.numberStart) { _ in store.save() }
+                .onChange(of: store.numberUseSeparator) { _ in store.save() }
 
                 Divider()
                 HStack {
