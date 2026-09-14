@@ -1425,20 +1425,16 @@ struct DirectoryDetailView: View {
                 }
             }
             .sheet(isPresented: $showRoutingEditor) {
-                if let e = entry {
-                    RoutingAddressQuickEditor(
-                        siren: e.party.siren ?? "",
-                        addresses: routingBinding(entry: e)
-                    )
-                }
+                RoutingAddressQuickEditor(
+                    siren: entry.party.siren ?? "",
+                    addresses: routingBinding(entry: entry)
+                )
             }
             .sheet(isPresented: $showContactEditor) {
-                if let e = entry {
-                    if let ct = editingContact {
-                        ContactFormView(contacts: contactsBinding(entry: e), editing: ct)
-                    } else {
-                        ContactFormView(contacts: contactsBinding(entry: e), editing: PartyContact())
-                    }
+                if let ct = editingContact {
+                    ContactFormView(contacts: contactsBinding(entry: entry), editing: ct)
+                } else {
+                    ContactFormView(contacts: contactsBinding(entry: entry), editing: PartyContact())
                 }
             }
             .onChange(of: showContactEditor) { showing in
