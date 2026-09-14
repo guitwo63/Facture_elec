@@ -985,6 +985,7 @@ struct InvoiceEditorView: View {
     @State private var isLocked = false
     @State private var showUnlockAlert = false
     @State private var showPrecedingInvoicePicker = false
+    @State private var showMandatoryDetails = false
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1062,17 +1063,18 @@ struct InvoiceEditorView: View {
                 }
 
                 if hasMandatoryWarnings {
-                    GroupBox {
+                    DisclosureGroup(isExpanded: $showMandatoryDetails) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("Données obligatoires pour la conformité Factur-X", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption.bold())
-                                .foregroundStyle(.orange)
                             Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-49/34), n° TVA si applicable.").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
                             Text("En-tête : numéro de facture, date, échéance, devise (EUR), mode de facturation (BT-23).").font(.caption)
                             Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
                             Text("Paiement : IBAN et BIC si virement SEPA.").font(.caption)
-                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } label: {
+                        Label("Données obligatoires pour la conformité Factur-X", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     }
                 }
 
@@ -4588,6 +4590,7 @@ struct OrderEditorView: View {
     @State private var isLocked = false
     @State private var showUnlockAlert = false
     @State private var createdInvoiceNumber: String?
+    @State private var showMandatoryDetails = false
 
     private var hasMandatoryWarnings: Bool {
         let b = order.buyer
@@ -4666,15 +4669,16 @@ struct OrderEditorView: View {
                 }
 
                 if hasMandatoryWarnings {
-                    GroupBox {
+                    DisclosureGroup(isExpanded: $showMandatoryDetails) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("Données obligatoires pour la conformité Order-X", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption.bold())
-                                .foregroundStyle(.orange)
                             Text("Acheteur et client : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique, n° TVA si applicable.").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
                             Text("En-tête : numéro de commande, date d'émission, date de livraison souhaitée, devise (EUR).").font(.caption)
-                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } label: {
+                        Label("Données obligatoires pour la conformité Order-X", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     }
                 }
 
