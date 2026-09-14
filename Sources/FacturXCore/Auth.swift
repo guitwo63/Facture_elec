@@ -285,7 +285,8 @@ public final class AuditStore: ObservableObject {
     public static let shared = AuditStore()
     @Published public var entries: [AuditLogEntry] = []
     private let defaults = UserDefaults.standard
-    private let key = "facturx.audit.v1"
+    private let env = AppEnvironment.shared
+    private var key: String { env.key("facturx.audit.v1") }
     public var maxEntries = 500
 
     public init() { load() }
@@ -331,10 +332,11 @@ public final class AuthStore: ObservableObject {
     public let audit = AuditStore.shared
 
     private let defaults = UserDefaults.standard
-    private let usersKey = "facturx.users.v1"
-    private let sessionKey = "facturx.session.userid.v1"
-    private let seededKey = "facturx.auth.seeded.v1"
-    private let sessionExpiresKey = "facturx.session.expires.v1"
+    private let env = AppEnvironment.shared
+    private var usersKey: String { env.key("facturx.users.v1") }
+    private var sessionKey: String { env.key("facturx.session.userid.v1") }
+    private var seededKey: String { env.key("facturx.auth.seeded.v1") }
+    private var sessionExpiresKey: String { env.key("facturx.session.expires.v1") }
 
     public init() {
         self.users = []
@@ -346,6 +348,15 @@ public final class AuthStore: ObservableObject {
 
     public func attachDirectory(_ directory: PartyDirectory) {
         self.directory = directory
+    }
+
+    /// Recharge les utilisateurs/seeds/session après un changement d'environnement (test/prod).
+    /// L'utilisateur courant est déconnecté puis la session du nouvel environnement est restaurée.
+    public func reloadEnvironment() {
+        currentUser = nil
+        load()
+        seedDefaultAdminIfEmpty()
+        restoreSession()
     }
 
     public func load() {
@@ -398,7 +409,7 @@ public final class AuthStore: ObservableObject {
         audit.record(actor: "system", action: "seed_admin", target: Self.defaultAdminUsername)
     }
 
-    private func restoreSession() {
+    public func restoreSession() {
         guard let raw = defaults.string(forKey: sessionKey),
               let id = UUID(uuidString: raw),
               let user = users.first(where: { $0.id == id && $0.isActive }) else { return }

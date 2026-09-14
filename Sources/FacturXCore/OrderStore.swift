@@ -13,12 +13,13 @@ public final class OrderStore: ObservableObject {
     public var actorName: String = "system"
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "orderx.orders.v1"
-    private let buyerEntryKey = "orderx.defaultbuyer.entryid.v1"
-    private let numPrefixKey = "orderx.number.prefix.v1"
-    private let numYearKey = "orderx.number.includeyear.v1"
-    private let numStartKey = "orderx.number.start.v1"
-    private let numSepKey = "orderx.number.useseparator.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("orderx.orders.v1") }
+    private var buyerEntryKey: String { env.key("orderx.defaultbuyer.entryid.v1") }
+    private var numPrefixKey: String { env.key("orderx.number.prefix.v1") }
+    private var numYearKey: String { env.key("orderx.number.includeyear.v1") }
+    private var numStartKey: String { env.key("orderx.number.start.v1") }
+    private var numSepKey: String { env.key("orderx.number.useseparator.v1") }
 
     public init() {
         self.orders = []
