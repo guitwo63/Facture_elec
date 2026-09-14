@@ -272,7 +272,8 @@ public final class OrderStatusStore: ObservableObject {
     @Published public var overrides: [OrderStatusOverride]
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "orderx.statuses.v1"
+    private let env = AppEnvironment.shared
+    private var storageKey: String { env.key("orderx.statuses.v1") }
 
     public static var defaults: [OrderStatusOverride] {
         OrderStatus.allCases.map { s in
