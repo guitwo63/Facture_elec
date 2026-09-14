@@ -54,7 +54,7 @@ public final class OrderPDFRenderer {
         drawText(context: context, text: "ACHETEUR", x: margin, y: y, font: boldFont(size: 11), color: .darkGray)
         drawParty(context: context, party: order.buyer, x: margin, y: y - 16)
 
-        drawText(context: context, text: "FOURNISSEUR", x: pageWidth / 2, y: y, font: boldFont(size: 11), color: .darkGray)
+        drawText(context: context, text: "CLIENT", x: pageWidth / 2, y: y, font: boldFont(size: 11), color: .darkGray)
         drawParty(context: context, party: order.seller, x: pageWidth / 2, y: y - 16)
     }
 

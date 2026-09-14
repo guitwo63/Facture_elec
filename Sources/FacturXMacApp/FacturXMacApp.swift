@@ -3194,7 +3194,7 @@ struct OrdersTabView: View {
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Rechercher (numéro, fournisseur, client…)", text: $query)
+                    TextField("Rechercher (numéro, client…)", text: $query)
                         .textFieldStyle(.plain)
                     if !query.isEmpty {
                         Button { query = "" } label: {
@@ -3245,7 +3245,7 @@ struct OrdersTabView: View {
                                             .font(.caption2).foregroundStyle(Color.accentColor)
                                         Spacer()
                                     }
-                                    Text("\(order.seller.name.isEmpty ? "Sans fournisseur" : order.seller.name)")
+                                    Text("\(order.seller.name.isEmpty ? "Sans client" : order.seller.name)")
                                         .font(.caption).foregroundStyle(.secondary)
                                     Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
                                         .font(.caption2).foregroundStyle(.secondary)
@@ -3390,7 +3390,7 @@ struct OrderEditorView: View {
                             Label("Données obligatoires pour la conformité Order-X", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption.bold())
                                 .foregroundStyle(.orange)
-                            Text("Acheteur et fournisseur : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique, n° TVA si applicable.").font(.caption)
+                            Text("Acheteur et client : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique, n° TVA si applicable.").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
                             Text("En-tête : numéro de commande, date d'émission, date de livraison souhaitée, devise (EUR).").font(.caption)
                         }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
@@ -3537,7 +3537,7 @@ struct OrderEditorView: View {
                 Button("Annuler", role: .cancel) { }
                 Button("Modifier", role: .destructive) { isLocked = false }
             } message: {
-                Text("La commande était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout envoi au fournisseur.")
+                Text("La commande était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout envoi au client.")
             }
         }
     }
