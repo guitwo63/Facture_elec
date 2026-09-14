@@ -68,6 +68,12 @@ public enum EN16931BusinessRules {
             results.append(BusinessRuleResult(ruleId: "BR-49", severity: .error,
                 message: "BR-49 : L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-49)."))
         }
+        let sellerVAT = (invoice.seller.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
+        let hasStandardRatedLine = invoice.lines.contains { $0.vatRate > 0 }
+        if hasStandardRatedLine && sellerVAT.isEmpty {
+            results.append(BusinessRuleResult(ruleId: "BR-S-02", severity: .error,
+                message: "BR-S-02 : Une ligne à TVA standard (BT-151 = S) oblige l'émetteur à avoir un n° TVA (BT-31)."))
+        }
 
         if buyerName.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-25", severity: .error,
