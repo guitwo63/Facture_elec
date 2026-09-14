@@ -94,9 +94,9 @@ final class FacturXCoreTests: XCTestCase {
     func testExportDirectoryCSVContainsEntry() {
         let entry = DirectoryEntry(
             kind: .client,
-            party: InvoiceParty(name: "Test SARL", street: "1 rue X", postcode: "75001", city: "Paris", country: "FR", siren: "111111111", vatNumber: "FR11111111111"),
-            contacts: [PartyContact(name: "Jean", email: "j@x.fr", phone: "0102", isActive: true, isDefault: true)],
-            note: "note test"
+            party: InvoiceParty(name: "Test SARL", street: "1 rue X", postcode: "75001", city: "Paris", country: "FR", vatNumber: "FR11111111111", siren: "111111111"),
+            note: "note test",
+            contacts: [PartyContact(name: "Jean", email: "j@x.fr", phone: "0102", isActive: true, isDefault: true)]
         )
         let csv = ExportGenerator().directoryCSV([entry])
         XCTAssertTrue(csv.contains("Raison sociale;Type;SIREN"))
