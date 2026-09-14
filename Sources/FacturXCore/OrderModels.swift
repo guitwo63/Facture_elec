@@ -211,3 +211,64 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         return "S"
     }
 }
+
+public struct OrderStatusOverride: Codable, Hashable {
+    public var id: String
+    public var label: String
+    public var systemImage: String
+    public var hexColor: String
+
+    public init(id: String, label: String, systemImage: String, hexColor: String) {
+        self.id = id
+        self.label = label
+        self.systemImage = systemImage
+        self.hexColor = hexColor
+    }
+}
+
+public final class OrderStatusStore: ObservableObject {
+    public static let shared = OrderStatusStore()
+
+    @Published public var overrides: [OrderStatusOverride]
+
+    private let defaults = UserDefaults.standard
+    private let storageKey = "orderx.statuses.v1"
+
+    public static var defaults: [OrderStatusOverride] {
+        OrderStatus.allCases.map { s in
+            OrderStatusOverride(id: s.rawValue, label: s.label, systemImage: s.systemImage, hexColor: s.hexColor)
+        }
+    }
+
+    public init() {
+        self.overrides = OrderStatusStore.defaults
+        load()
+    }
+
+    public func load() {
+        if let data = defaults.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode([OrderStatusOverride].self, from: data),
+           !decoded.isEmpty {
+            var byID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
+            for d in OrderStatusStore.defaults where byID[d.id] == nil {
+                byID[d.id] = d
+            }
+            overrides = OrderStatus.allCases.compactMap { byID[$0.rawValue] }
+        }
+    }
+
+    public func save() {
+        if let data = try? JSONEncoder().encode(overrides) {
+            defaults.set(data, forKey: storageKey)
+        }
+    }
+
+    public func reset() {
+        overrides = OrderStatusStore.defaults
+        defaults.removeObject(forKey: storageKey)
+    }
+
+    public func override(for status: OrderStatus) -> OrderStatusOverride {
+        overrides.first { $0.id == status.rawValue } ?? OrderStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
+    }
+}

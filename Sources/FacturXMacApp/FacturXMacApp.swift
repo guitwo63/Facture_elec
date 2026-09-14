@@ -96,6 +96,7 @@ struct FacturXMacApp: App {
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
+    @StateObject private var statusStore = OrderStatusStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -108,6 +109,7 @@ struct FacturXMacApp: App {
                 .environmentObject(chorusSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
+                .environmentObject(statusStore)
                 .environmentObject(auth)
                 .frame(minWidth: 980, minHeight: 620)
                 .onAppear {
@@ -2159,8 +2161,9 @@ struct SettingsTabView: View {
         VStack(spacing: 0) {
             Picker("", selection: $settingsTab) {
                 Text("Profil").tag(0)
+                Text("Commandes").tag(1)
                 if auth.currentUser?.role == .admin {
-                    Text("Application").tag(1)
+                    Text("Application").tag(2)
                 }
             }
             .pickerStyle(.segmented)
@@ -2169,8 +2172,69 @@ struct SettingsTabView: View {
             switch settingsTab {
             case 0:
                 ProfileSettingsView()
+            case 1:
+                OrderStatusSettingsView()
             default:
                 ApplicationSettingsView()
+            }
+        }
+    }
+}
+
+struct OrderStatusSettingsView: View {
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @State private var hexInput: [String: String] = [:]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des commandes").font(.title2.bold())
+                Spacer()
+                Button {
+                    statusStore.reset()
+                    statusStore.save()
+                } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
+                    .buttonStyle(.bordered)
+            }
+            .padding(12)
+            Divider()
+            Text("Personnalisez le libellé, l'icône SF Symbol et la couleur (hex sans #) de chaque statut de commande.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(statusStore.overrides.indices, id: \.self) { idx in
+                        statusRow(idx)
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .frame(minWidth: 480, minHeight: 420)
+    }
+
+    private func statusRow(_ idx: Int) -> some View {
+        let binding = Binding<OrderStatusOverride>(
+            get: { statusStore.overrides[idx] },
+            set: { statusStore.overrides[idx] = $0; statusStore.save() }
+        )
+        return HStack(spacing: 12) {
+            Circle()
+                .fill(Color(hex: binding.wrappedValue.hexColor))
+                .frame(width: 14, height: 14)
+            Image(systemName: binding.wrappedValue.systemImage)
+                .frame(width: 22)
+                .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
+            TextField("Libellé", text: binding.label)
+                .frame(minWidth: 180)
+            TextField("Icône SF", text: binding.systemImage)
+                .frame(width: 120)
+            HStack(spacing: 4) {
+                Text("#").font(.caption).foregroundStyle(.secondary)
+                TextField("Couleur", text: Binding(
+                    get: { binding.wrappedValue.hexColor.uppercased() },
+                    set: { binding.wrappedValue.hexColor = $0.uppercased() }
+                ))
+                .frame(width: 80)
             }
         }
     }
@@ -3093,6 +3157,7 @@ struct OrderPartySection: View {
 struct OrdersTabView: View {
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var statusStore: OrderStatusStore
     @Binding var selectedID: UUID?
     @State private var query = ""
 
@@ -3170,11 +3235,12 @@ struct OrdersTabView: View {
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     HStack(spacing: 6) {
-                                        Image(systemName: order.status.systemImage)
-                                            .foregroundColor(Color(hex: order.status.hexColor))
+                                        let so = statusStore.override(for: order.status)
+                                        Image(systemName: so.systemImage)
+                                            .foregroundColor(Color(hex: so.hexColor))
                                             .font(.caption2)
-                                        Text(order.status.label).font(.caption2)
-                                            .foregroundColor(Color(hex: order.status.hexColor))
+                                        Text(so.label).font(.caption2)
+                                            .foregroundColor(Color(hex: so.hexColor))
                                         Text(order.type.label)
                                             .font(.caption2).foregroundStyle(Color.accentColor)
                                         Spacer()
@@ -3240,6 +3306,7 @@ struct OrdersTabView: View {
 struct OrderEditorView: View {
     @Binding var order: SalesOrder
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var statusStore: OrderStatusStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var validation: FacturXValidationResult?
@@ -3417,8 +3484,8 @@ struct OrderEditorView: View {
                     GroupBox("Acheteur (vous)") {
                         OrderPartySection(party: $order.buyer, role: .buyer)
                     }.lockable(isLocked)
-                    GroupBox("Fournisseur") {
-                        OrderPartySection(party: $order.seller, role: .seller)
+                    GroupBox("Client") {
+                        OrderPartySection(party: $order.seller, role: .buyer)
                     }.lockable(isLocked)
                 }
 
@@ -3562,12 +3629,14 @@ struct OrderEditorView: View {
                     }
                     Spacer()
                     HStack(spacing: 4) {
-                        Image(systemName: order.status.systemImage)
-                            .foregroundColor(Color(hex: order.status.hexColor))
+                        let so = statusStore.override(for: order.status)
+                        Image(systemName: so.systemImage)
+                            .foregroundColor(Color(hex: so.hexColor))
                             .font(.caption2)
                         Picker("Statut", selection: $order.status) {
                             ForEach(OrderStatus.allCases, id: \.self) { s in
-                                Label(s.label, systemImage: s.systemImage).tag(s)
+                                let o = statusStore.override(for: s)
+                                Label(o.label, systemImage: o.systemImage).tag(s)
                             }
                         }
                         .labelsHidden()
