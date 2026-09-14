@@ -2383,11 +2383,10 @@ struct PartyEditorView: View {
                     TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text("SIRET").font(.caption)
-                    TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
-                }
+            HStack {
+                Text("SIRET").font(.caption)
+                TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
+                    .frame(maxWidth: 200)
                 if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
                     if SireneValidator.isValidSiret(st) {
                         Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
@@ -2397,6 +2396,7 @@ struct PartyEditorView: View {
                             .font(.caption2).foregroundStyle(.orange)
                     }
                 }
+                Spacer()
             }
             HStack {
                 Text("Ident. élec. (BT-49/34)").font(.caption)
