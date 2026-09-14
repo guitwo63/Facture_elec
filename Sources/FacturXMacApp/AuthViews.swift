@@ -106,10 +106,11 @@ struct UserManagementView: View {
             Spacer()
         }
         .sheet(isPresented: $creatingUser) {
-            UserEditorSheet { username, displayName, password, role, societyIDs in
+            UserEditorSheet { username, displayName, password, role, societyIDs, defaultSeller in
                 do {
                     _ = try auth.createUser(username: username, password: password,
-                                            displayName: displayName, role: role, societyIDs: societyIDs)
+                                            displayName: displayName, role: role, societyIDs: societyIDs,
+                                            defaultSellerEntryID: defaultSeller)
                 } catch {
                     return
                 }
@@ -117,12 +118,13 @@ struct UserManagementView: View {
             }
         }
         .sheet(item: $editingUser) { user in
-            UserEditorSheet(existing: user) { username, displayName, password, role, societyIDs in
+            UserEditorSheet(existing: user) { username, displayName, password, role, societyIDs, defaultSeller in
                 var updated = user
                 updated.username = username
                 updated.displayName = displayName
                 updated.role = role
                 updated.societyIDs = societyIDs
+                updated.defaultSellerEntryID = defaultSeller
                 auth.upsert(updated)
                 if !password.isEmpty {
                     try? auth.updatePassword(updated, newPassword: password)
@@ -295,7 +297,7 @@ struct CompanyDetailCard: View {
 
 struct UserEditorSheet: View {
     var existing: User?
-    let onSave: (String, String, String, UserRole, [UUID]) -> Void
+    let onSave: (String, String, String, UserRole, [UUID], UUID?) -> Void
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @Environment(\.dismiss) private var dismiss
@@ -305,6 +307,7 @@ struct UserEditorSheet: View {
     @State private var password = ""
     @State private var role: UserRole = .comptable
     @State private var societyIDs: Set<UUID> = []
+    @State private var defaultSellerEntryID: UUID? = nil
 
     var body: some View {
         VStack(spacing: 16) {
@@ -349,10 +352,27 @@ struct UserEditorSheet: View {
                                     get: { societyIDs.contains(s.id) },
                                     set: { checked in
                                         if checked { societyIDs.insert(s.id) }
-                                        else { societyIDs.remove(s.id) }
+                                        else {
+                                            societyIDs.remove(s.id)
+                                            if defaultSellerEntryID == s.id { defaultSellerEntryID = nil }
+                                        }
                                     }
                                 )) {
-                                    Text(s.displayName)
+                                    HStack {
+                                        Text(s.displayName)
+                                        if societyIDs.contains(s.id) {
+                                            Spacer()
+                                            Toggle(isOn: Binding(
+                                                get: { defaultSellerEntryID == s.id },
+                                                set: { isDefault in
+                                                    defaultSellerEntryID = isDefault ? s.id : nil
+                                                }
+                                            )) {
+                                                Text("Émetteur par défaut").font(.caption)
+                                            }
+                                            .toggleStyle(.checkbox)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -369,7 +389,7 @@ struct UserEditorSheet: View {
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, role, Array(societyIDs))
+                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, role, Array(societyIDs), defaultSellerEntryID)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -384,6 +404,7 @@ struct UserEditorSheet: View {
                 displayName = u.displayName
                 role = u.role
                 societyIDs = Set(u.societyIDs)
+                defaultSellerEntryID = u.defaultSellerEntryID
             }
         }
     }
@@ -455,7 +476,7 @@ struct ProfileSettingsView: View {
                             Text("Émetteur par défaut").font(.headline)
                             Text("L’émetteur par défaut est un lien vers une fiche fournisseur de l’annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
                                 .font(.caption).foregroundStyle(.secondary)
-                            let linkedEntry: DirectoryEntry? = store.defaultSellerEntryID.flatMap { id in directory.entries.first { $0.id == id } }
+                            let linkedEntry: DirectoryEntry? = (user.defaultSellerEntryID ?? store.defaultSellerEntryID).flatMap { id in directory.entries.first { $0.id == id } }
                             if let entry = linkedEntry {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.party.name).font(.body.weight(.semibold))
@@ -472,8 +493,13 @@ struct ProfileSettingsView: View {
                                     } label: { Label("Changer", systemImage: "person.crop.circle.badge.plus") }
                                         .buttonStyle(.bordered)
                                     Button(role: .destructive) {
-                                        store.defaultSellerEntryID = nil
-                                        store.save()
+                                        var u = user
+                                        u.defaultSellerEntryID = nil
+                                        auth.upsert(u)
+                                        if store.defaultSellerEntryID != nil {
+                                            store.defaultSellerEntryID = nil
+                                            store.save()
+                                        }
                                     } label: { Label("Dissocier", systemImage: "minus.circle") }
                                         .buttonStyle(.bordered)
                                     Spacer()
@@ -489,8 +515,9 @@ struct ProfileSettingsView: View {
                     }
                     .sheet(isPresented: $showSellerPicker) {
                         PartyPickerSheet(role: .seller) { selected in
-                            store.defaultSellerEntryID = selected.id
-                            store.save()
+                            var u = user
+                            u.defaultSellerEntryID = selected.id
+                            auth.upsert(u)
                             showSellerPicker = false
                         }
                     }

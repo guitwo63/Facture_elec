@@ -212,6 +212,29 @@ final class AuthTests: XCTestCase {
         XCTAssertNil(decoded2.companyID)
     }
 
+    func testUserDefaultSellerEntryIDRetrocompatibility() throws {
+        let json = """
+        {"id":"\(UUID().uuidString)","username":"compta@exemple.fr","role":"comptable",
+         "passwordHash":"","salt":"","societyIDs":["\(UUID().uuidString)"],"isActive":true,"createdAt":0}
+        """.data(using: .utf8)!
+        let user = try JSONDecoder().decode(User.self, from: json)
+        XCTAssertNil(user.defaultSellerEntryID,
+                     "Un utilisateur sans defaultSellerEntryID doit se décoder avec nil")
+    }
+
+    func testCreateUserWithDefaultSeller() throws {
+        let store = AuthStore()
+        store.users = []
+        let sid = UUID()
+        let user = try store.createUser(username: "compta2@exemple.fr", password: "pw",
+                                        role: .comptable, societyIDs: [sid],
+                                        defaultSellerEntryID: sid)
+        XCTAssertEqual(user.defaultSellerEntryID, sid)
+        let data = try JSONEncoder().encode(user)
+        let decoded = try JSONDecoder().decode(User.self, from: data)
+        XCTAssertEqual(decoded.defaultSellerEntryID, sid)
+    }
+
     func testInvoiceNumberingIsPerCompany() {
         let store = InvoiceStore()
         store.invoices = []

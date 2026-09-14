@@ -94,9 +94,28 @@ public final class InvoiceStore: ObservableObject {
         save()
     }
 
-    public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil) -> Invoice {
+    public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil, preferredSellerEntryID: UUID? = nil) -> Invoice {
         let dir = directory ?? PartyDirectory.shared
-        let seller = resolveDefaultSeller(from: dir) ?? myCompany
+        let sellerEntryID = preferredSellerEntryID ?? defaultSellerEntryID
+        let seller: InvoiceParty = {
+            if let id = sellerEntryID, let entry = dir.entries.first(where: { $0.id == id }) {
+                var p = entry.party
+                if let routing = entry.defaultRoutingAddress, routing.isActive {
+                    let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
+                    if !composed.isEmpty {
+                        p.endpointID = composed
+                        p.endpointSchemeID = "0225"
+                    }
+                }
+                if let contact = entry.defaultContact, contact.isActive {
+                    p.contactName = contact.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : contact.name
+                    p.contactEmail = (contact.email?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.email
+                    p.contactPhone = (contact.phone?.trimmingCharacters(in: .whitespaces) ?? "").isEmpty ? nil : contact.phone
+                }
+                return p
+            }
+            return resolveDefaultSeller(from: dir) ?? myCompany
+        }()
         return Invoice(
             number: nextNumber(companyID: companyID),
             seller: seller,

@@ -270,7 +270,8 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
-            let draft = store.newDraft(companyID: defaultDraftCompanyID())
+            let draft = store.newDraft(companyID: defaultDraftCompanyID(),
+                                       preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
             store.upsert(draft)
             selectedID = draft.id
         }
@@ -327,7 +328,8 @@ struct InvoicesTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let draft = store.newDraft(companyID: defaultCompanyID())
+                        let draft = store.newDraft(companyID: defaultCompanyID(),
+                                                   preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
                         store.upsert(draft)
                         selectedID = draft.id
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
