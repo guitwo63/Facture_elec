@@ -3603,6 +3603,9 @@ struct OrderEditorView: View {
                                     row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
                                 }
                                 row("Total TTC", order.grandTotal, bold: true)
+                                Divider().frame(width: 280)
+                                row("Montant facturé", linkedInvoicesAmount)
+                                row("Reste à facturer", max(0, order.grandTotal - linkedInvoicesAmount), bold: true)
                             }
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
@@ -3702,6 +3705,12 @@ struct OrderEditorView: View {
             inv.purchaseOrderRef == order.number
                 || inv.lines.contains(where: { ($0.orderReference ?? "") == order.number })
         }.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private var linkedInvoicesAmount: Double {
+        linkedInvoices.reduce(0) { acc, inv in
+            inv.type == .creditNote ? acc - inv.grandTotal : acc + inv.grandTotal
+        }.rounded(toPlaces: 2)
     }
 
     private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {
