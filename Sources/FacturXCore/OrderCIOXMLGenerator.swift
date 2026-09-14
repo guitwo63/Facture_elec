@@ -5,7 +5,7 @@ public enum OrderCIOXMLError: Error {
     case invalidAmount
 }
 
-/// G\u00e9n\u00e9rateur XML Order-X : Cross Industry Order (CIO) D20B.
+/// Générateur XML Order-X : Cross Industry Order (CIO) D20B.
 /// Racine rsm:SCRDMCCBDACIOMessageStructure (UN/CEFACT 2020), TypeCode 220,
 /// embedded file order-x.xml, profils urn:order-x.eu:1p0:{basic,comfort,extended}.
 public struct OrderCIOXMLGenerator {

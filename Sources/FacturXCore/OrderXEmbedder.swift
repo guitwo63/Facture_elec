@@ -7,7 +7,7 @@ public enum OrderXEmbedError: Error {
 }
 
 /// Embarque le XML Order-X (CIO) dans un PDF/A-3 sous le nom `order-x.xml`
-/// avec /AFRelationship /Alternative, plus les m\u00e9tadonn\u00e9es XMP Order-X
+/// avec /AFRelationship /Alternative, plus les métadonnées XMP Order-X
 /// (fx:DocumentType = ORDER, namespace urn:factur-x:pdfa:CrossIndustryDocument:1p0#).
 public struct OrderXEmbedder {
     public init() {}

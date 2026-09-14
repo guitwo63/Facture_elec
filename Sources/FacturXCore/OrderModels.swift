@@ -31,7 +31,7 @@ public enum OrderTypeCode: String, Codable, CaseIterable {
         switch self {
         case .order: return "Commande (220)"
         case .orderChange: return "Modification de commande (221)"
-        case .orderResponse: return "R\u00e9ponse \u00e0 commande (222)"
+        case .orderResponse: return "Réponse à commande (222)"
         }
     }
 }
@@ -49,13 +49,13 @@ public enum OrderStatus: String, Codable, CaseIterable {
     public var label: String {
         switch self {
         case .draft: return "Brouillon"
-        case .issued: return "\u00c9mise"
+        case .issued: return "Émise"
         case .sentToSupplier: return "Transmise au fournisseur"
-        case .accepted: return "Accept\u00e9e par le fournisseur"
-        case .amended: return "Modifi\u00e9e"
-        case .rejected: return "Rejet\u00e9e par le fournisseur"
-        case .cancelled: return "Annul\u00e9e"
-        case .confirmed: return "Confirm\u00e9e"
+        case .accepted: return "Acceptée par le fournisseur"
+        case .amended: return "Modifiée"
+        case .rejected: return "Rejetée par le fournisseur"
+        case .cancelled: return "Annulée"
+        case .confirmed: return "Confirmée"
         }
     }
 
