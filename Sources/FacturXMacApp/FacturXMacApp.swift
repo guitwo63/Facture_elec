@@ -872,6 +872,11 @@ struct InvoicesTabView: View {
                         }
                         .contextMenu {
                             Button {
+                                let copy = store.duplicate(from: invoice)
+                                store.upsert(copy)
+                                selectedID = copy.id
+                            } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                            Button {
                                 let credit = store.newCreditNote(from: invoice)
                                 store.upsert(credit)
                                 selectedID = credit.id

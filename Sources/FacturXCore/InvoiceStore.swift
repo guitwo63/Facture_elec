@@ -134,6 +134,22 @@ public final class InvoiceStore: ObservableObject {
         )
     }
 
+    public func duplicate(from invoice: Invoice) -> Invoice {
+        var copy = invoice
+        copy.id = UUID()
+        copy.number = nextNumber(companyID: invoice.companyID)
+        copy.status = .draft
+        copy.issueDate = Date()
+        copy.precedingInvoiceRef = nil
+        copy.precedingInvoiceDate = nil
+        copy.lines = invoice.lines.map { line in
+            var l = line
+            l.id = UUID()
+            return l
+        }
+        return copy
+    }
+
     public func newCreditNote(from invoice: Invoice) -> Invoice {
         var credit = invoice
         credit.id = UUID()
