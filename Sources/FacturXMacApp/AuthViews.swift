@@ -24,7 +24,6 @@ struct LoginView: View {
                     .frame(width: 280)
                     .textContentType(.emailAddress)
                     .disableAutocorrection(true)
-                    .textInputAutocapitalization(.never)
                 SecureField("Mot de passe", text: $password)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 280)
@@ -322,7 +321,6 @@ struct UserEditorSheet: View {
                     TextField("[email protected]", text: $username)
                         .textFieldStyle(.roundedBorder)
                         .disableAutocorrection(true)
-                        .textInputAutocapitalization(.never)
                 }
                 HStack {
                     Text("Nom affiché").frame(width: 140, alignment: .leading)
