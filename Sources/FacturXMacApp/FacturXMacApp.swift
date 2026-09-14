@@ -1006,6 +1006,18 @@ struct InvoiceEditorView: View {
         return !(sellerOk && buyerOk && headerOk && linesOk)
     }
 
+    private var errorRuleIDs: Set<String> {
+        guard let v = validation, showValidation else { return [] }
+        return Set(v.businessRules.filter { $0.severity == .error }.map { $0.ruleId })
+    }
+
+    private func fieldHighlight<V: View>(_ view: V, forRuleIDs ids: [String]) -> some View {
+        view.overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.red, lineWidth: ids.contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0)
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -1105,7 +1117,7 @@ struct InvoiceEditorView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     LabeledContent {
-                                        TextField("", text: $invoice.number).frame(width: 160)
+                                        fieldHighlight(TextField("", text: $invoice.number).frame(width: 160), forRuleIDs: ["BR-1"])
                                     } label: {
                                         HStack(spacing: 3) {
                                             Text("Numéro *").foregroundColor(.red)
@@ -1164,6 +1176,8 @@ struct InvoiceEditorView: View {
                                                 .frame(maxWidth: 360, alignment: .leading)
                                             }
                                             .buttonStyle(.bordered)
+                                            .overlay(RoundedRectangle(cornerRadius: 4)
+                                                .stroke(Color.red, lineWidth: errorRuleIDs.contains("BR-FR-CO-05") ? 1.5 : 0))
                                             if linkableInvoices.isEmpty {
                                                 Text("Aucune facture disponible").font(.caption2).foregroundStyle(.secondary)
                                             }
@@ -1195,7 +1209,7 @@ struct InvoiceEditorView: View {
                                     Picker("Profil Factur-X", selection: $invoice.profile) {
                                         ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                                     }
-                                    NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160)
+                                    fieldHighlight(NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160), forRuleIDs: ["BR-5"])
                                     TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
                                 }
                                 HStack {
@@ -1254,9 +1268,13 @@ struct InvoiceEditorView: View {
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
                         })
                     }.lockable(isLocked)
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
                         PartySection(party: $invoice.buyer, role: .buyer)
                     }.lockable(isLocked)
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.red, lineWidth: ["BR-25", "BR-26", "BR-46"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                 }
 
                 GroupBox("Lignes") {
@@ -1264,7 +1282,7 @@ struct InvoiceEditorView: View {
                         ForEach($invoice.lines) { $line in
                             HStack {
                                 HStack(spacing: 2) {
-                                    TextField("Désignation *", text: $line.name).frame(minWidth: 220)
+                                    fieldHighlight(TextField("Désignation *", text: $line.name).frame(minWidth: 220), forRuleIDs: ["BR-21"])
                                     InfoBadge(text: "BT-153 — Désignation de la ligne. Obligatoire.")
                                 }
                                 HStack(spacing: 2) {
@@ -1273,7 +1291,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-132 — Référence de commande liée à la ligne.")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("Qté", value: $line.quantity, format: .number)
+                                    fieldHighlight(DoubleField("Qté", value: $line.quantity, format: .number), forRuleIDs: ["BR-16"])
                                     InfoBadge(text: "BT-149 — Quantité. Doit être positive (facture) ou négative (avoir).")
                                 }
                                 HStack(spacing: 2) {
@@ -1281,7 +1299,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-150 — Unité de mesure (UN/ECE Rec 20).")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
+                                    fieldHighlight(DoubleField("P.U. HT", value: $line.unitPrice, format: .number), forRuleIDs: ["BR-17"])
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
