@@ -1447,10 +1447,12 @@ struct InvoiceEditorView: View {
                             refreshSuperPDPStatus()
                         } label: {
                             if superPDPSubmitting {
-                                ProgressView().controlSize(.small)
+                                HStack(spacing: 4) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Statut PDP…")
+                                }
                             } else {
-                                Image(systemName: "antenna.radar")
-                                    .imageScale(.medium)
+                                Label("Statut PDP", systemImage: "antenna.radar")
                             }
                         }
                         .buttonStyle(.bordered)
