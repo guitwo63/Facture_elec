@@ -911,6 +911,7 @@ struct InvoicesTabView: View {
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .tint(.blue)
                     Text("Factures").font(.title2.bold())
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
@@ -994,6 +995,9 @@ struct InvoicesTabView: View {
                             store.upsert(draft)
                             selectedID = draft.id
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.blue)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -1514,6 +1518,7 @@ struct InvoiceEditorView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .tint(.blue)
                 .help("Visualiser, exporter XML, générer le Factur-X, dupliquer, copie PDP…")
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
