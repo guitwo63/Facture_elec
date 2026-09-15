@@ -81,11 +81,12 @@ public final class OrderStore: ObservableObject {
             orders.insert(order, at: 0)
         }
         save()
-        audit?.record(actor: actorName, action: isNew ? "order_created" : "order_updated", target: order.number,
-                       objectType: .order, objectCode: order.number)
         if let prev = previousStatus, prev != order.status {
             audit?.recordStatusChange(actor: actorName, objectType: .order, objectCode: order.number,
                                       statusFrom: prev.label, statusTo: order.status.label)
+        } else {
+            audit?.record(actor: actorName, action: isNew ? "order_created" : "order_updated", target: order.number,
+                           objectType: .order, objectCode: order.number)
         }
     }
 

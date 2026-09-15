@@ -92,13 +92,14 @@ public final class InvoiceStore: ObservableObject {
             invoices.insert(invoice, at: 0)
         }
         save()
-        audit?.record(actor: actorName, action: isNew ? "invoice_created" : "invoice_updated",
-                       target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture",
-                       objectType: .invoice, objectCode: invoice.number)
         if let prev = previousStatus, prev != invoice.status {
             audit?.recordStatusChange(actor: actorName, objectType: .invoice, objectCode: invoice.number,
                                       statusFrom: prev.label, statusTo: invoice.status.label,
                                       details: invoice.type.isCreditNote ? "avoir" : "facture")
+        } else {
+            audit?.record(actor: actorName, action: isNew ? "invoice_created" : "invoice_updated",
+                           target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture",
+                           objectType: .invoice, objectCode: invoice.number)
         }
     }
 
