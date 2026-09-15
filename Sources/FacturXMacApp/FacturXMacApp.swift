@@ -2014,7 +2014,6 @@ struct InvoiceEditorView: View {
         }
         superPDPSubmitting = true
         let invoiceRef = invoice
-        let priorStatus = superPDPSubmission?.status
         Task {
             do {
                 let service = SuperPDPService()
