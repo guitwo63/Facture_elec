@@ -107,7 +107,7 @@ public struct ExportGenerator {
         var rows: [[String]] = []
         rows.append([
             "N° facture", "Type", "Date", "Destinataire",
-            "Désignation", "Quantité", "Unité", "P.U. HT", "TVA %", "Total HT", "Réf. commande"
+            "Désignation", "Quantité", "Unité", "P.U. HT", "TVA %", "Cat. TVA (BT-151)", "Total HT", "Réf. commande"
         ])
         for inv in invoices {
             for line in inv.lines {
@@ -121,6 +121,7 @@ public struct ExportGenerator {
                     csv(line.unit),
                     String(format: "%.2f", line.unitPrice),
                     String(format: "%g", line.vatRate),
+                    csv(inv.vatCategory(for: line.vatRate)),
                     String(format: "%.2f", line.lineTotal),
                     csv(orBlank(line.orderReference))
                 ])
@@ -134,7 +135,7 @@ public struct ExportGenerator {
         var rows: [[String]] = []
         rows.append([
             "N° commande", "Type", "Date", "Client",
-            "Désignation", "Quantité", "Unité", "P.U. HT", "TVA %", "Total HT"
+            "Désignation", "Quantité", "Unité", "P.U. HT", "TVA %", "Cat. TVA (BT-151)", "Total HT"
         ])
         for order in orders {
             for line in order.lines {
@@ -148,6 +149,7 @@ public struct ExportGenerator {
                     csv(line.unit),
                     String(format: "%.2f", line.unitPrice),
                     String(format: "%g", line.vatRate),
+                    csv(order.vatCategory(for: line.vatRate)),
                     String(format: "%.2f", line.lineTotal)
                 ])
             }

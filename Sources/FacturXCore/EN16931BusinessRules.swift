@@ -46,12 +46,16 @@ public enum EN16931BusinessRules {
                 message: "BR-9 : La date d'échéance (BT-9) est antérieure à la date d'émission (BT-2)."))
         }
 
+        let knownCurrencies = Set(NormRefs.currencies.map { $0.code })
         if currency.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-5", severity: .error,
                 message: "BR-5 : La devise (BT-5) est obligatoire (code ISO 4217 à 3 lettres)."))
         } else if currency.count != 3 {
             results.append(BusinessRuleResult(ruleId: "BR-5", severity: .error,
                 message: "BR-5 : La devise (BT-5) doit être un code ISO 4217 à 3 lettres."))
+        } else if !knownCurrencies.contains(currency) {
+            results.append(BusinessRuleResult(ruleId: "BR-5", severity: .warning,
+                message: "BR-5 : La devise (BT-5) « \(currency) » n'est pas dans la liste de référence ISO 4217 ; vérifiez le code."))
         }
 
         if sellerName.isEmpty {
@@ -67,6 +71,15 @@ public enum EN16931BusinessRules {
         if sellerEndpoint.isEmpty && sellerSiren.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-49", severity: .error,
                 message: "BR-49 : L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-49)."))
+        }
+        if !sellerSiren.isEmpty && !SireneValidator.isValidSiren(invoice.seller.siren) {
+            results.append(BusinessRuleResult(ruleId: "BR-49", severity: .warning,
+                message: "BR-49 : Le SIREN de l'émetteur (BT-29) doit comporter 9 chiffres et être valide (clé Luhn)."))
+        }
+        if let sellerSiret = invoice.seller.siret?.trimmingCharacters(in: .whitespaces), !sellerSiret.isEmpty,
+           !SireneValidator.isValidSiret(invoice.seller.siret) {
+            results.append(BusinessRuleResult(ruleId: "BR-49", severity: .warning,
+                message: "BR-49 : Le SIRET de l'émetteur doit comporter 14 chiffres et être valide (clé Luhn)."))
         }
         let sellerVAT = (invoice.seller.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
         let hasStandardRatedLine = invoice.lines.contains { $0.vatRate > 0 }
@@ -88,6 +101,15 @@ public enum EN16931BusinessRules {
         if buyerEndpoint.isEmpty && buyerSiren.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-46", severity: .error,
                 message: "BR-46 : Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-34)."))
+        }
+        if !buyerSiren.isEmpty && !SireneValidator.isValidSiren(invoice.buyer.siren) {
+            results.append(BusinessRuleResult(ruleId: "BR-46", severity: .warning,
+                message: "BR-46 : Le SIREN du destinataire (BT-48) doit comporter 9 chiffres et être valide (clé Luhn)."))
+        }
+        if let buyerSiret = invoice.buyer.siret?.trimmingCharacters(in: .whitespaces), !buyerSiret.isEmpty,
+           !SireneValidator.isValidSiret(invoice.buyer.siret) {
+            results.append(BusinessRuleResult(ruleId: "BR-46", severity: .warning,
+                message: "BR-46 : Le SIRET du destinataire doit comporter 14 chiffres et être valide (clé Luhn)."))
         }
 
         if invoice.lines.isEmpty {
@@ -166,21 +188,33 @@ public enum EN16931BusinessRules {
                 message: "BR-FR-05 : La mention sur l'escompte (SubjectCode AAB) est obligatoire en France."))
         }
 
-        if let iban = invoice.paymentIBAN, !iban.isEmpty {
-            let cleaned = iban.replacingOccurrences(of: " ", with: "")
-            if cleaned.count < 15 || cleaned.count > 34 {
-                results.append(BusinessRuleResult(ruleId: "BR-50", severity: .warning,
-                    message: "BR-50 : L'IBAN (BT-91) semble avoir une longueur inhabituelle (15 à 34 caractères)."))
-            }
-            if cleaned.uppercased() != cleaned {
-                results.append(BusinessRuleResult(ruleId: "BR-50", severity: .warning,
-                    message: "BR-50 : L'IBAN (BT-91) doit être en majuscules."))
+        if let iban = invoice.paymentIBAN, !iban.trimmingCharacters(in: .whitespaces).isEmpty {
+            if !IBANValidator.isValid(iban) {
+                let cleaned = IBANValidator.normalize(iban)
+                if cleaned.count < 15 || cleaned.count > 34 {
+                    results.append(BusinessRuleResult(ruleId: "BR-50", severity: .warning,
+                        message: "BR-50 : L'IBAN (BT-91) semble avoir une longueur inhabituelle (15 à 34 caractères)."))
+                } else if cleaned.uppercased() != cleaned {
+                    results.append(BusinessRuleResult(ruleId: "BR-50", severity: .warning,
+                        message: "BR-50 : L'IBAN (BT-91) doit être en majuscules."))
+                } else {
+                    results.append(BusinessRuleResult(ruleId: "BR-50", severity: .error,
+                        message: "BR-50 : L'IBAN (BT-91) est invalide (clé de contrôle mod 97 incorrecte ou longueur pays inattendue)."))
+                }
             }
         }
 
         if invoice.lines.contains(where: { $0.vatRate < 0 }) {
             results.append(BusinessRuleResult(ruleId: "BR-FR-06", severity: .warning,
                 message: "BR-FR-06 : Un taux de TVA négatif est inhabituel ; vérifiez la catégorie de TVA (BT-151)."))
+        }
+
+        for (idx, line) in invoice.lines.enumerated() {
+            let label = "Ligne \(idx + 1)"
+            if line.vatRate == 0 {
+                results.append(BusinessRuleResult(ruleId: "BR-CO-16", severity: .warning,
+                    message: "BR-CO-16 : \(label) — taux nul (BT-151=Z) : vérifiez qu'il s'agit bien d'une exonération et non d'un oubli de taux."))
+            }
         }
 
         switch invoice.profile {

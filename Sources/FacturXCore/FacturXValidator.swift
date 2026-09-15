@@ -100,13 +100,16 @@ public struct FacturXValidator {
             warnings.append("La mention sur l'escompte (note avec SubjectCode AAB) est obligatoire en France (BR-FR-05).")
         }
 
-        if let iban = invoice.paymentIBAN, !iban.isEmpty {
-            let cleaned = iban.replacingOccurrences(of: " ", with: "")
-            if cleaned.count < 15 || cleaned.count > 34 {
-                warnings.append("L'IBAN semble avoir une longueur inhabituelle (15 à 34 caractères attendus).")
-            }
-            if cleaned.uppercased() != cleaned {
-                warnings.append("L'IBAN devrait être en majuscules.")
+        if let iban = invoice.paymentIBAN, !iban.trimmingCharacters(in: .whitespaces).isEmpty {
+            if !IBANValidator.isValid(iban) {
+                let cleaned = IBANValidator.normalize(iban)
+                if cleaned.count < 15 || cleaned.count > 34 {
+                    warnings.append("L'IBAN semble avoir une longueur inhabituelle (15 à 34 caractères attendus).")
+                } else if cleaned.uppercased() != cleaned {
+                    warnings.append("L'IBAN devrait être en majuscules.")
+                } else {
+                    errors.append("L'IBAN est invalide (clé de contrôle mod 97 incorrecte ou longueur pays inattendue).")
+                }
             }
         }
 

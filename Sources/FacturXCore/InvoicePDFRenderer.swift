@@ -138,15 +138,29 @@ public final class InvoicePDFRenderer {
     }
 
     private func drawFooter(context: CGContext, invoice: Invoice) {
-        let y: CGFloat = 80
+        var y: CGFloat = 120
+        let legalNotes: [(String, String)] = [
+            ("Pénalités de retard", invoice.legalNotePMD),
+            ("Frais de recouvrement", invoice.legalNotePMT),
+            ("Escompte", invoice.legalNoteAAB)
+        ]
+        for (label, note) in legalNotes {
+            let text = note.trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { continue }
+            drawText(context: context, text: "\(label) : \(text)",
+                     x: margin, y: y, font: font(size: 8), color: .darkGray)
+            y -= 11
+        }
+
+        let paymentY: CGFloat = 80
         if let iban = invoice.paymentIBAN {
-            drawText(context: context, text: "IBAN: \(iban)", x: margin, y: y, font: font(size: 9), color: .darkGray)
+            drawText(context: context, text: "IBAN: \(IBANValidator.formatted(iban))", x: margin, y: paymentY, font: font(size: 9), color: .darkGray)
         }
         if let bic = invoice.paymentBIC {
-            drawText(context: context, text: "BIC: \(bic)", x: margin, y: y - 12, font: font(size: 9), color: .darkGray)
+            drawText(context: context, text: "BIC: \(bic)", x: margin, y: paymentY - 12, font: font(size: 9), color: .darkGray)
         }
         if let terms = invoice.paymentTerms {
-            drawText(context: context, text: "Conditions: \(terms)", x: margin, y: y - 24, font: font(size: 9), color: .darkGray)
+            drawText(context: context, text: "Conditions: \(terms)", x: margin, y: paymentY - 24, font: font(size: 9), color: .darkGray)
         }
         drawText(context: context, text: "Facture électronique Factur-X profil \(invoice.profile.rawValue) — conforme EN 16931",
                  x: margin, y: 40, font: font(size: 8), color: .gray)

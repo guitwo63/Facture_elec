@@ -313,4 +313,93 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertFalse(SireneValidator.isValidSiret("732829320"))
         XCTAssertFalse(SireneValidator.isValidSiret(nil))
     }
+
+    // MARK: - IBAN
+
+    func testIBANValid() {
+        XCTAssertTrue(IBANValidator.isValid("FR7630006000011234567890189"))
+        XCTAssertTrue(IBANValidator.isValid("FR76 3000 6000 0112 3456 7890 189"))
+        XCTAssertTrue(IBANValidator.isValid("DE89370400440532013000"))
+        XCTAssertTrue(IBANValidator.isValid("GB82WEST12345698765432"))
+    }
+
+    func testIBANInvalid() {
+        XCTAssertFalse(IBANValidator.isValid("FR7630006000011234567890188"))
+        XCTAssertFalse(IBANValidator.isValid("FR763000600"))
+        XCTAssertFalse(IBANValidator.isValid(nil))
+        XCTAssertFalse(IBANValidator.isValid(""))
+        XCTAssertFalse(IBANValidator.isValid("XX7630006000011234567890189"))
+    }
+
+    func testIBANFormatted() {
+        XCTAssertEqual(IBANValidator.formatted("FR7630006000011234567890189"),
+                       "FR76 3000 6000 0112 3456 7890 189")
+        XCTAssertEqual(IBANValidator.formatted(nil), "")
+    }
+
+    func testIBANCountryCode() {
+        XCTAssertEqual(IBANValidator.countryCode("FR7630006000011234567890189"), "FR")
+        XCTAssertEqual(IBANValidator.countryCode("de89370400440532013000"), "DE")
+        XCTAssertNil(IBANValidator.countryCode("F"))
+    }
+
+    // MARK: - Règles métier renforcées
+
+    func testBusinessRulesInvalidIBAN() {
+        var inv = sampleInvoice()
+        inv.paymentIBAN = "FR7630006000011234567890188"
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-50" && $0.severity == .error },
+                     "BR-50 doit remonter une erreur pour un IBAN à clé invalide")
+    }
+
+    func testBusinessRulesInvalidSiren() {
+        var inv = sampleInvoice()
+        inv.seller = InvoiceParty(
+            name: inv.seller.name, street: inv.seller.street, postcode: inv.seller.postcode,
+            city: inv.seller.city, country: inv.seller.country, vatNumber: inv.seller.vatNumber,
+            siren: "123456780", contactEmail: inv.seller.contactEmail,
+            endpointID: inv.seller.endpointID, endpointSchemeID: inv.seller.endpointSchemeID
+        )
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-49" && $0.severity == .warning && $0.message.contains("SIREN") },
+                     "BR-49 doit avertir sur un SIREN émetteur invalide (clé Luhn)")
+    }
+
+    func testBusinessRulesUnknownCurrencyWarns() {
+        var inv = sampleInvoice()
+        inv.currency = "XXX"
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-5" && $0.severity == .warning },
+                     "BR-5 doit avertir pour une devise hors liste ISO 4217 de référence")
+    }
+
+    func testBusinessRulesVATCategoryCoherence() {
+        var inv = sampleInvoice()
+        inv.lines = [InvoiceLine(name: "Ligne exonérée", quantity: 1, unit: "C62", unitPrice: 100, vatRate: 0)]
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-CO-16" },
+                     "BR-CO-16 doit signaler un taux nul pour inviter à vérifier l'exonération")
+    }
+
+    // MARK: - Export enrichi
+
+    func testExportInvoiceLinesCSVContainsVATCategory() {
+        let csv = ExportGenerator().invoiceLinesCSV([sampleInvoice()])
+        XCTAssertTrue(csv.contains("Cat. TVA (BT-151)"))
+        XCTAssertTrue(csv.contains(";S;"),
+                     "La catégorie TVA S doit figurer pour les lignes à taux standard")
+    }
+
+    func testExportOrderLinesCSVContainsVATCategory() {
+        let order = SalesOrder(
+            number: "CMD-001",
+            buyer: InvoiceParty(name: "Acheteur SARL", street: "1 rue A", postcode: "75001", city: "Paris", country: "FR"),
+            seller: InvoiceParty(name: "Client SAS", street: "2 rue B", postcode: "75002", city: "Paris", country: "FR"),
+            lines: [InvoiceLine(name: "Article A", quantity: 3, unitPrice: 100, vatRate: 20)]
+        )
+        let csv = ExportGenerator().orderLinesCSV([order])
+        XCTAssertTrue(csv.contains("Cat. TVA (BT-151)"))
+        XCTAssertTrue(csv.contains(";S;"))
+    }
 }
