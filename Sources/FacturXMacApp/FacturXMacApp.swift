@@ -1881,10 +1881,34 @@ struct InvoiceEditorView: View {
                     store.upsert(invoice)
                 }
                 superPDPMessage = "Facture déposée sur SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
+                store.audit?.recordStatusChange(
+                    actor: store.actorName,
+                    objectType: .invoice,
+                    objectCode: invoice.number,
+                    statusFrom: nil,
+                    statusTo: submission.status,
+                    details: "Dépôt facture sur SUPER PDP (id distant : \(submission.remoteID ?? "?"))"
+                )
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec dépôt SUPER PDP : \(e.localizedDescription)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_deposit_error",
+                    target: invoice.number,
+                    details: "Échec dépôt SUPER PDP : \(e.localizedDescription)",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             } catch {
                 superPDPMessage = "Échec dépôt SUPER PDP : \(error)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_deposit_error",
+                    target: invoice.number,
+                    details: "Échec dépôt SUPER PDP : \(error)",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             }
             superPDPSubmitting = false
         }
@@ -1893,14 +1917,32 @@ struct InvoiceEditorView: View {
     private func refreshSuperPDPStatus() {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         superPDPSubmitting = true
+        let priorStatus = superPDPSubmission?.status
         Task {
             do {
                 let service = SuperPDPService()
                 let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: superPDPSettings.credentials)
                 superPDPSubmission = updated
                 superPDPMessage = "Statut SUPER PDP mis à jour : \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "")."
+                let actor = store.actorName
+                store.audit?.recordStatusChange(
+                    actor: actor,
+                    objectType: .invoice,
+                    objectCode: invoice.number,
+                    statusFrom: priorStatus,
+                    statusTo: updated.status,
+                    details: "Interrogation statut SUPER PDP (id distant : \(rid))"
+                )
             } catch {
                 superPDPMessage = "Échec rafraîchissement : \(error.localizedDescription)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_error",
+                    target: invoice.number,
+                    details: "Échec interrogation statut SUPER PDP : \(error.localizedDescription)",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             }
             superPDPSubmitting = false
         }
@@ -1960,9 +2002,15 @@ struct InvoiceEditorView: View {
                             if e.action == "status_change" {
                                 Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
                                     .font(.caption.bold())
+                                if !e.details.isEmpty {
+                                    Text(e.details).font(.caption2).foregroundStyle(.secondary)
+                                }
                             } else {
-                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action)
+                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action)
                                     .font(.caption)
+                                if !e.details.isEmpty {
+                                    Text(e.details).font(.caption2).foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
                         }
