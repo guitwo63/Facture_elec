@@ -1497,7 +1497,7 @@ struct InvoiceEditorView: View {
                         store.upsert(copy)
                         duplicatedNumber = copy.number
                     } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
-                    if isAdmin && superPDPSettings.credentials.usePDP {
+                    if superPDPSettings.credentials.usePDP {
                         Divider()
                         Button {
                             downloadPDPInvoice()
@@ -1517,7 +1517,7 @@ struct InvoiceEditorView: View {
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
-                } else if isAdmin && superPDPSettings.credentials.usePDP {
+                } else if superPDPSettings.credentials.usePDP {
                     Button {
                         depositToSuperPDP()
                     } label: { Label("Super PDP", systemImage: "paperplane.fill") }
