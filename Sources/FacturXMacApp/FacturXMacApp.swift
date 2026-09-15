@@ -3262,6 +3262,18 @@ struct DirectoryDetailView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Text("Statut").font(.headline)
+                            Spacer()
+                            if entry.isArchived {
+                                Label("Tiers archivé", systemImage: "archivebox")
+                                    .font(.callout.bold()).foregroundStyle(.orange)
+                            } else {
+                                Label("Tiers actif", systemImage: "checkmark.circle")
+                                    .font(.callout.bold()).foregroundStyle(.green)
+                            }
+                        }
+                        Divider()
                         Text("Identité").font(.headline)
                         detailRow("Type", entry.kind.label)
                         detailRow("Nom", entry.party.name)
@@ -3280,66 +3292,73 @@ struct DirectoryDetailView: View {
                             }
                         }
 
-                        Divider()
-                        Text("Identifiants").font(.headline)
-                        if let s = entry.party.siren, !s.isEmpty {
-                            HStack(alignment: .top) {
-                                Text("SIREN").font(.callout.bold()).frame(width: 160, alignment: .leading)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(s).font(.body)
-                                    if SireneValidator.isValidSiren(s) {
-                                        Label("SIREN valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
-                                            .font(.caption2).foregroundStyle(.green)
-                                    } else {
-                                        Label("SIREN invalide (9 chiffres attendus, clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
-                                            .font(.caption2).foregroundStyle(.orange)
+                        HStack(alignment: .top, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Identifiants").font(.headline)
+                                if let s = entry.party.siren, !s.isEmpty {
+                                    HStack(alignment: .top) {
+                                        Text("SIREN").font(.callout.bold()).frame(width: 140, alignment: .leading)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(s).font(.body)
+                                            if SireneValidator.isValidSiren(s) {
+                                                Label("SIREN valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
+                                                    .font(.caption2).foregroundStyle(.green)
+                                            } else {
+                                                Label("SIREN invalide (9 chiffres attendus, clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                                                    .font(.caption2).foregroundStyle(.orange)
+                                            }
+                                        }
+                                        Spacer()
                                     }
                                 }
-                                Spacer()
-                            }
-                        }
-                        if let st = entry.party.siret, !st.isEmpty {
-                            HStack(alignment: .top) {
-                                Text("SIRET").font(.callout.bold()).frame(width: 160, alignment: .leading)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(st).font(.body)
-                                    if SireneValidator.isValidSiret(st) {
-                                        Label("valide (Luhn)", systemImage: "checkmark.circle.fill")
-                                            .font(.caption2).foregroundStyle(.green)
-                                    } else {
-                                        Label("invalide (Luhn)", systemImage: "exclamationmark.triangle.fill")
-                                            .font(.caption2).foregroundStyle(.orange)
+                                if let st = entry.party.siret, !st.isEmpty {
+                                    HStack(alignment: .top) {
+                                        Text("SIRET").font(.callout.bold()).frame(width: 140, alignment: .leading)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(st).font(.body)
+                                            if SireneValidator.isValidSiret(st) {
+                                                Label("valide (Luhn)", systemImage: "checkmark.circle.fill")
+                                                    .font(.caption2).foregroundStyle(.green)
+                                            } else {
+                                                Label("invalide (Luhn)", systemImage: "exclamationmark.triangle.fill")
+                                                    .font(.caption2).foregroundStyle(.orange)
+                                            }
+                                        }
+                                        Spacer()
                                     }
                                 }
-                                Spacer()
+                                if let v = entry.party.vatNumber, !v.isEmpty { detailRow("N° TVA", v) }
+                                if let e = entry.party.endpointID, !e.isEmpty {
+                                    detailRow("Ident. élec. (BT-49/34)", e)
+                                }
+                                if !entry.party.endpointSchemeID.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    detailRow("Scheme ident. élec.", entry.party.endpointSchemeID)
+                                }
+                                detailRow("Scheme légal", entry.party.legalSchemeID)
                             }
-                        }
-                        if let v = entry.party.vatNumber, !v.isEmpty { detailRow("N° TVA", v) }
-                        if let e = entry.party.endpointID, !e.isEmpty {
-                            detailRow("Ident. élec. (BT-49/34)", e)
-                        }
-                        if !entry.party.endpointSchemeID.trimmingCharacters(in: .whitespaces).isEmpty {
-                            detailRow("Scheme ident. élec.", entry.party.endpointSchemeID)
-                        }
-                        detailRow("Scheme légal", entry.party.legalSchemeID)
-
-                        Divider()
-                        Text("Adresse").font(.headline)
-                        if !entry.party.street.trimmingCharacters(in: .whitespaces).isEmpty {
-                            detailRow("Rue", entry.party.street)
-                        }
-                        if !entry.party.postcode.trimmingCharacters(in: .whitespaces).isEmpty {
-                            detailRow("Code postal", entry.party.postcode)
-                        }
-                        if !entry.party.city.trimmingCharacters(in: .whitespaces).isEmpty {
-                            detailRow("Ville", entry.party.city)
-                        }
-                        if !entry.party.country.trimmingCharacters(in: .whitespaces).isEmpty {
-                            detailRow("Pays", entry.party.country)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Divider()
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Adresse").font(.headline)
+                                if !entry.party.street.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    detailRow("Rue", entry.party.street)
+                                }
+                                if !entry.party.postcode.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    detailRow("Code postal", entry.party.postcode)
+                                }
+                                if !entry.party.city.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    detailRow("Ville", entry.party.city)
+                                }
+                                if !entry.party.country.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    detailRow("Pays", entry.party.country)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
                         Divider()
-                        Text("Coordonnées bancaires").font(.headline)
+                        if entry.kind != .client {
+                            Text("Coordonnées bancaires").font(.headline)
                         if let iban = entry.party.iban?.trimmingCharacters(in: .whitespaces), !iban.isEmpty {
                             HStack(alignment: .top) {
                                 Text("IBAN").font(.callout.bold()).frame(width: 160, alignment: .leading)
@@ -3366,6 +3385,7 @@ struct DirectoryDetailView: View {
                             && (entry.party.bic?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
                             && (entry.party.paymentTerms?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) {
                             Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
+                        }
                         }
                         Divider()
                         HStack {
@@ -3427,6 +3447,7 @@ struct DirectoryDetailView: View {
                             if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
                         }
 
+                        if entry.kind != .fournisseur {
                         Divider()
                         HStack {
                             Text("Adresses de facturation électronique").font(.headline)
@@ -3481,21 +3502,12 @@ struct DirectoryDetailView: View {
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                         }
+                        }
 
                         if let note = entry.note, !note.isEmpty {
                             Divider()
                             Text("Note").font(.headline)
                             Text(note).font(.callout).foregroundStyle(.secondary)
-                        }
-
-                        Divider()
-                        Text("Statut").font(.headline)
-                        if entry.isArchived {
-                            Label("Tiers archivé", systemImage: "archivebox")
-                                .font(.callout.bold()).foregroundStyle(.orange)
-                        } else {
-                            Label("Tiers actif", systemImage: "checkmark.circle")
-                                .font(.callout.bold()).foregroundStyle(.green)
                         }
                     }.padding(14)
                 }
@@ -3644,7 +3656,7 @@ struct DirectoryEditorView: View {
             }
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kind == .societe)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kind == .societe, hideBankDetails: entry.kind == .client, hideElectronicAddress: entry.kind == .fournisseur)
             }
 
             if !tagStore.tags.isEmpty {
@@ -5678,6 +5690,8 @@ struct PartyEditorView: View {
     var showWebButton: Bool
     var isSociete: Bool = false
     var hideEmail: Bool = false
+    var hideBankDetails: Bool = false
+    var hideElectronicAddress: Bool = false
     var isMultiContact: Bool
     var directory: PartyDirectory?
     var onPickContact: ((PartyContact) -> Void)?
@@ -5694,11 +5708,13 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
         self.isSociete = isSociete
         self.hideEmail = hideEmail
+        self.hideBankDetails = hideBankDetails
+        self.hideElectronicAddress = hideElectronicAddress
         self.isMultiContact = contacts != nil
         self.directory = directory
         self.onPickContact = onPickContact
@@ -5754,70 +5770,69 @@ struct PartyEditorView: View {
             HStack { Text("Nom").font(.caption); star }
             TextField("Nom", text: $party.name)
                 .onChange(of: party.name) { _ in scheduleDinumSearch() }
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("Adresse", text: $party.street)
-                    HStack {
-                        TextField("Code postal", text: $party.postcode)
-                        TextField("Ville", text: $party.city)
-                    }
-                    HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Adresse", text: $party.street)
+                HStack(spacing: 8) {
+                    TextField("Code postal", text: $party.postcode).frame(width: 90)
+                    TextField("Ville", text: $party.city)
+                    HStack(spacing: 2) {
                         Text("Pays").font(.caption); star
-                        NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 200)
+                        NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 160)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
                         Text("SIREN").font(.caption); star
                         TextField("SIREN (9 chiffres)", text: Binding($party.siren, replacingNilWith: ""))
+                            .frame(width: 130)
                             .onChange(of: party.siren) { _ in scheduleDinumSearch() }
                     }
+                    HStack(spacing: 4) {
+                        Text("TVA").font(.caption)
+                        TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: "")).frame(width: 130)
+                    }
+                    HStack(spacing: 4) {
+                        Text("SIRET").font(.caption)
+                        TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: "")).frame(width: 150)
+                    }
+                }
+                HStack(spacing: 12) {
                     if let sn = party.siren?.trimmingCharacters(in: .whitespaces), !sn.isEmpty {
                         if SireneValidator.isValidSiren(sn) {
-                            Label("SIREN valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
+                            Label("SIREN ok", systemImage: "checkmark.circle.fill")
                                 .font(.caption2).foregroundStyle(.green)
                         } else {
-                            Label("SIREN invalide (9 chiffres attendus, clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                            Label("SIREN invalide", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption2).foregroundStyle(.orange)
                         }
                     }
-                    HStack(spacing: 4) {
-                        Text("TVA intra").font(.caption)
-                        TextField("N° TVA", text: Binding($party.vatNumber, replacingNilWith: ""))
-                    }
-                    HStack {
-                        Text("SIRET").font(.caption)
-                        TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: ""))
-                            .frame(maxWidth: 200)
-                        if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
-                            if SireneValidator.isValidSiret(st) {
-                                Label("SIRET valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
-                                    .font(.caption2).foregroundStyle(.green)
-                            } else {
-                                Label("SIRET invalide (clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption2).foregroundStyle(.orange)
-                            }
+                    if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
+                        if SireneValidator.isValidSiret(st) {
+                            Label("SIRET ok", systemImage: "checkmark.circle.fill")
+                                .font(.caption2).foregroundStyle(.green)
+                        } else {
+                            Label("SIRET invalide", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2).foregroundStyle(.orange)
                         }
-                        Spacer()
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack {
-                Text("Ident. élec. (BT-49/34)").font(.caption)
-                if linkedEntry != nil {
-                    Text((party.endpointID ?? "").isEmpty ? "Aucune" : (party.endpointID ?? ""))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button {
-                        showRoutingPicker = true
-                    } label: { Label("Choisir", systemImage: "envelope") }
-                        .buttonStyle(.bordered)
-                        .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
-                } else {
-                    TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
-                    NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
+            if !hideElectronicAddress {
+                HStack {
+                    Text("Ident. élec. (BT-49/34)").font(.caption)
+                    if linkedEntry != nil {
+                        Text((party.endpointID ?? "").isEmpty ? "Aucune" : (party.endpointID ?? ""))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            showRoutingPicker = true
+                        } label: { Label("Choisir", systemImage: "envelope") }
+                            .buttonStyle(.bordered)
+                            .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
+                    } else {
+                        TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
+                        NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
+                    }
                 }
             }
             if isMultiContact {
@@ -5903,7 +5918,7 @@ struct PartyEditorView: View {
                     TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
                 }
             }
-            if linkedEntry == nil {
+            if !hideElectronicAddress, linkedEntry == nil {
                 Button {
                     showRoutingEditor = true
                 } label: {
@@ -5911,7 +5926,7 @@ struct PartyEditorView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            if isSociete {
+            if isSociete, !hideBankDetails {
                 DisclosureGroup("Coordonnées bancaires & conditions de paiement") {
                     VStack(alignment: .leading, spacing: 6) {
                         TextField("IBAN", text: Binding($party.iban, replacingNilWith: ""))
@@ -5932,7 +5947,7 @@ struct PartyEditorView: View {
                 }
                 .font(.caption)
             }
-            if !routingAddresses.isEmpty {
+            if !hideElectronicAddress, !routingAddresses.isEmpty {
                 ForEach(routingAddresses) { addr in
                     HStack(spacing: 8) {
                         Text(addr.format.label).font(.caption.bold())
