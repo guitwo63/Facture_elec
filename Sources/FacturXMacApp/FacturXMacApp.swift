@@ -1453,7 +1453,9 @@ struct InvoiceEditorView: View {
                             .foregroundColor(Color(hex: invoice.status.hexColor))
                             .font(.caption2)
                         Picker("Statut", selection: $invoice.status) {
-                            ForEach([invoice.status] + InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin), id: \.self) { s in
+                            let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
+                            let options = transitions.isEmpty ? [invoice.status] : transitions
+                            ForEach(options, id: \.self) { s in
                                 Label(s.label, systemImage: s.systemImage).tag(s)
                             }
                         }
