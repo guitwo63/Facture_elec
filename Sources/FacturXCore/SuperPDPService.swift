@@ -524,7 +524,7 @@ public final class SuperPDPService {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var payload: [String: Any] = [
-            "invoice_id": remoteID,
+            "invoice_id": Int(remoteID) ?? remoteID,
             "status_code": statusCode
         ]
         if let reported = reportedData, !reported.isEmpty {

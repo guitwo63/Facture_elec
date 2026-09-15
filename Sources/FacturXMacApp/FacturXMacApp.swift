@@ -2112,7 +2112,7 @@ struct InvoiceEditorView: View {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
                                 }
                             } else {
-                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action)
+                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action == "pdp_status_send_error" ? "Envoi statut PDP échoué" : e.action)
                                     .font(.caption)
                                 if !e.details.isEmpty {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
