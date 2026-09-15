@@ -1378,10 +1378,6 @@ struct InvoiceEditorView: View {
                         .onChange(of: invoice.number) { _ in exportError = nil }
                         .onChange(of: invoice.seller.name) { _ in exportError = nil }
                         .onChange(of: invoice.buyer.name) { _ in exportError = nil }
-                        .onChange(of: invoice.status) { newStatus in
-                            guard !syncingFromPDP else { return }
-                            notifyPDPStatusChange(to: newStatus)
-                        }
                 }
                 if let url = exportedURL {
                     Text("Fichier généré : \(url.lastPathComponent)").font(.caption).foregroundStyle(.green)
@@ -1765,6 +1761,10 @@ struct InvoiceEditorView: View {
                     },
                     onCancel: { showPrecedingInvoicePicker = false }
                 )
+            }
+            .onChange(of: invoice.status) { newStatus in
+                guard !syncingFromPDP else { return }
+                notifyPDPStatusChange(to: newStatus)
             }
         }
     }
