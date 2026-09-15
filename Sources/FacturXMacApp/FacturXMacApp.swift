@@ -1,6 +1,7 @@
 import SwiftUI
 import FacturXCore
 import AppKit
+import PDFKit
 import UniformTypeIdentifiers
 
 extension Color {
@@ -1282,6 +1283,8 @@ struct InvoiceEditorView: View {
     @State private var lastSentPDPStatusCode: String?
     @State private var showStatusJournal = false
     @State private var showLegalMentions = false
+    @State private var showInvoicePreview = false
+    @State private var previewPDFData: Data?
 
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
@@ -1362,6 +1365,12 @@ struct InvoiceEditorView: View {
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(fieldLocked)
+                Button {
+                    previewPDFData = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: sellerLogo)
+                    showInvoicePreview = true
+                } label: { Label("Visualiser", systemImage: "eye") }
+                    .buttonStyle(.bordered)
+                    .help("Afficher l'aperçu du PDF lisible de la facture")
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
@@ -1543,10 +1552,6 @@ struct InvoiceEditorView: View {
                                 }
                                 HStack {
                                     HStack(spacing: 3) {
-                                        DatePicker("Date", selection: $invoice.issueDate, displayedComponents: .date)
-                                        InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
-                                    }
-                                    HStack(spacing: 3) {
                                         Image(systemName: "clock.badge.checkmark")
                                             .foregroundStyle(.secondary)
                                             .font(.caption)
@@ -1555,6 +1560,10 @@ struct InvoiceEditorView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                     .help("Date de création de la facture dans l'application (non modifiable).")
+                                    HStack(spacing: 3) {
+                                        DatePicker("Date facture", selection: $invoice.issueDate, displayedComponents: .date)
+                                        InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                                    }
                                     HStack(spacing: 3) {
                                         DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
                                         InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
@@ -1808,6 +1817,9 @@ struct InvoiceEditorView: View {
             .onChange(of: invoice.status) { newStatus in
                 guard !syncingFromPDP else { return }
                 notifyPDPStatusChange(to: newStatus)
+            }
+            .sheet(isPresented: $showInvoicePreview) {
+                InvoicePreviewSheet(pdfData: previewPDFData, title: "Facture \(invoice.number)")
             }
         }
     }
@@ -3444,6 +3456,34 @@ struct RoutingAddressFormView: View {
     }
 }
 
+struct CapsuleToggleButton: View {
+    let title: String
+    @Binding var isOn: Bool
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isOn ? "checkmark" : "")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 12)
+                Text(title)
+            }
+            .font(.callout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(isOn ? Color.accentColor.opacity(0.18) : Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                Capsule().stroke(isOn ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
+            )
+            .foregroundStyle(isOn ? Color.accentColor : .primary)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct ContactFormView: View {
     @Binding var contacts: [PartyContact]
     @State private var draft: PartyContact
@@ -3463,8 +3503,11 @@ struct ContactFormView: View {
             TextField("Email", text: Binding($draft.email, replacingNilWith: ""))
             TextField("Téléphone", text: Binding($draft.phone, replacingNilWith: ""))
             TextField("Libellé (optionnel)", text: Binding($draft.label, replacingNilWith: ""))
-            Toggle("Contact actif", isOn: $draft.isActive)
-            Toggle("Contact par défaut", isOn: $draft.isDefault)
+            HStack(spacing: 10) {
+                CapsuleToggleButton(title: "Contact actif", isOn: $draft.isActive)
+                CapsuleToggleButton(title: "Contact par défaut", isOn: $draft.isDefault)
+                Spacer()
+            }
             HStack {
                 Spacer()
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -6301,5 +6344,46 @@ struct PartyLogoEditor: View {
         }
         .padding(24)
         .frame(width: 420, height: 320)
+    }
+}
+
+struct InvoicePreviewSheet: View {
+    let pdfData: Data?
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Aperçu — \(title)").font(.headline)
+                Spacer()
+                Button("Fermer") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(12)
+            Divider()
+            if let data = pdfData, let document = PDFDocument(data: data) {
+                PDFKitView(document: document)
+            } else {
+                Text("Aucun aperçu disponible.").foregroundStyle(.secondary)
+                Spacer()
+            }
+        }
+        .frame(minWidth: 640, minHeight: 720)
+    }
+}
+
+struct PDFKitView: NSViewRepresentable {
+    let document: PDFDocument
+
+    func makeNSView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.document = document
+        return view
+    }
+
+    func updateNSView(_ nsView: PDFView, context: Context) {
+        if nsView.document !== document {
+            nsView.document = document
+        }
     }
 }
