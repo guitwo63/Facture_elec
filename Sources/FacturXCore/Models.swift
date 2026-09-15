@@ -354,6 +354,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var type: InvoiceTypeCode
     public var status: InvoiceStatus
     public var issueDate: Date
+    public var createdAt: Date
     public var dueDate: Date
     public var currency: String
     public var profile: FacturXProfile
@@ -386,6 +387,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         type: InvoiceTypeCode = .commercialInvoice,
         status: InvoiceStatus = .draft,
         issueDate: Date = Date(),
+        createdAt: Date = Date(),
         dueDate: Date = Date().addingTimeInterval(30 * 86400),
         currency: String = "EUR",
         profile: FacturXProfile = .en16931,
@@ -417,6 +419,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.type = type
         self.status = status
         self.issueDate = issueDate
+        self.createdAt = createdAt
         self.dueDate = dueDate
         self.currency = currency
         self.profile = profile
@@ -445,7 +448,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer, companyID
+        case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
         case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID
     }
@@ -457,6 +460,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         type = try c.decodeIfPresent(InvoiceTypeCode.self, forKey: .type) ?? .commercialInvoice
         status = try c.decodeIfPresent(InvoiceStatus.self, forKey: .status) ?? .draft
         issueDate = try c.decodeIfPresent(Date.self, forKey: .issueDate) ?? Date()
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate) ?? Date().addingTimeInterval(30 * 86400)
         currency = try c.decodeIfPresent(String.self, forKey: .currency) ?? "EUR"
         profile = try c.decodeIfPresent(FacturXProfile.self, forKey: .profile) ?? .en16931

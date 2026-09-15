@@ -1365,13 +1365,14 @@ struct InvoiceEditorView: View {
                         .buttonStyle(.bordered)
                     Button("Générer le Factur-X") { export() }
                         .buttonStyle(.borderedProminent)
-                    Button {
-                        depositToSuperPDP()
-                    } label: { Label("Super PDP", systemImage: "paperplane.fill") }
-                        .buttonStyle(.bordered)
-                        .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
-                        .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
-                }
+                    if isAdmin {
+                        Button {
+                            depositToSuperPDP()
+                        } label: { Label("Super PDP", systemImage: "paperplane.fill") }
+                            .buttonStyle(.bordered)
+                            .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                            .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
+                    }
             }
             .padding(12)
             Divider()
@@ -1539,6 +1540,15 @@ struct InvoiceEditorView: View {
                                         DatePicker("Date", selection: $invoice.issueDate, displayedComponents: .date)
                                         InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
                                     }
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "clock.badge.checkmark")
+                                            .foregroundStyle(.secondary)
+                                            .font(.caption)
+                                        Text(invoice.createdAt, format: .dateTime.day().month().year().hour().minute())
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .help("Date de création de la facture dans l'application (non modifiable).")
                                     HStack(spacing: 3) {
                                         DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
                                         InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
@@ -1729,14 +1739,16 @@ struct InvoiceEditorView: View {
 
                 GroupBox("Paiement") {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
+                        if let iban = invoice.paymentIBAN, !iban.isEmpty {
                             HStack(spacing: 3) {
-                                TextField("IBAN", text: Binding($invoice.paymentIBAN, replacingNilWith: ""))
-                                InfoBadge(text: "BT-84 — IBAN pour le virement SEPA.")
+                                Text(iban).font(.caption.monospaced())
+                                InfoBadge(text: "BT-84 — IBAN hérité de l'émetteur (annuaire).")
                             }
+                        }
+                        if let bic = invoice.paymentBIC, !bic.isEmpty {
                             HStack(spacing: 3) {
-                                TextField("BIC", text: Binding($invoice.paymentBIC, replacingNilWith: ""))
-                                InfoBadge(text: "BT-85 — BIC de la banque (requis si IBAN hors SEPA).")
+                                Text(bic).font(.caption.monospaced())
+                                InfoBadge(text: "BT-85 — BIC hérité de l'émetteur (annuaire).")
                             }
                         }
                         TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
