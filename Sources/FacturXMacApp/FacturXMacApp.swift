@@ -1210,6 +1210,8 @@ struct InvoiceEditorView: View {
 
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
+    private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
+    private var fieldLocked: Bool { isLocked && !isAdmin }
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1252,9 +1254,13 @@ struct InvoiceEditorView: View {
                         .foregroundStyle(statusLocked ? Color(hex: invoice.status.hexColor) : .secondary)
                         .padding(.horizontal, 6)
                         .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
+                    if isAdmin {
+                        Text("(admin : modification autorisée)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                if isLocked && !statusLocked {
+                if isManuallyLocked && !statusLocked && !isAdmin {
                     Button { showUnlockAlert = true } label: {
                         Label("Modifier", systemImage: "lock.open")
                     }
@@ -1273,10 +1279,10 @@ struct InvoiceEditorView: View {
                     duplicatedNumber = copy.number
                 } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
                     .buttonStyle(.bordered)
-                    .disabled(isLocked)
+                    .help("Créer une copie de la facture")
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
-                    .disabled(isLocked)
+                    .disabled(fieldLocked)
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
@@ -1289,7 +1295,7 @@ struct InvoiceEditorView: View {
                         depositToSuperPDP()
                     } label: { Label("Super PDP", systemImage: "paperplane.fill") }
                         .buttonStyle(.bordered)
-                        .disabled(isLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                        .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
                         .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
                 }
             }
@@ -1354,6 +1360,22 @@ struct InvoiceEditorView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: invoice.status.systemImage)
+                            .foregroundColor(Color(hex: invoice.status.hexColor))
+                            .font(.caption2)
+                        Picker("Statut", selection: $invoice.status) {
+                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                                Label(s.label, systemImage: s.systemImage).tag(s)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                        .help("Statut de la facture (modifiable à tout moment, y compris facture verrouillée)")
+                    }
+                }
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         if !linkedCreditNotes.isEmpty {
@@ -1500,19 +1522,6 @@ struct InvoiceEditorView: View {
                                 .font(.caption)
                             }
                             VStack(alignment: .trailing, spacing: 4) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: invoice.status.systemImage)
-                                        .foregroundColor(Color(hex: invoice.status.hexColor))
-                                        .font(.caption2)
-                                    Picker("Statut", selection: $invoice.status) {
-                                        ForEach(InvoiceStatus.allCases, id: \.self) { s in
-                                            Label(s.label, systemImage: s.systemImage).tag(s)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .frame(width: 200)
-                                    .help("Statut de la facture (modifiable à tout moment)")
-                                }
                                 VStack(alignment: .trailing) {
                                 row("Total HT", invoice.lineTotal)
                                 ForEach(invoice.vatBreakdown, id: \.rate) { item in
@@ -1529,7 +1538,7 @@ struct InvoiceEditorView: View {
                             }
                         }
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 HStack(alignment: .top, spacing: 12) {
                     GroupBox("Émetteur (vous)") {
@@ -1538,12 +1547,12 @@ struct InvoiceEditorView: View {
                             invoice.paymentBIC = p.bic
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
                         })
-                    }.lockable(isLocked)
+                    }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
                         PartySection(party: $invoice.buyer, role: .buyer)
-                    }.lockable(isLocked)
+                    }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-25", "BR-26", "BR-46"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                 }
@@ -1588,7 +1597,7 @@ struct InvoiceEditorView: View {
                             invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: invoice.lines.last?.vatRate ?? 20))
                         } label: { Label("Ajouter une ligne", systemImage: "plus") }
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 GroupBox("Paiement") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -1604,7 +1613,7 @@ struct InvoiceEditorView: View {
                         }
                         TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 GroupBox("Mentions légales (FR)") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -1616,7 +1625,7 @@ struct InvoiceEditorView: View {
                         TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
                         TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
                 statusJournalSection
             }.padding()
         }
@@ -1645,8 +1654,16 @@ struct InvoiceEditorView: View {
                     onCancel: { showPrecedingInvoicePicker = false }
                 )
             }
-            .onChange(of: invoice.status) { _ in
+            .onChange(of: invoice.status) { oldStatus in
                 store.upsert(invoice)
+                auth.audit.recordStatusChange(
+                    actor: auth.currentUser?.username ?? "system",
+                    objectType: .invoice,
+                    objectCode: invoice.number,
+                    statusFrom: oldStatus.rawValue,
+                    statusTo: invoice.status.rawValue,
+                    details: "Statut facture modifié"
+                )
             }
         }
     }
