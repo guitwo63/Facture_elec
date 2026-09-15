@@ -1351,7 +1351,7 @@ struct InvoiceEditorView: View {
                                 }
                                 .font(.caption)
                             }
-                            VStack(alignment: .trailing, spacing: 8) {
+                            VStack(alignment: .trailing, spacing: 4) {
                                 HStack(spacing: 4) {
                                     Image(systemName: invoice.status.systemImage)
                                         .foregroundColor(Color(hex: invoice.status.hexColor))
@@ -1365,6 +1365,7 @@ struct InvoiceEditorView: View {
                                     .frame(width: 200)
                                     .help("Statut de la facture (modifiable à tout moment)")
                                 }
+                                VStack(alignment: .trailing) {
                                 row("Total HT", invoice.lineTotal)
                                 ForEach(invoice.vatBreakdown, id: \.rate) { item in
                                     row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
@@ -1374,9 +1375,10 @@ struct InvoiceEditorView: View {
                                     row("Acompte déjà payé", -invoice.prepaidAmount)
                                     row("Net à payer", invoice.netToPay, bold: true)
                                 }
+                                }
+                                .padding(8)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                             }
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                         }
                     }.padding(8)
                 }.lockable(isLocked)
