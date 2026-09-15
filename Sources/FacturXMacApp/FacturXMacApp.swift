@@ -1827,7 +1827,6 @@ struct InvoiceEditorView: View {
             .sheet(isPresented: $showLogoPicker) {
                 LogoPickerSheet(logoData: $logoData, isPresented: $showLogoPicker)
             }
-            }
         }
     }
 
