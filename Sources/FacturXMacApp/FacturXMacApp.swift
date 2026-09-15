@@ -5493,8 +5493,8 @@ struct SuperPDPFrenchDirectorySheet: View {
             } catch let e as SuperPDPError {
                 error = e.localizedDescription
                 results = []
-            } catch {
-                error = "\(error)"
+            } catch let err {
+                error = "\(err)"
                 results = []
             }
             searching = false
