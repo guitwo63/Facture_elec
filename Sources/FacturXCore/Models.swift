@@ -569,12 +569,12 @@ public struct Invoice: Codable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
-        case buyerReference, purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
+        case purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
     }
 
     private enum LegacyReferenceKeys: String, CodingKey {
-        case contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef
+        case buyerReference, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef
     }
 
     public init(from decoder: Decoder) throws {
@@ -592,7 +592,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         seller = try c.decodeIfPresent(InvoiceParty.self, forKey: .seller) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         buyer = try c.decodeIfPresent(InvoiceParty.self, forKey: .buyer) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
-        let legacyBuyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
+        let legacyBuyerReference = try? lc.decodeIfPresent(String.self, forKey: .buyerReference)
         purchaseOrderRef = try c.decodeIfPresent(String.self, forKey: .purchaseOrderRef)
         precedingInvoiceRef = try c.decodeIfPresent(String.self, forKey: .precedingInvoiceRef)
         precedingInvoiceDate = try c.decodeIfPresent(Date.self, forKey: .precedingInvoiceDate)
