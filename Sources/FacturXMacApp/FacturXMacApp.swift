@@ -1285,7 +1285,7 @@ struct OptionalFieldsSection: View {
                 Divider()
                 Text("Champs libres").font(.caption.bold())
                 ForEach($fields) { $field in
-                    if !curatedTagNames.contains(field.wrappedValue.tagName) {
+                    if !curatedTagNames.contains(field.tagName) {
                         freeRow(field: $field)
                     }
                 }
