@@ -1272,10 +1272,6 @@ struct OptionalFieldsSection: View {
     private var templates: [OptionalFieldTemplate] { OptionalFieldCatalogue.templates(for: location) }
     private var title: String { location == .header ? "Champs optionnels (entete)" : "Champs optionnels (ligne)" }
 
-    private var curatedTagNames: Set<String> {
-        Set(templates.map { $0.tagName })
-    }
-
     private func labelFor(tagName: String) -> String {
         if let tpl = OptionalFieldCatalogue.template(forTag: tagName, location: location) {
             return "\(tpl.bt) - \(tpl.tagName)"
@@ -1283,18 +1279,18 @@ struct OptionalFieldsSection: View {
         return tagName
     }
 
+    private func helpFor(tagName: String) -> String {
+        OptionalFieldCatalogue.template(forTag: tagName, location: location)?.help ?? "Balise libre (non emise dans le XML CII)."
+    }
+
     var body: some View {
         DisclosureGroup(title) {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(templates) { tpl in
-                    curatedRow(for: tpl)
+                if fields.isEmpty {
+                    Text("Aucun champ optionnel.").foregroundStyle(.secondary)
                 }
-                Divider()
-                Text("Champs supplementaires").font(.caption.bold())
                 ForEach($fields) { $field in
-                    if !curatedTagNames.contains(field.tagName) {
-                        additionalRow(field: $field)
-                    }
+                    fieldRow(field: $field)
                 }
                 Menu {
                     ForEach(templates) { tpl in
@@ -1323,31 +1319,9 @@ struct OptionalFieldsSection: View {
     }
 
     @ViewBuilder
-    private func curatedRow(for tpl: OptionalFieldTemplate) -> some View {
-        let binding = Binding<String>(
-            get: { fields.first(where: { $0.tagName == tpl.tagName })?.value ?? "" },
-            set: { newValue in
-                if let idx = fields.firstIndex(where: { $0.tagName == tpl.tagName }) {
-                    if newValue.trimmingCharacters(in: .whitespaces).isEmpty {
-                        fields.remove(at: idx)
-                    } else {
-                        fields[idx].value = newValue
-                    }
-                } else if !newValue.trimmingCharacters(in: .whitespaces).isEmpty {
-                    fields.append(OptionalField(tagName: tpl.tagName, value: newValue))
-                }
-            }
-        )
-        HStack(spacing: 4) {
-            Text(tpl.bt).font(.caption2.bold()).foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
-            Text(tpl.tagName).font(.caption2.monospaced()).frame(width: 300, alignment: .leading)
-            TextField(tpl.label, text: binding).frame(maxWidth: .infinity)
-            InfoBadge(text: tpl.help)
-        }
-    }
-
-    @ViewBuilder
-    private func additionalRow(field: Binding<OptionalField>) -> some View {
+    private func fieldRow(field: Binding<OptionalField>) -> some View {
+        let tagName = field.tagName.wrappedValue
+        let isCustom = tagName.isEmpty || OptionalFieldCatalogue.template(forTag: tagName, location: location) == nil
         HStack(spacing: 4) {
             Menu {
                 ForEach(templates) { tpl in
@@ -1366,17 +1340,18 @@ struct OptionalFieldsSection: View {
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: "tag")
-                    Text(field.tagName.wrappedValue.isEmpty ? "Choisir une balise..." : labelFor(tagName: field.tagName.wrappedValue))
+                    Text(tagName.isEmpty ? "Choisir une balise..." : labelFor(tagName: tagName))
                         .lineLimit(1)
                     Image(systemName: "chevron.down").font(.caption2)
                 }
                 .frame(width: 320, alignment: .leading)
             }
-            if field.tagName.wrappedValue.isEmpty || OptionalFieldCatalogue.template(forTag: field.tagName.wrappedValue, location: location) == nil {
-                let placeholder = OptionalFieldCatalogue.template(forTag: field.tagName.wrappedValue, location: location)?.label ?? "ram:..."
+            if isCustom {
+                let placeholder = OptionalFieldCatalogue.template(forTag: tagName, location: location)?.label ?? "ram:..."
                 TextField(placeholder, text: field.tagName).frame(width: 200)
             }
             TextField("Valeur", text: field.value).frame(maxWidth: .infinity)
+            InfoBadge(text: helpFor(tagName: tagName))
             Button {
                 if let idx = fields.firstIndex(where: { $0.id == field.wrappedValue.id }) {
                     fields.remove(at: idx)
