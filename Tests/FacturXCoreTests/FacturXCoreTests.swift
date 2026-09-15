@@ -443,4 +443,42 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertTrue(csv.contains("Cat. TVA (BT-151)"))
         XCTAssertTrue(csv.contains(";S;"))
     }
+
+    func testSuperPDPInvoiceEventDetailLabels() {
+        XCTAssertEqual(SuperPDPInvoiceEvent(statusCode: "fr:212").detailLabel, "Facture encaissée")
+        XCTAssertEqual(SuperPDPInvoiceEvent(statusCode: "fr:207").detailLabel, "Accepté par le destinataire")
+        XCTAssertEqual(SuperPDPInvoiceEvent(statusCode: "fr:206").detailLabel, "Refusé par le destinataire")
+        XCTAssertEqual(SuperPDPInvoiceEvent(statusCode: "fr:320").detailLabel, "Facture annulée")
+        XCTAssertEqual(SuperPDPInvoiceEvent(statusCode: "fr:220").detailLabel, "Facture rejetée par la PDP")
+        XCTAssertTrue(SuperPDPInvoiceEvent(statusCode: "fr:999").detailLabel.contains("fr:999"))
+    }
+
+    func testSuperPDPFrenchCompanyToInvoiceParty() {
+        let company = SuperPDPFrenchCompany(
+            name: "ACME SAS",
+            siren: "123456789",
+            siret: "12345678900017",
+            vatNumber: "FR12345678901",
+            addressLine: "10 rue du Test",
+            postcode: "75001",
+            city: "Paris",
+            country: "FR"
+        )
+        let party = company.toInvoiceParty()
+        XCTAssertEqual(party.name, "ACME SAS")
+        XCTAssertEqual(party.siren, "123456789")
+        XCTAssertEqual(party.siret, "12345678900017")
+        XCTAssertEqual(party.vatNumber, "FR12345678901")
+        XCTAssertEqual(party.endpointID, "123456789")
+        XCTAssertEqual(party.endpointSchemeID, "0225")
+        XCTAssertEqual(party.city, "Paris")
+        XCTAssertEqual(company.displaySubtitle, "SIREN 123456789 · FR12345678901 · Paris")
+    }
+
+    func testSuperPDPSessionAuthorization() {
+        let s1 = SuperPDPSession(status: "active", isAuthorized: true, companyNumber: "123456789")
+        XCTAssertTrue(s1.isAuthorized)
+        let s2 = SuperPDPSession(status: "pending", isAuthorized: false)
+        XCTAssertFalse(s2.isAuthorized)
+    }
 }
