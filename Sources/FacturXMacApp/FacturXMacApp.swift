@@ -414,6 +414,16 @@ enum InvoiceTypeFilter: String, CaseIterable, Hashable {
     case creditNote = "Avoirs"
 }
 
+enum InvoiceFilterField: String, CaseIterable, Hashable {
+    case none = "Aucun"
+    case number = "N° facture"
+    case buyerName = "Client"
+    case buyerSiren = "SIREN client"
+    case sellerName = "Émetteur"
+    case amountMin = "Montant TTC min"
+    case amountMax = "Montant TTC max"
+}
+
 struct ExportSheet: View {
     let invoices: [Invoice]
     let orders: [SalesOrder]
@@ -825,8 +835,16 @@ struct InvoicesTabView: View {
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
+    @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
     @State private var showExport = false
+    @State private var showAdvancedFilters = false
+    @State private var advField1: InvoiceFilterField = .none
+    @State private var advValue1 = ""
+    @State private var advField2: InvoiceFilterField = .none
+    @State private var advValue2 = ""
+    @State private var advField3: InvoiceFilterField = .none
+    @State private var advValue3 = ""
 
     var filteredInvoices: [Invoice] {
         var result = store.invoices
@@ -844,6 +862,12 @@ struct InvoicesTabView: View {
         case .creditNote:
             result = result.filter { $0.type.isCreditNote }
         }
+        if let sf = statusFilter {
+            result = result.filter { $0.status == sf }
+        }
+        result = applyAdvancedFilter(result, field: advField1, value: advValue1)
+        result = applyAdvancedFilter(result, field: advField2, value: advValue2)
+        result = applyAdvancedFilter(result, field: advField3, value: advValue3)
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
         return result.filter { invoice in
@@ -878,6 +902,14 @@ struct InvoicesTabView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 260)
+                    Picker("Statut", selection: $statusFilter) {
+                        Text("Tous statuts").tag(InvoiceStatus?.none)
+                        ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                            Label(s.label, systemImage: s.systemImage).tag(InvoiceStatus?.some(s))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 200)
                     Spacer()
                     Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
                         .buttonStyle(.bordered)
@@ -895,6 +927,48 @@ struct InvoicesTabView: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+                DisclosureGroup(isExpanded: $showAdvancedFilters) {
+                    VStack(spacing: 6) {
+                        advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
+                        if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
+                        }
+                        if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
+                        }
+                        HStack {
+                            Spacer()
+                            Button {
+                                advField1 = .none; advValue1 = ""
+                                advField2 = .none; advValue2 = ""
+                                advField3 = .none; advValue3 = ""
+                            } label: {
+                                Label("Réinitialiser", systemImage: "xmark.circle")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(advField1 == .none && advValue1.isEmpty
+                                      && advField2 == .none && advValue2.isEmpty
+                                      && advField3 == .none && advValue3.isEmpty)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    HStack {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.caption)
+                        Text("Filtres avancés")
+                            .font(.caption.bold())
+                        let active = (advField1 != .none && !advValue1.isEmpty)
+                            || (advField2 != .none && !advValue2.isEmpty)
+                            || (advField3 != .none && !advValue3.isEmpty)
+                        if active {
+                            Text("•")
+                                .font(.caption.bold())
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
             }
             .padding(12)
 
@@ -1042,6 +1116,67 @@ struct InvoicesTabView: View {
         }
         return visible.first?.id
     }
+
+    private func applyAdvancedFilter(_ invoices: [Invoice], field: InvoiceFilterField, value: String) -> [Invoice] {
+        let v = value.trimmingCharacters(in: .whitespaces).lowercased()
+        guard field != .none, !v.isEmpty else { return invoices }
+        switch field {
+        case .number:
+            return invoices.filter { $0.number.lowercased().contains(v) }
+        case .buyerName:
+            return invoices.filter { $0.buyer.name.lowercased().contains(v) }
+        case .buyerSiren:
+            return invoices.filter { ($0.buyer.siren ?? "").lowercased().contains(v) }
+        case .sellerName:
+            return invoices.filter { $0.seller.name.lowercased().contains(v) }
+        case .amountMin:
+            if let min = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return invoices.filter { $0.grandTotal >= min }
+            }
+            return invoices
+        case .amountMax:
+            if let max = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return invoices.filter { $0.grandTotal <= max }
+            }
+            return invoices
+        case .none:
+            return invoices
+        }
+    }
+
+    @ViewBuilder
+    private func advancedFilterRow(field: Binding<InvoiceFilterField>, value: Binding<String>, index: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("Filtre \(index)")
+                .font(.caption)
+                .frame(width: 60, alignment: .leading)
+                .foregroundStyle(.secondary)
+            Picker("", selection: field) {
+                ForEach(InvoiceFilterField.allCases, id: \.self) { f in
+                    Text(f.rawValue).tag(f)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 160)
+            if field.wrappedValue == .amountMin || field.wrappedValue == .amountMax {
+                TextField("Valeur", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+            } else {
+                TextField("Recherche", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+            }
+            if !value.wrappedValue.isEmpty {
+                Button { value.wrappedValue = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
 }
 
 struct InvoiceEditorView: View {
@@ -1054,7 +1189,7 @@ struct InvoiceEditorView: View {
     @State private var duplicatedNumber: String?
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
-    @State private var isLocked = false
+    @State private var isManuallyLocked = false
     @State private var showUnlockAlert = false
     @State private var showPrecedingInvoicePicker = false
     @State private var showMandatoryDetails = false
@@ -1062,6 +1197,9 @@ struct InvoiceEditorView: View {
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
     @State private var showStatusJournal = false
+
+    private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
+    private var statusLocked: Bool { invoice.status.locksInvoice }
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1099,21 +1237,21 @@ struct InvoiceEditorView: View {
             HStack {
                 Text("Édition : \(invoice.number)").font(.title2.bold())
                 if isLocked {
-                    Label("Lecture seule", systemImage: "lock.fill")
+                    Label(statusLocked ? "Verrouillée (statut)" : "Lecture seule", systemImage: "lock.fill")
                         .font(.caption.bold())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(statusLocked ? Color(hex: invoice.status.hexColor) : .secondary)
                         .padding(.horizontal, 6)
                         .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
                 }
                 Spacer()
-                if isLocked {
+                if isLocked && !statusLocked {
                     Button { showUnlockAlert = true } label: {
                         Label("Modifier", systemImage: "lock.open")
                     }
                     .buttonStyle(.bordered)
                     .help("Repasser en édition (la facture n'est plus protégée)")
-                } else if validation?.isValid == true {
-                    Button { isLocked = true } label: {
+                } else if !isLocked && validation?.isValid == true {
+                    Button { isManuallyLocked = true } label: {
                         Label("Verrouiller", systemImage: "lock")
                     }
                     .buttonStyle(.bordered)
@@ -1474,7 +1612,7 @@ struct InvoiceEditorView: View {
         }
             .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
                 Button("Annuler", role: .cancel) { }
-                Button("Modifier", role: .destructive) { isLocked = false }
+                Button("Modifier", role: .destructive) { isManuallyLocked = false }
             } message: {
                 Text("La facture était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout dépôt PDP.")
             }
@@ -3192,8 +3330,19 @@ struct OrderStatusSettingsView: View {
                 .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
             TextField("Libellé", text: binding.label)
                 .frame(minWidth: 180)
-            TextField("Icône SF", text: binding.systemImage)
-                .frame(width: 120)
+            if override.isPDPStatus {
+                HStack(spacing: 4) {
+                    Image(systemName: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(override.id)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.1)))
+                .help("Clé technique non modifiable (statut lié à la PDP)")
+            }
             ColorPicker(selection: Binding(
                 get: { Color(hex: binding.wrappedValue.hexColor) },
                 set: { newColor in
@@ -3722,7 +3871,19 @@ struct ValueTablesView: View {
                                 .frame(width: 22)
                                 .foregroundStyle(Color(hex: override.hexColor))
                             Text(override.label).font(.body)
-                            Text(override.systemImage).font(.caption).foregroundStyle(.secondary)
+                            if override.isPDPStatus {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "lock.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text(override.id)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.1)))
+                                .help("Clé technique non modifiable (statut lié à la PDP)")
+                            }
                             Spacer()
                             Button {
                                 editingStatus = override

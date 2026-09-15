@@ -30,6 +30,8 @@ struct LoginView: View {
                 SecureField("Mot de passe", text: $password)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 280)
+                    .submitLabel(.go)
+                    .onSubmit { attemptLogin() }
                 if let err = errorMessage {
                     Text(err).font(.caption).foregroundStyle(.red)
                 }

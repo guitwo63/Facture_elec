@@ -309,6 +309,13 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .cancelled: return "8C8C8C"
         }
     }
+
+    public var locksInvoice: Bool {
+        switch self {
+        case .accepted, .paid, .cancelled: return true
+        default: return false
+        }
+    }
 }
 
 public struct Invoice: Codable, Hashable, Identifiable {
