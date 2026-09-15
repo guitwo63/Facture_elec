@@ -305,13 +305,13 @@ public final class PartyDirectory: ObservableObject {
             entries.insert(entry, at: 0)
         }
         save()
-        audit?.record(actor: actorName, action: isNew ? "directory_entry_created" : "directory_entry_updated", target: entry.displayName)
+        audit?.record(actor: actorName, action: isNew ? "directory_entry_created" : "directory_entry_updated", target: entry.displayName, objectType: .party, objectCode: entry.displayName)
     }
 
     public func delete(_ entry: DirectoryEntry) {
         entries.removeAll { $0.id == entry.id }
         save()
-        audit?.record(actor: actorName, action: "directory_entry_deleted", target: entry.displayName)
+        audit?.record(actor: actorName, action: "directory_entry_deleted", target: entry.displayName, objectType: .party, objectCode: entry.displayName)
     }
 
     public func delete(at offsets: IndexSet) {

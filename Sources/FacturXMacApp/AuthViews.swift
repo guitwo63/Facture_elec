@@ -112,13 +112,20 @@ struct LoginView: View {
 struct AuditLogView: View {
     @EnvironmentObject var auth: AuthStore
     @State private var query = ""
+    @State private var typeFilter: AuditObjectType? = nil
+    @State private var statusOnly = false
 
     var filtered: [AuditLogEntry] {
+        var result = auth.audit.entries
+        if let t = typeFilter { result = result.filter { $0.objectType == t } }
+        if statusOnly { result = result.filter { $0.action == "status_change" } }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return auth.audit.entries }
-        return auth.audit.entries.filter {
+        guard !q.isEmpty else { return result }
+        return result.filter {
             $0.actor.lowercased().contains(q) || $0.action.lowercased().contains(q)
             || $0.target.lowercased().contains(q) || $0.details.lowercased().contains(q)
+            || ($0.objectCode ?? "").lowercased().contains(q)
+            || ($0.statusFrom ?? "").lowercased().contains(q) || ($0.statusTo ?? "").lowercased().contains(q)
         }
     }
 
@@ -134,18 +141,39 @@ struct AuditLogView: View {
                 } label: { Label("Vider", systemImage: "trash") }
                     .buttonStyle(.bordered)
             }.padding(10)
-            TextField("Rechercher", text: $query)
-                .textFieldStyle(.roundedBorder).padding(.horizontal, 10)
+            HStack {
+                TextField("Rechercher", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Type", selection: $typeFilter) {
+                    Text("Tous").tag(AuditObjectType?.none)
+                    ForEach(AuditObjectType.allCases, id: \.self) { t in
+                        Text(t.label).tag(AuditObjectType?.some(t))
+                    }
+                }
+                .pickerStyle(.menu).frame(width: 160)
+                Toggle("Statuts uniquement", isOn: $statusOnly)
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
             Divider()
             Table(filtered) {
                 TableColumn("Date") { e in
                     Text(e.timestamp, format: .dateTime.day().month().year().hour().minute())
                         .font(.caption.monospacedDigit())
                 }.width(140)
-                TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(140)
+                TableColumn("Type") { e in
+                    Text(e.objectType?.label ?? "").font(.caption)
+                }.width(90)
+                TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(120)
+                TableColumn("Code") { e in Text(e.objectCode ?? e.target).font(.caption) }.width(120)
                 TableColumn("Action") { e in Text(e.action).font(.caption) }.width(120)
-                TableColumn("Cible") { e in Text(e.target).font(.caption) }.width(140)
-                TableColumn("Détails") { e in Text(e.details).font(.caption) }
+                TableColumn("Détails") { e in
+                    if e.action == "status_change" {
+                        Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
+                            .font(.caption)
+                    } else {
+                        Text(e.details).font(.caption)
+                    }
+                }
             }
         }
     }

@@ -1061,6 +1061,7 @@ struct InvoiceEditorView: View {
     @State private var superPDPSubmitting = false
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
+    @State private var showStatusJournal = false
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1452,6 +1453,8 @@ struct InvoiceEditorView: View {
                         TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
                         TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
                     }.padding(8)
+                }
+                statusJournalSection
                 }.lockable(isLocked)
             }.padding()
         }
@@ -1666,6 +1669,40 @@ struct InvoiceEditorView: View {
             }
         } catch {
             exportError = "\(error)"
+        }
+    }
+
+    private var statusJournalSection: some View {
+        let logs = AuditStore.shared.entries.filter {
+            $0.objectType == .invoice && ($0.objectCode ?? $0.target) == invoice.number
+        }
+        return DisclosureGroup(isExpanded: $showStatusJournal) {
+            if logs.isEmpty {
+                Text("Aucun événement enregistré pour cette facture.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(logs) { e in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(e.timestamp, format: .dateTime.day().month().year().hour().minute())
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .frame(width: 130, alignment: .leading)
+                            Text(e.actor).font(.caption).frame(width: 100, alignment: .leading)
+                            if e.action == "status_change" {
+                                Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
+                                    .font(.caption.bold())
+                            } else {
+                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action)
+                                    .font(.caption)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Journal de la facture (\(logs.count))", systemImage: "list.bullet.clipboard")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
         }
     }
 
