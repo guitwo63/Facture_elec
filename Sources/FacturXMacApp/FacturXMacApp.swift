@@ -1381,6 +1381,7 @@ struct InvoiceEditorView: View {
     @State private var superPDPSubmitting = false
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
+    @State private var pdpDownloadedURL: URL?
     @State private var syncingFromPDP = false
     @State private var lastSentPDPStatusCode: String?
     @State private var showStatusJournal = false
@@ -1563,8 +1564,13 @@ struct InvoiceEditorView: View {
                             Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
                         }
                         Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .primary)
+                        if let durl = pdpDownloadedURL {
+                            Button("Afficher dans le Finder") { NSWorkspace.shared.activateFileViewerSelecting([durl]) }
+                                .buttonStyle(.borderless)
+                                .font(.caption)
+                        }
                     }
-                    .onChange(of: invoice.number) { _ in superPDPMessage = nil; superPDPSubmission = nil }
+                    .onChange(of: invoice.number) { _ in superPDPMessage = nil; superPDPSubmission = nil; pdpDownloadedURL = nil }
                 } else if let sub = superPDPSubmission {
                     HStack(spacing: 6) {
                         Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
@@ -2232,7 +2238,7 @@ struct InvoiceEditorView: View {
                 if panel.runModal() == .OK, let url = panel.url {
                     try data.write(to: url)
                     superPDPMessage = "⤓ Copie déposée téléchargée : \(url.lastPathComponent)"
-                    exportedURL = url
+                    pdpDownloadedURL = url
                 }
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec téléchargement : \(e.localizedDescription)"
