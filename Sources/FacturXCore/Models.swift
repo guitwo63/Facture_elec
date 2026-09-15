@@ -277,7 +277,7 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
     public var label: String {
         switch self {
         case .draft: return "Brouillon"
-        case .issued: return "Émise"
+        case .issued: return "Validée (non envoyée)"
         case .sentToPDP: return "Transmise au PDP"
         case .accepted: return "Acceptée par le PDP"
         case .rejected: return "Rejetée par le PDP"
