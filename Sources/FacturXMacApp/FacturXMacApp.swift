@@ -1274,7 +1274,7 @@ struct OptionalFieldsSection: View {
 
     private func labelFor(tagName: String) -> String {
         if let tpl = OptionalFieldCatalogue.template(forTag: tagName, location: location) {
-            return "\(tpl.bt) - \(tpl.tagName)"
+            return "\(tpl.bt) - \(tpl.label)"
         }
         return tagName
     }
@@ -1328,7 +1328,7 @@ struct OptionalFieldsSection: View {
                     Button {
                         field.tagName.wrappedValue = tpl.tagName
                     } label: {
-                        Text("\(tpl.bt) - \(tpl.tagName)")
+                        Text("\(tpl.bt) - \(tpl.label)")
                     }
                 }
                 Divider()
