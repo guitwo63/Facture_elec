@@ -182,6 +182,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var contacts: [PartyContact]
     public var isArchived: Bool
     public var tagIDs: [UUID]
+    public var logoData: Data?
 
     public init(
         id: UUID = UUID(),
@@ -192,7 +193,8 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         routingAddresses: [PartyRoutingAddress] = [],
         contacts: [PartyContact] = [],
         isArchived: Bool = false,
-        tagIDs: [UUID] = []
+        tagIDs: [UUID] = [],
+        logoData: Data? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -203,6 +205,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         self.contacts = contacts
         self.isArchived = isArchived
         self.tagIDs = tagIDs
+        self.logoData = logoData
     }
 
     public var displayName: String {
@@ -227,7 +230,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, party, companyID, note, routingAddresses, contacts, isArchived, tagIDs
+        case id, kind, party, companyID, note, routingAddresses, contacts, isArchived, tagIDs, logoData
     }
 
     public init(from decoder: Decoder) throws {
@@ -242,6 +245,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         contacts = try c.decodeIfPresent([PartyContact].self, forKey: .contacts) ?? []
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         tagIDs = try c.decodeIfPresent([UUID].self, forKey: .tagIDs) ?? []
+        logoData = try c.decodeIfPresent(Data.self, forKey: .logoData)
     }
 
     public var defaultRoutingAddress: PartyRoutingAddress? {

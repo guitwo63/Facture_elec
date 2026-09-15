@@ -1282,13 +1282,15 @@ struct InvoiceEditorView: View {
     @State private var lastSentPDPStatusCode: String?
     @State private var showStatusJournal = false
     @State private var showLegalMentions = false
-    @State private var logoData: Data?
-    @State private var showLogoPicker = false
 
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
     private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
     private var fieldLocked: Bool { isLocked && !isAdmin }
+    private var sellerLogo: Data? {
+        guard let cid = invoice.companyID else { return nil }
+        return PartyDirectory.shared.entries.first(where: { $0.id == cid })?.logoData
+    }
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1360,23 +1362,6 @@ struct InvoiceEditorView: View {
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(fieldLocked)
-                Button {
-                    showLogoPicker = true
-                } label: {
-                    if logoData != nil {
-                        Label("Logo : ajouté", systemImage: "checkmark.rectangle.portrait")
-                    } else {
-                        Label("Ajouter un logo", systemImage: "photo")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .help("Image (PNG/JPEG/TIFF) affichée en en-tête du PDF lisible")
-                if logoData != nil {
-                    Button {
-                        logoData = nil
-                    } label: { Label("Retirer le logo", systemImage: "trash") }
-                        .buttonStyle(.bordered)
-                }
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
@@ -1824,9 +1809,6 @@ struct InvoiceEditorView: View {
                 guard !syncingFromPDP else { return }
                 notifyPDPStatusChange(to: newStatus)
             }
-            .sheet(isPresented: $showLogoPicker) {
-                LogoPickerSheet(logoData: $logoData, isPresented: $showLogoPicker)
-            }
         }
     }
 
@@ -1901,7 +1883,7 @@ struct InvoiceEditorView: View {
         }
         do {
             store.upsert(invoice)
-            let data = try FacturXGenerator().generate(invoice: invoice, logo: logoData)
+            let data = try FacturXGenerator().generate(invoice: invoice, logo: sellerLogo)
             let postCheck = FacturXValidator().validate(pdf: data)
             if !postCheck.isValid {
                 validation = FacturXValidationResult(
@@ -1958,7 +1940,7 @@ struct InvoiceEditorView: View {
         }
         Task {
             do {
-                let facturx = try FacturXGenerator().generate(invoice: invoice, logo: logoData)
+                let facturx = try FacturXGenerator().generate(invoice: invoice, logo: sellerLogo)
                 let service = SuperPDPService()
                 let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
                 superPDPSubmission = SuperPDPInvoiceSubmission(
@@ -2169,7 +2151,7 @@ struct InvoiceEditorView: View {
         exportError = nil
         exportedURL = nil
         store.upsert(invoice)
-        let data = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: logoData)
+        let data = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: sellerLogo)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = "avoir-interne-\(invoice.number).pdf"
@@ -3807,6 +3789,7 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var directory: PartyDirectory
     @State private var testMessage: String?
     @State private var testing = false
     @State private var superPDPTestMessage: String?
@@ -3816,6 +3799,8 @@ struct ApplicationSettingsView: View {
     @State private var superPDPExpanded = false
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
+    @State private var logosExpanded = false
+    @State private var editingLogoEntry: DirectoryEntry?
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
 
@@ -4086,6 +4071,59 @@ struct ApplicationSettingsView: View {
                 .onChange(of: store.numberStart) { _ in store.save() }
                 .onChange(of: store.numberUseSeparator) { _ in store.save() }
 
+                DisclosureGroup(isExpanded: $logosExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Associez un logo (PNG, JPEG ou TIFF) à chaque fournisseur émetteur. Le logo est affiché en en-tête du PDF lisible des factures émises par ce fournisseur.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        let fournisseurs = directory.entries.filter { ($0.kind == .fournisseur || $0.kind == .both) && !$0.isArchived }
+                        if fournisseurs.isEmpty {
+                            Text("Aucun fournisseur dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(fournisseurs, id: \.id) { entry in
+                                HStack(spacing: 10) {
+                                    if let data = entry.logoData, let img = NSImage(data: data) {
+                                        Image(nsImage: img)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(width: 36, height: 24)
+                                            .background(RoundedRectangle(cornerRadius: 4).stroke(.secondary, lineWidth: 0.3))
+                                    } else {
+                                        Image(systemName: "photo")
+                                            .font(.title3)
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 36, height: 24)
+                                    }
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(entry.displayName).font(.callout)
+                                        if entry.logoData != nil {
+                                            Text("Logo configuré").font(.caption2).foregroundStyle(.green)
+                                        } else {
+                                            Text("Aucun logo").font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Button {
+                                        editingLogoEntry = entry
+                                    } label: { Label(entry.logoData == nil ? "Ajouter" : "Modifier", systemImage: "photo") }
+                                        .buttonStyle(.bordered).controlSize(.small)
+                                    if entry.logoData != nil {
+                                        Button(role: .destructive) {
+                                            var e = entry
+                                            e.logoData = nil
+                                            directory.upsert(e)
+                                        } label: { Image(systemName: "trash") }
+                                            .buttonStyle(.bordered).controlSize(.small)
+                                    }
+                                }
+                                Divider()
+                            }
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Logos des fournisseurs", systemImage: "photo.on.rectangle")
+                        .font(.headline)
+                }
+
                 Divider()
                 HStack {
                     Text("Facture_elec v0.3.0").font(.caption).foregroundStyle(.secondary)
@@ -4097,6 +4135,12 @@ struct ApplicationSettingsView: View {
 
                 Spacer()
             }.padding()
+        }
+        .sheet(item: $editingLogoEntry) { entry in
+            PartyLogoEditor(entry: entry, isPresented: Binding(
+                get: { editingLogoEntry != nil },
+                set: { if !$0 { editingLogoEntry = nil } }
+            ))
         }
     }
 
@@ -6196,18 +6240,23 @@ extension Binding {
     }
 }
 
-struct LogoPickerSheet: View {
-    @Binding var logoData: Data?
+/// Édition du logo d'une fiche tiers (fournisseur). Le logo est persisté
+/// sur le DirectoryEntry et réutilisé automatiquement en en-tête du PDF
+/// des factures émises par ce fournisseur.
+struct PartyLogoEditor: View {
+    let entry: DirectoryEntry
+    @EnvironmentObject var directory: PartyDirectory
     @Binding var isPresented: Bool
-    @State private var selectedURL: URL?
+
+    private var currentLogo: Data? { entry.logoData }
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Logo de l'en-tête").font(.headline)
-            Text("Image (PNG, JPEG ou TIFF) affichée en haut à gauche du PDF lisible. Le logo n'est pas embarqué dans le XML Factur-X.")
+            Text("Logo \u00ab \(entry.displayName) \u00bb").font(.headline)
+            Text("Image (PNG, JPEG ou TIFF) affichée en en-tête du PDF lisible des factures émises par ce fournisseur. Le logo n'est pas embarqué dans le XML Factur-X.")
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
-            if let data = logoData, let img = NSImage(data: data) {
+            if let data = currentLogo, let img = NSImage(data: data) {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFit()
@@ -6219,7 +6268,7 @@ struct LogoPickerSheet: View {
                 Image(systemName: "photo")
                     .font(.system(size: 40))
                     .foregroundStyle(.secondary)
-                Text("Aucun logo sélectionné").font(.caption).foregroundStyle(.secondary)
+                Text("Aucun logo pour ce fournisseur").font(.caption).foregroundStyle(.secondary)
             }
 
             HStack {
@@ -6228,17 +6277,20 @@ struct LogoPickerSheet: View {
                     panel.allowedContentTypes = [.png, .jpeg, .tiff]
                     panel.allowsMultipleSelection = false
                     panel.canChooseDirectories = false
-                    if panel.runModal() == .OK, let url = panel.url {
-                        if let data = try? Data(contentsOf: url) {
-                            logoData = data
-                            selectedURL = url
-                        }
+                    if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
+                        var e = entry
+                        e.logoData = data
+                        directory.upsert(e)
                     }
-                } label: { Label("Choisir une image…", systemImage: "folder") }
+                } label: { Label(currentLogo == nil ? "Choisir une image…" : "Remplacer…", systemImage: "folder") }
                 .buttonStyle(.bordered)
 
-                if logoData != nil {
-                    Button(role: .destructive) { logoData = nil } label: { Label("Retirer", systemImage: "trash") }
+                if currentLogo != nil {
+                    Button(role: .destructive) {
+                        var e = entry
+                        e.logoData = nil
+                        directory.upsert(e)
+                    } label: { Label("Retirer", systemImage: "trash") }
                         .buttonStyle(.bordered)
                 }
             }
