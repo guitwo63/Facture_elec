@@ -236,7 +236,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
                 orderReference: line.orderReference ?? self.number
             )
         }
-        let invoice = Invoice(
+        var invoice = Invoice(
             number: number,
             type: .commercialInvoice,
             status: .draft,
