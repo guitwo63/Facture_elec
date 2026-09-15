@@ -1279,6 +1279,7 @@ struct InvoiceEditorView: View {
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
     @State private var syncingFromPDP = false
+    @State private var lastSentPDPStatusCode: String?
     @State private var showStatusJournal = false
     @State private var showLegalMentions = false
 
@@ -1915,6 +1916,14 @@ struct InvoiceEditorView: View {
     }
 
     private func depositToSuperPDP() {
+        if let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty {
+            superPDPMessage = "Facture déjà déposée sur SUPER PDP (id distant \(rid)). Ré-interrogez le statut plutôt que de redéposer."
+            return
+        }
+        if invoice.status == .accepted || invoice.status == .paid || invoice.status == .cancelled {
+            superPDPMessage = "Dépôt refusé : la facture est déjà « \(invoice.status.label) ». Un dépôt n'est possible que depuis Brouillon / Validée / Transmise."
+            return
+        }
         superPDPSubmitting = true
         superPDPMessage = nil
         let preCheck = FacturXValidator().validate(invoice: invoice)
@@ -2053,6 +2062,10 @@ struct InvoiceEditorView: View {
         default:
             return
         }
+        if let last = lastSentPDPStatusCode, last == statusCode {
+            superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
+            return
+        }
         superPDPSubmitting = true
         let invoiceRef = invoice
         Task {
@@ -2072,6 +2085,7 @@ struct InvoiceEditorView: View {
                     }
                 }
                 try await service.sendInvoiceEvent(remoteID: rid, statusCode: statusCode, credentials: superPDPSettings.credentials, reportedData: reported)
+                lastSentPDPStatusCode = statusCode
                 superPDPSubmission = SuperPDPInvoiceSubmission(
                     id: UUID().uuidString, remoteID: rid, status: detailLabel,
                     enInvoiceRef: superPDPSubmission?.enInvoiceRef,
