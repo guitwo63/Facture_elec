@@ -1745,9 +1745,6 @@ struct InvoiceEditorView: View {
                     onCancel: { showPrecedingInvoicePicker = false }
                 )
             }
-            .onChange(of: invoice.status) { _ in
-                store.upsert(invoice)
-            }
         }
     }
 
