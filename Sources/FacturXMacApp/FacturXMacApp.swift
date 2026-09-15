@@ -3820,6 +3820,7 @@ struct SocietiesAdminView: View {
     @EnvironmentObject var directory: PartyDirectory
     @State private var query = ""
     @State private var selectedID: UUID?
+    @State private var editingLogoEntry: DirectoryEntry?
 
     private var societies: [DirectoryEntry] {
         directory.entries.filter { $0.kind == .societe }
@@ -3890,6 +3891,20 @@ struct SocietiesAdminView: View {
                     TableColumn("Ville") { e in Text(e.party.city.isEmpty ? "—" : e.party.city) }
                     TableColumn("IBAN") { e in Text((e.party.iban ?? "").isEmpty ? "—" : e.party.iban!) }
                         .width(min: 120, ideal: 160)
+                    TableColumn("Logo") { e in
+                        Group {
+                            if let data = e.logoData, let img = NSImage(data: data) {
+                                Image(nsImage: img)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 36, height: 24)
+                                    .background(RoundedRectangle(cornerRadius: 4).stroke(.secondary, lineWidth: 0.3))
+                            } else {
+                                Text("-").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .width(min: 48, ideal: 60)
                 }
                 .frame(minHeight: 180)
                 if let id = selectedID, let entry = societies.first(where: { $0.id == id }) {
@@ -3898,11 +3913,23 @@ struct SocietiesAdminView: View {
                             editingEntry = entry
                         } label: { Label("Modifier", systemImage: "pencil") }
                             .buttonStyle(.bordered)
+                        Button {
+                            editingLogoEntry = entry
+                        } label: { Label(entry.logoData == nil ? "Ajouter logo" : "Modifier logo", systemImage: "photo") }
+                            .buttonStyle(.bordered)
+                        if entry.logoData != nil {
+                            Button(role: .destructive) {
+                                var e = entry
+                                e.logoData = nil
+                                directory.upsert(e)
+                            } label: { Label("Retirer logo", systemImage: "trash") }
+                                .buttonStyle(.bordered)
+                        }
                         Button(role: .destructive) {
                             directory.delete(entry)
                             selectedID = nil
-                        } label: { Label("Supprimer", systemImage: "trash") }
-                        .buttonStyle(.bordered)
+                        } label: { Label("Supprimer", systemImage: "trash.fill") }
+                            .buttonStyle(.bordered)
                         Spacer()
                     }.padding(.top, 4)
                 }
@@ -3910,6 +3937,12 @@ struct SocietiesAdminView: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(item: $editingLogoEntry) { entry in
+            PartyLogoEditor(entry: entry, isPresented: Binding(
+                get: { editingLogoEntry != nil },
+                set: { if !$0 { editingLogoEntry = nil } }
+            ))
+        }
     }
 }
 
@@ -3931,11 +3964,8 @@ struct ApplicationSettingsView: View {
     @State private var superPDPExpanded = false
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
-    @State private var logosExpanded = false
-    @State private var societiesExpanded = true
     @State private var editingSociety: DirectoryEntry?
     @State private var creatingSociety = false
-    @State private var editingLogoEntry: DirectoryEntry?
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
 
@@ -4215,59 +4245,6 @@ struct ApplicationSettingsView: View {
                 .onChange(of: store.numberStart) { _ in store.save() }
                 .onChange(of: store.numberUseSeparator) { _ in store.save() }
 
-                DisclosureGroup(isExpanded: $logosExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Associez un logo (PNG, JPEG ou TIFF) à chaque société émettrice. Le logo est affiché en en-tête du PDF lisible des factures émises par cette société.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        let societes = directory.entries.filter { $0.kind == .societe && !$0.isArchived }
-                        if societes.isEmpty {
-                            Text("Aucune société dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(societes, id: \.id) { entry in
-                                HStack(spacing: 10) {
-                                    if let data = entry.logoData, let img = NSImage(data: data) {
-                                        Image(nsImage: img)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 36, height: 24)
-                                            .background(RoundedRectangle(cornerRadius: 4).stroke(.secondary, lineWidth: 0.3))
-                                    } else {
-                                        Image(systemName: "photo")
-                                            .font(.title3)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 36, height: 24)
-                                    }
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(entry.displayName).font(.callout)
-                                        if entry.logoData != nil {
-                                            Text("Logo configuré").font(.caption2).foregroundStyle(.green)
-                                        } else {
-                                            Text("Aucun logo").font(.caption2).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    Spacer()
-                                    Button {
-                                        editingLogoEntry = entry
-                                    } label: { Label(entry.logoData == nil ? "Ajouter" : "Modifier", systemImage: "photo") }
-                                        .buttonStyle(.bordered).controlSize(.small)
-                                    if entry.logoData != nil {
-                                        Button(role: .destructive) {
-                                            var e = entry
-                                            e.logoData = nil
-                                            directory.upsert(e)
-                                        } label: { Image(systemName: "trash") }
-                                            .buttonStyle(.bordered).controlSize(.small)
-                                    }
-                                }
-                                Divider()
-                            }
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Logos des sociétés", systemImage: "photo.on.rectangle")
-                        .font(.headline)
-                }
-
                 Divider()
                 HStack {
                     Text("Facture_elec v0.3.0").font(.caption).foregroundStyle(.secondary)
@@ -4279,12 +4256,6 @@ struct ApplicationSettingsView: View {
 
                 Spacer()
             }.padding()
-        }
-        .sheet(item: $editingLogoEntry) { entry in
-            PartyLogoEditor(entry: entry, isPresented: Binding(
-                get: { editingLogoEntry != nil },
-                set: { if !$0 { editingLogoEntry = nil } }
-            ))
         }
         .sheet(item: $editingSociety) { entry in
             DirectoryEditorView(entry: entry, onSave: { updated in
