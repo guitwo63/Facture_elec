@@ -317,20 +317,21 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         }
     }
 
+    /// Transitions autorisées pour un comptable (cycle de vie normé sans annulation).
     public func allowedTransitions() -> [InvoiceStatus] {
         switch self {
         case .draft:
             return [.issued]
         case .issued:
-            return [.sentToPDP, .rejected, .cancelled]
+            return [.sentToPDP, .rejected]
         case .sentToPDP:
-            return [.accepted, .rejected, .cancelled]
+            return [.accepted, .rejected]
         case .accepted:
-            return [.paid, .rejected, .cancelled]
+            return [.paid, .rejected]
         case .rejected:
-            return [.cancelled]
+            return []
         case .paid:
-            return [.cancelled]
+            return []
         case .cancelled:
             return []
         }
@@ -340,7 +341,7 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         let standard = status.allowedTransitions()
         guard isAdmin else { return standard }
         var extended = standard
-        if !extended.contains(.cancelled) && status != .cancelled {
+        if status != .cancelled && !extended.contains(.cancelled) {
             extended.append(.cancelled)
         }
         return extended.sorted { $0.label < $1.label }
