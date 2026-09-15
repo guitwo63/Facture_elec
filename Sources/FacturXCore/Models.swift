@@ -339,7 +339,11 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
     public static func allowedTransitions(from status: InvoiceStatus, isAdmin: Bool) -> [InvoiceStatus] {
         let standard = status.allowedTransitions()
         guard isAdmin else { return standard }
-        return InvoiceStatus.allCases.filter { $0 != status }.sorted { $0.label < $1.label }
+        var extended = standard
+        if !extended.contains(.cancelled) && status != .cancelled {
+            extended.append(.cancelled)
+        }
+        return extended.sorted { $0.label < $1.label }
     }
 }
 
