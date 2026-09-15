@@ -1351,7 +1351,20 @@ struct InvoiceEditorView: View {
                                 }
                                 .font(.caption)
                             }
-                            VStack(alignment: .trailing) {
+                            VStack(alignment: .trailing, spacing: 8) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: invoice.status.systemImage)
+                                        .foregroundColor(Color(hex: invoice.status.hexColor))
+                                        .font(.caption2)
+                                    Picker("Statut", selection: $invoice.status) {
+                                        ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                                            Label(s.label, systemImage: s.systemImage).tag(s)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 200)
+                                    .help("Statut de la facture (modifiable à tout moment)")
+                                }
                                 row("Total HT", invoice.lineTotal)
                                 ForEach(invoice.vatBreakdown, id: \.rate) { item in
                                     row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
@@ -1481,6 +1494,9 @@ struct InvoiceEditorView: View {
                     },
                     onCancel: { showPrecedingInvoicePicker = false }
                 )
+            }
+            .onChange(of: invoice.status) { _ in
+                store.upsert(invoice)
             }
         }
     }
@@ -1672,7 +1688,7 @@ struct InvoiceEditorView: View {
     }
 
     private var statusJournalSection: some View {
-        let logs = AuditStore.shared.entries.filter {
+        let logs = auth.audit.entries.filter {
             $0.objectType == .invoice && ($0.objectCode ?? $0.target) == invoice.number
         }
         return DisclosureGroup(isExpanded: $showStatusJournal) {
@@ -1719,19 +1735,6 @@ struct InvoiceEditorView: View {
                             .foregroundStyle(.red)
                     }
                     Spacer()
-                    HStack(spacing: 4) {
-                        Image(systemName: invoice.status.systemImage)
-                            .foregroundColor(Color(hex: invoice.status.hexColor))
-                            .font(.caption2)
-                        Picker("Statut", selection: $invoice.status) {
-                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
-                                Label(s.label, systemImage: s.systemImage).tag(s)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                        .help("Statut de la facture (modifiable à tout moment)")
-                    }
                     Button { showValidation = false } label: {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
