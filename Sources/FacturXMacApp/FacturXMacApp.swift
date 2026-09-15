@@ -1390,17 +1390,23 @@ struct InvoiceEditorView: View {
                         .onChange(of: invoice.number) { _ in duplicatedNumber = nil }
                 }
                 if let m = superPDPMessage {
-                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
-                        .onChange(of: invoice.number) { _ in superPDPMessage = nil }
-                }
-                if let sub = superPDPSubmission {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        if m.hasPrefix("Échec") {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        } else if let sub = superPDPSubmission {
+                            Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
+                                .foregroundStyle(sub.isProcessed ? .green : .orange)
+                        } else {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                        }
+                        Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .primary)
+                    }
+                    .onChange(of: invoice.number) { _ in superPDPMessage = nil; superPDPSubmission = nil }
+                } else if let sub = superPDPSubmission {
+                    HStack(spacing: 6) {
                         Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
                             .foregroundStyle(sub.isProcessed ? .green : .orange)
                         Text("SUPER PDP — id \(sub.remoteID ?? "?") · statut \(sub.status)").font(.caption)
-                        Button("Rafraîchir") { refreshSuperPDPStatus() }
-                            .buttonStyle(.bordered)
-                            .disabled(superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
                     }
                     .onChange(of: invoice.number) { _ in superPDPSubmission = nil }
                 }
@@ -1923,7 +1929,7 @@ struct InvoiceEditorView: View {
                 let service = SuperPDPService()
                 let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: superPDPSettings.credentials)
                 superPDPSubmission = updated
-                superPDPMessage = "Statut SUPER PDP mis à jour : \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "")."
+                superPDPMessage = "Statut SUPER PDP mis à jour : \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
                 let actor = store.actorName
                 store.audit?.recordStatusChange(
                     actor: actor,
