@@ -1463,28 +1463,63 @@ struct InvoiceEditorView: View {
                     .buttonStyle(.bordered)
                     .help("Protéger la facture validée en lecture seule")
                 }
-                Button {
-                    let copy = store.duplicate(from: invoice)
-                    store.upsert(copy)
-                    duplicatedNumber = copy.number
-                } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
-                    .buttonStyle(.bordered)
-                    .help("Créer une copie de la facture")
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(fieldLocked)
-                Button {
-                    previewPDFData = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: sellerLogo)
-                    showInvoicePreview = true
-                } label: { Label("Visualiser", systemImage: "eye") }
+                if isAdmin {
+                    Button {
+                        downloadPDPInvoice()
+                    } label: {
+                        if pdpDownloading {
+                            HStack(spacing: 4) {
+                                ProgressView().controlSize(.small)
+                                Text("Copie…")
+                            }
+                        } else {
+                            Label("Copie PDP", systemImage: "square.and.arrow.down")
+                        }
+                    }
                     .buttonStyle(.bordered)
-                    .help("Afficher l'aperçu du PDF lisible de la facture")
+                    .disabled(pdpDownloading
+                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                              || !superPDPSettings.credentials.isConfigured)
+                    .help("Télécharger la copie de la facture déposée sur SUPER PDP")
+                    Button {
+                        validatePDP()
+                    } label: {
+                        if pdpValidating {
+                            HStack(spacing: 4) {
+                                ProgressView().controlSize(.small)
+                                Text("Valider…")
+                            }
+                        } else {
+                            Label("Valider PDP", systemImage: "checkmark.shield")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
+                    .help("Valider le Factur-X sur SUPER PDP avant dépôt")
+                }
+                Menu {
+                    Button {
+                        previewPDFData = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: sellerLogo)
+                        showInvoicePreview = true
+                    } label: { Label("Visualiser", systemImage: "eye") }
+                    Button { exportXML() } label: { Label("Exporter XML", systemImage: "chevron.left.forwardslash.chevron.right") }
+                    Button {
+                        let copy = store.duplicate(from: invoice)
+                        store.upsert(copy)
+                        duplicatedNumber = copy.number
+                    } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                } label: {
+                    Label("Autre action", systemImage: "ellipsis.circle")
+                }
+                .buttonStyle(.bordered)
+                .help("Visualiser, exporter XML, dupliquer…")
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
                 } else {
-                    Button("Exporter XML") { exportXML() }
-                        .buttonStyle(.bordered)
                     Button("Générer le Factur-X") { export() }
                         .buttonStyle(.borderedProminent)
                     if isAdmin {
@@ -1760,24 +1795,6 @@ struct InvoiceEditorView: View {
                                               || !superPDPSettings.credentials.isConfigured)
                                     .help("Interroger le statut de la facture sur SUPER PDP")
                                     Button {
-                                        downloadPDPInvoice()
-                                    } label: {
-                                        if pdpDownloading {
-                                            HStack(spacing: 4) {
-                                                ProgressView().controlSize(.small)
-                                                Text("Copie…")
-                                            }
-                                        } else {
-                                            Label("Copie PDP", systemImage: "square.and.arrow.down")
-                                        }
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                    .disabled(pdpDownloading
-                                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                              || !superPDPSettings.credentials.isConfigured)
-                                    .help("Télécharger la copie de la facture déposée sur SUPER PDP")
-                                    Button {
                                         fetchPDPEvents()
                                     } label: {
                                         Label("Historique PDP", systemImage: "clock.arrow.circlepath")
@@ -1787,22 +1804,6 @@ struct InvoiceEditorView: View {
                                     .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
                                               || !superPDPSettings.credentials.isConfigured)
                                     .help("Historique des événements de cycle de vie sur SUPER PDP")
-                                    Button {
-                                        validatePDP()
-                                    } label: {
-                                        if pdpValidating {
-                                            HStack(spacing: 4) {
-                                                ProgressView().controlSize(.small)
-                                                Text("Valider…")
-                                            }
-                                        } else {
-                                            Label("Valider PDP", systemImage: "checkmark.shield")
-                                        }
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                    .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
-                                    .help("Valider le Factur-X sur SUPER PDP avant dépôt")
                                 }
                                 VStack(alignment: .trailing) {
                                 row("Total HT", invoice.lineTotal)
@@ -5332,8 +5333,8 @@ struct ChorusProSearchSheet: View {
                 if r.isEmpty { error = "Aucun résultat." }
             } catch let e as ChorusProError {
                 self.error = e.errorDescription
-            } catch {
-                self.error = error.localizedDescription
+            } catch let err {
+                self.error = err.localizedDescription
             }
             searching = false
         }
@@ -5590,8 +5591,8 @@ struct SuperPDPSearchSheet: View {
                 if r.isEmpty { error = "Aucun résultat." }
             } catch let e as SuperPDPError {
                 self.error = e.errorDescription
-            } catch {
-                self.error = error.localizedDescription
+            } catch let err {
+                self.error = err.localizedDescription
             }
             searching = false
         }
