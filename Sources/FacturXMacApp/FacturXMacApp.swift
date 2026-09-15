@@ -3823,6 +3823,7 @@ struct SocietiesAdminView: View {
 
     private var societies: [DirectoryEntry] {
         directory.entries.filter { $0.kind == .societe }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
     private var filtered: [DirectoryEntry] {
@@ -3845,7 +3846,7 @@ struct SocietiesAdminView: View {
                 } label: { Label("Nouvelle société", systemImage: "plus") }
                     .buttonStyle(.borderedProminent)
                 Spacer()
-                Text("\(societies.count) société(s)")
+                Text("\(societies.count) société(s) — \(societies.filter { !$0.isArchived }.count) active(s)")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("Les sociétés sont les entités émettrices de l'application. Elles définissent le périmètre des utilisateurs et l'émetteur des factures. Elles ne sont pas affichées dans l'onglet Annuaire.")
@@ -3873,7 +3874,18 @@ struct SocietiesAdminView: View {
                     get: { selectedID },
                     set: { selectedID = $0 }
                 )) {
-                    TableColumn("Nom") { e in Text(e.displayName) }
+                    TableColumn("Nom") { e in
+                        HStack(spacing: 6) {
+                            Text(e.displayName)
+                            if e.isArchived {
+                                Text("Archive")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.2), in: Capsule())
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
                     TableColumn("SIREN") { e in Text((e.party.siren ?? "").isEmpty ? "—" : e.party.siren!) }
                     TableColumn("Ville") { e in Text(e.party.city.isEmpty ? "—" : e.party.city) }
                     TableColumn("IBAN") { e in Text((e.party.iban ?? "").isEmpty ? "—" : e.party.iban!) }
