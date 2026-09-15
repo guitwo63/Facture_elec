@@ -1452,16 +1452,35 @@ struct InvoiceEditorView: View {
                         Image(systemName: invoice.status.systemImage)
                             .foregroundColor(Color(hex: invoice.status.hexColor))
                             .font(.caption2)
-                        Picker("Statut", selection: $invoice.status) {
-                            let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
-                            let options = transitions.isEmpty ? [invoice.status] : transitions
-                            ForEach(options, id: \.self) { s in
-                                Label(s.label, systemImage: s.systemImage).tag(s)
+                        let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
+                        if transitions.isEmpty {
+                            Text(invoice.status.label)
+                                .frame(width: 200, alignment: .leading)
+                                .foregroundStyle(.secondary)
+                                .help("Statut terminal — aucune transition possible.")
+                        } else {
+                            Menu {
+                                Button {
+                                } label: {
+                                    Label(invoice.status.label, systemImage: invoice.status.systemImage)
+                                }.disabled(true)
+                                Divider()
+                                ForEach(transitions, id: \.self) { s in
+                                    Button {
+                                        invoice.status = s
+                                    } label: {
+                                        Label(s.label, systemImage: s.systemImage)
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(invoice.status.label).lineLimit(1)
+                                    Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .frame(width: 200, alignment: .leading)
                             }
+                            .help("Statut actuel : \(invoice.status.label). Transitions autorisées affichées dans le menu.")
                         }
-                        .labelsHidden()
-                        .frame(width: 200)
-                        .help("Statut de la facture (transitions autorisées par le cycle de vie normé). Admin : tous statuts.)")
                         Button {
                             refreshSuperPDPStatus()
                         } label: {
