@@ -162,6 +162,62 @@ public enum SireneValidator {
     }
 }
 
+public struct OptionalField: Codable, Hashable, Identifiable {
+    public var id: UUID
+    public var tagName: String
+    public var value: String
+
+    public init(id: UUID = UUID(), tagName: String, value: String) {
+        self.id = id
+        self.tagName = tagName
+        self.value = value
+    }
+}
+
+public enum OptionalFieldLocation: String, Codable, CaseIterable {
+    case header
+    case line
+}
+
+public struct OptionalFieldTemplate: Identifiable, Hashable {
+    public let id: String
+    public let bt: String
+    public let label: String
+    public let tagName: String
+    public let location: OptionalFieldLocation
+    public let help: String
+    public init(_ bt: String, _ label: String, _ tagName: String, _ location: OptionalFieldLocation, _ help: String) {
+        self.id = bt
+        self.bt = bt
+        self.label = label
+        self.tagName = tagName
+        self.location = location
+        self.help = help
+    }
+}
+
+public enum OptionalFieldCatalogue {
+    public static let header: [OptionalFieldTemplate] = [
+        OptionalFieldTemplate("BT-11", "Ref. projet", "ram:SpecifiedProcuringProject/ram:ID", .header, "BT-11 - Reference du projet d'achat (SpecifiedProcuringProject/ID)."),
+        OptionalFieldTemplate("BT-17", "Ref. contrat", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .header, "BT-17 - Reference du contrat."),
+        OptionalFieldTemplate("BT-18", "Ref. appel d'offres", "ram:TendererReferencedDocument/ram:IssuerAssignedID", .header, "BT-18 - Reference de l'appel d'offres."),
+        OptionalFieldTemplate("BT-19", "Ref. bon de reception", "ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-19 - Reference de l'avis de reception."),
+        OptionalFieldTemplate("BT-20", "Ref. bon de livraison", "ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-20 - Reference de l'avis d'expedition."),
+    ]
+    public static let line: [OptionalFieldTemplate] = [
+        OptionalFieldTemplate("BT-133", "Ref. contrat ligne", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .line, "BT-133 - Reference de contrat au niveau de la ligne."),
+        OptionalFieldTemplate("BT-134", "Ref. commande ligne", "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID", .line, "BT-134 - Reference de commande au niveau de la ligne."),
+        OptionalFieldTemplate("BT-155", "ID produit vendeur", "ram:GlobalID", .line, "BT-155 - Identifiant produit (GlobalID) attribue par le vendeur. schemeID GTIN 0160 ajoute automatiquement."),
+        OptionalFieldTemplate("BT-156", "ID produit acheteur", "ram:BuyerAssignedID", .line, "BT-156 - Identifiant produit attribue par l'acheteur (BuyerAssignedID)."),
+    ]
+    public static func templates(for location: OptionalFieldLocation) -> [OptionalFieldTemplate] {
+        location == .header ? header : line
+    }
+    public static func template(forTag tagName: String, location: OptionalFieldLocation) -> OptionalFieldTemplate? {
+        templates(for: location).first(where: { $0.tagName == tagName })
+    }
+}
+
 public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var id: UUID
     public var name: String
@@ -171,6 +227,7 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var unitPrice: Double
     public var vatRate: Double
     public var orderReference: String?
+    public var optionalFields: [OptionalField]
 
     public init(
         id: UUID = UUID(),
@@ -180,7 +237,8 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         unit: String = "C62",
         unitPrice: Double,
         vatRate: Double = 20.0,
-        orderReference: String? = nil
+        orderReference: String? = nil,
+        optionalFields: [OptionalField] = []
     ) {
         self.id = id
         self.name = name
@@ -190,6 +248,24 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         self.unitPrice = unitPrice
         self.vatRate = vatRate
         self.orderReference = orderReference
+        self.optionalFields = optionalFields
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, description, quantity, unit, unitPrice, vatRate, orderReference, optionalFields
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        quantity = try c.decodeIfPresent(Double.self, forKey: .quantity) ?? 0
+        unit = try c.decodeIfPresent(String.self, forKey: .unit) ?? "C62"
+        unitPrice = try c.decodeIfPresent(Double.self, forKey: .unitPrice) ?? 0
+        vatRate = try c.decodeIfPresent(Double.self, forKey: .vatRate) ?? 20.0
+        orderReference = try c.decodeIfPresent(String.self, forKey: .orderReference)
+        optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
     }
 
     public var lineTotal: Double {
@@ -376,10 +452,6 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var companyID: UUID?
     public var buyerReference: String?
     public var purchaseOrderRef: String?
-    public var contractRef: String?
-    public var tenderRef: String?
-    public var receivingAdviceRef: String?
-    public var despatchAdviceRef: String?
     public var precedingInvoiceRef: String?
     public var precedingInvoiceDate: Date?
     public var lines: [InvoiceLine]
@@ -393,6 +465,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var legalNoteAAB: String
     public var prepaidAmount: Double
     public var superPDPRemoteID: String?
+    public var optionalFields: [OptionalField]
 
     public init(
         id: UUID = UUID(),
@@ -409,10 +482,6 @@ public struct Invoice: Codable, Hashable, Identifiable {
         companyID: UUID? = nil,
         buyerReference: String? = nil,
         purchaseOrderRef: String? = nil,
-        contractRef: String? = nil,
-        tenderRef: String? = nil,
-        receivingAdviceRef: String? = nil,
-        despatchAdviceRef: String? = nil,
         precedingInvoiceRef: String? = nil,
         precedingInvoiceDate: Date? = nil,
         lines: [InvoiceLine] = [],
@@ -425,7 +494,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNotePMD: String = "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur",
         legalNoteAAB: String = "Escompte pour paiement anticipé : aucun",
         prepaidAmount: Double = 0,
-        superPDPRemoteID: String? = nil
+        superPDPRemoteID: String? = nil,
+        optionalFields: [OptionalField] = []
     ) {
         self.id = id
         self.number = number
@@ -441,10 +511,6 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.companyID = companyID
         self.buyerReference = buyerReference
         self.purchaseOrderRef = purchaseOrderRef
-        self.contractRef = contractRef
-        self.tenderRef = tenderRef
-        self.receivingAdviceRef = receivingAdviceRef
-        self.despatchAdviceRef = despatchAdviceRef
         self.precedingInvoiceRef = precedingInvoiceRef
         self.precedingInvoiceDate = precedingInvoiceDate
         self.lines = lines
@@ -458,16 +524,57 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.legalNoteAAB = legalNoteAAB
         self.prepaidAmount = prepaidAmount
         self.superPDPRemoteID = superPDPRemoteID
+        self.optionalFields = optionalFields
+    }
+
+    public var contractRef: String? {
+        get { referenceField("ram:ContractReferencedDocument/ram:IssuerAssignedID") }
+        set { setReferenceField("ram:ContractReferencedDocument/ram:IssuerAssignedID", newValue) }
+    }
+    public var tenderRef: String? {
+        get { referenceField("ram:TendererReferencedDocument/ram:IssuerAssignedID") }
+        set { setReferenceField("ram:TendererReferencedDocument/ram:IssuerAssignedID", newValue) }
+    }
+    public var receivingAdviceRef: String? {
+        get { referenceField("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID") }
+        set { setReferenceField("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", newValue) }
+    }
+    public var despatchAdviceRef: String? {
+        get { referenceField("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID") }
+        set { setReferenceField("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", newValue) }
+    }
+
+    private func referenceField(_ tagName: String) -> String? {
+        guard let v = optionalFields.first(where: { $0.tagName == tagName })?.value,
+              !v.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return v
+    }
+
+    private mutating func setReferenceField(_ tagName: String, _ value: String?) {
+        if let idx = optionalFields.firstIndex(where: { $0.tagName == tagName }) {
+            if let value, !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                optionalFields[idx].value = value
+            } else {
+                optionalFields.remove(at: idx)
+            }
+        } else if let value, !value.trimmingCharacters(in: .whitespaces).isEmpty {
+            optionalFields.append(OptionalField(tagName: tagName, value: value))
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
-        case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
-        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID
+        case buyerReference, purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
+        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
+    }
+
+    private enum LegacyReferenceKeys: String, CodingKey {
+        case contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let lc = try decoder.container(keyedBy: LegacyReferenceKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         number = try c.decodeIfPresent(String.self, forKey: .number) ?? ""
         type = try c.decodeIfPresent(InvoiceTypeCode.self, forKey: .type) ?? .commercialInvoice
@@ -482,10 +589,6 @@ public struct Invoice: Codable, Hashable, Identifiable {
         companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
         buyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
         purchaseOrderRef = try c.decodeIfPresent(String.self, forKey: .purchaseOrderRef)
-        contractRef = try c.decodeIfPresent(String.self, forKey: .contractRef)
-        tenderRef = try c.decodeIfPresent(String.self, forKey: .tenderRef)
-        receivingAdviceRef = try c.decodeIfPresent(String.self, forKey: .receivingAdviceRef)
-        despatchAdviceRef = try c.decodeIfPresent(String.self, forKey: .despatchAdviceRef)
         precedingInvoiceRef = try c.decodeIfPresent(String.self, forKey: .precedingInvoiceRef)
         precedingInvoiceDate = try c.decodeIfPresent(Date.self, forKey: .precedingInvoiceDate)
         lines = try c.decodeIfPresent([InvoiceLine].self, forKey: .lines) ?? []
@@ -499,6 +602,17 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNoteAAB = try c.decodeIfPresent(String.self, forKey: .legalNoteAAB) ?? "Escompte pour paiement anticipé : aucun"
         prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
         superPDPRemoteID = try c.decodeIfPresent(String.self, forKey: .superPDPRemoteID)
+        optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
+        migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
+        migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))
+        migrateReference("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .receivingAdviceRef))
+        migrateReference("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .despatchAdviceRef))
+    }
+
+    private mutating func migrateReference(_ tagName: String, _ value: String?) {
+        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty,
+              !optionalFields.contains(where: { $0.tagName == tagName }) else { return }
+        optionalFields.append(OptionalField(tagName: tagName, value: value))
     }
 
     public var netToPay: Double {

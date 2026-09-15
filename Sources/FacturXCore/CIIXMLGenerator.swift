@@ -23,9 +23,10 @@ public struct CIIXMLGenerator {
 
         let seller = xmlParty(invoice.seller, role: .seller)
         let buyer = xmlParty(invoice.buyer, role: .buyer)
+        let projectRef = projectReferenceXML(invoice)
         let agreement = """
         <ram:ApplicableHeaderTradeAgreement>
-\(buyerReferenceXML(invoice))\(seller)\(buyer)\(purchaseOrderXML(invoice))\(contractXML(invoice))\(tenderXML(invoice))
+\(buyerReferenceXML(invoice))\(seller)\(buyer)\(purchaseOrderXML(invoice))\(contractXML(invoice))\(tenderXML(invoice))\(projectRef.isEmpty ? "" : projectRef)
         </ram:ApplicableHeaderTradeAgreement>
 """
         let delivery = """
@@ -77,13 +78,37 @@ public struct CIIXMLGenerator {
         let desc = line.description.map { """
             <ram:Description>\(escape($0))</ram:Description>
 """ } ?? ""
+        let globalID = line.optionalFields.first(where: { $0.tagName == "ram:GlobalID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
+        let globalIDXML = globalID.map { f in
+            let v = escape(f.value.trimmingCharacters(in: .whitespaces))
+            return """
+            <ram:GlobalID schemeID="0160">\(v)</ram:GlobalID>
+"""
+        } ?? ""
+        let orderField = line.optionalFields.first(where: { $0.tagName == "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
+        let contractField = line.optionalFields.first(where: { $0.tagName == "ram:ContractReferencedDocument/ram:IssuerAssignedID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
+        var lineRefs = ""
+        if let of = orderField {
+            lineRefs += """
+            <ram:BuyerOrderReferencedDocument>
+              <ram:IssuerAssignedID>\(escape(of.value.trimmingCharacters(in: .whitespaces)))</ram:IssuerAssignedID>
+            </ram:BuyerOrderReferencedDocument>
+"""
+        }
+        if let cf = contractField {
+            lineRefs += """
+            <ram:ContractReferencedDocument>
+              <ram:IssuerAssignedID>\(escape(cf.value.trimmingCharacters(in: .whitespaces)))</ram:IssuerAssignedID>
+            </ram:ContractReferencedDocument>
+"""
+        }
         return """
         <ram:IncludedSupplyChainTradeLineItem>
           <ram:AssociatedDocumentLineDocument><ram:LineID>\(lineID)</ram:LineID></ram:AssociatedDocumentLineDocument>
-          <ram:SpecifiedTradeProduct>
+          <ram:SpecifiedTradeProduct>\(globalIDXML.isEmpty ? "" : globalIDXML)
             <ram:Name>\(escape(line.name))</ram:Name>\(desc.isEmpty ? "" : desc)
           </ram:SpecifiedTradeProduct>
-          <ram:SpecifiedLineTradeAgreement>
+          <ram:SpecifiedLineTradeAgreement>\(lineRefs.isEmpty ? "" : lineRefs)
             <ram:NetPriceProductTradePrice>
               <ram:ChargeAmount>\(price)</ram:ChargeAmount>
             </ram:NetPriceProductTradePrice>
@@ -416,6 +441,16 @@ public struct CIIXMLGenerator {
         block.split(separator: "\n", omittingEmptySubsequences: false)
             .map { String($0) }
             .joined(separator: "\n")
+    }
+
+    private func projectReferenceXML(_ invoice: Invoice) -> String {
+        guard let field = invoice.optionalFields.first(where: { $0.tagName == "ram:SpecifiedProcuringProject/ram:ID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }) else { return "" }
+        let v = escape(field.value.trimmingCharacters(in: .whitespaces))
+        return """
+      <ram:SpecifiedProcuringProject>
+        <ram:ID>\(v)</ram:ID>
+      </ram:SpecifiedProcuringProject>
+"""
     }
 
     private func escape(_ s: String) -> String {

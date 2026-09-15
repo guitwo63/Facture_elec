@@ -117,8 +117,8 @@ final class AuthTests: XCTestCase {
         let dir = PartyDirectory()
         dir.entries = []
         store.attachDirectory(dir)
-        let e1 = DirectoryEntry(kind: .fournisseur, party: InvoiceParty(name: "Société A", street: "", postcode: "", city: ""))
-        let e2 = DirectoryEntry(kind: .fournisseur, party: InvoiceParty(name: "Société B", street: "", postcode: "", city: ""))
+        let e1 = DirectoryEntry(kind: .societe, party: InvoiceParty(name: "Société A", street: "", postcode: "", city: ""))
+        let e2 = DirectoryEntry(kind: .societe, party: InvoiceParty(name: "Société B", street: "", postcode: "", city: ""))
         let client = DirectoryEntry(kind: .client, party: InvoiceParty(name: "Client X", street: "", postcode: "", city: ""))
         dir.entries = [e1, e2, client]
         return (store, dir, [e1, e2, client])
@@ -152,7 +152,7 @@ final class AuthTests: XCTestCase {
         XCTAssertEqual(Set(store.visibleSocieties(for: comptable).map(\.displayName)), Set(["Société B"]))
         XCTAssertTrue(store.visibleSocieties(for: nil).isEmpty)
         XCTAssertEqual(Set(store.availableSocieties().map(\.displayName)), Set(["Société A", "Société B"]),
-                     "availableSocieties ne doit renvoyer que les fiches fournisseurs")
+                     "availableSocieties ne doit renvoyer que les fiches sociétés")
     }
 
     func testMultiRoleCumulatesProfiles() throws {

@@ -39,21 +39,29 @@ public enum OrderTypeCode: String, Codable, CaseIterable {
 public enum OrderStatus: String, Codable, CaseIterable {
     case draft
     case issued
-    case sentToSupplier
+    case sentToSociete
     case accepted
     case amended
     case rejected
     case cancelled
     case confirmed
 
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "sentToSupplier": self = .sentToSociete
+        default: self = OrderStatus(rawValue: raw) ?? .draft
+        }
+    }
+
     public var label: String {
         switch self {
         case .draft: return "Brouillon"
         case .issued: return "Émise"
-        case .sentToSupplier: return "Transmise au fournisseur"
-        case .accepted: return "Acceptée par le fournisseur"
+        case .sentToSociete: return "Transmise à la société"
+        case .accepted: return "Acceptée par la société"
         case .amended: return "Modifiée"
-        case .rejected: return "Rejetée par le fournisseur"
+        case .rejected: return "Rejetée par la société"
         case .cancelled: return "Annulée"
         case .confirmed: return "Confirmée"
         }
@@ -63,7 +71,7 @@ public enum OrderStatus: String, Codable, CaseIterable {
         switch self {
         case .draft: return "doc"
         case .issued: return "doc.fill"
-        case .sentToSupplier: return "paperplane.fill"
+        case .sentToSociete: return "paperplane.fill"
         case .accepted: return "checkmark.seal.fill"
         case .amended: return "pencil.line"
         case .rejected: return "xmark.octagon.fill"
@@ -76,7 +84,7 @@ public enum OrderStatus: String, Codable, CaseIterable {
         switch self {
         case .draft: return "6E6E73"
         case .issued: return "2A6EBB"
-        case .sentToSupplier: return "B07A2A"
+        case .sentToSociete: return "B07A2A"
         case .accepted: return "2E8B57"
         case .amended: return "8A4FBD"
         case .rejected: return "C0392B"
@@ -228,7 +236,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
                 orderReference: line.orderReference ?? self.number
             )
         }
-        return Invoice(
+        var invoice = Invoice(
             number: number,
             type: .commercialInvoice,
             status: .draft,
@@ -241,7 +249,6 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
             companyID: companyID,
             buyerReference: buyerReference,
             purchaseOrderRef: quotationRef,
-            contractRef: contractRef,
             lines: mappedLines,
             paymentIBAN: buyer.iban,
             paymentBIC: buyer.bic,
@@ -249,6 +256,10 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
             notes: notes,
             billingMode: .m1
         )
+        if let contractRef, !contractRef.trimmingCharacters(in: .whitespaces).isEmpty {
+            invoice.contractRef = contractRef
+        }
+        return invoice
     }
 }
 
@@ -266,7 +277,7 @@ public struct OrderStatusOverride: Codable, Hashable, Identifiable {
     }
 
     private static let pdpKeys: Set<String> = [
-        OrderStatus.sentToSupplier.rawValue,
+        OrderStatus.sentToSociete.rawValue,
         OrderStatus.accepted.rawValue,
         OrderStatus.rejected.rawValue,
         OrderStatus.confirmed.rawValue,
@@ -300,7 +311,12 @@ public final class OrderStatusStore: ObservableObject {
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([OrderStatusOverride].self, from: data),
            !decoded.isEmpty {
-            var byID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
+            let migrated = decoded.map { o -> OrderStatusOverride in
+                var v = o
+                if v.id == "sentToSupplier" { v.id = OrderStatus.sentToSociete.rawValue }
+                return v
+            }
+            var byID = Dictionary(uniqueKeysWithValues: migrated.map { ($0.id, $0) })
             for d in OrderStatusStore.defaults where byID[d.id] == nil {
                 byID[d.id] = d
             }
@@ -335,7 +351,9 @@ public final class OrderStatusStore: ObservableObject {
     }
 
     public func override(for order: SalesOrder) -> OrderStatusOverride {
-        if let cid = order.customStatusID,
+        var cid = order.customStatusID
+        if cid == "sentToSupplier" { cid = OrderStatus.sentToSociete.rawValue }
+        if let cid = cid,
            let custom = overrides.first(where: { $0.id == cid }) {
             return custom
         }

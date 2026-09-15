@@ -1264,6 +1264,106 @@ struct InvoicesTabView: View {
     }
 }
 
+struct OptionalFieldsSection: View {
+    @Binding var fields: [OptionalField]
+    let location: OptionalFieldLocation
+    var locked: Bool = false
+
+    private var templates: [OptionalFieldTemplate] { OptionalFieldCatalogue.templates(for: location) }
+    private var title: String { location == .header ? "Champs optionnels (entete)" : "Champs optionnels (ligne)" }
+
+    private func labelFor(tagName: String) -> String {
+        if let tpl = OptionalFieldCatalogue.template(forTag: tagName, location: location) {
+            return "\(tpl.bt) - \(tpl.label)"
+        }
+        return tagName
+    }
+
+    private func helpFor(tagName: String) -> String {
+        OptionalFieldCatalogue.template(forTag: tagName, location: location)?.help ?? "Balise libre (non emise dans le XML CII)."
+    }
+
+    var body: some View {
+        DisclosureGroup(title) {
+            VStack(alignment: .leading, spacing: 6) {
+                if fields.isEmpty {
+                    Text("Aucun champ optionnel.").foregroundStyle(.secondary)
+                }
+                ForEach($fields) { $field in
+                    fieldRow(field: $field)
+                }
+                Menu {
+                    ForEach(templates) { tpl in
+                        Button {
+                            fields.append(OptionalField(tagName: tpl.tagName, value: ""))
+                        } label: {
+                            Label("\(tpl.bt) - \(tpl.label)", systemImage: "tag")
+                        }
+                    }
+                    Divider()
+                    Button {
+                        fields.append(OptionalField(tagName: "", value: ""))
+                    } label: {
+                        Label("Balise personnalisee...", systemImage: "pencil")
+                    }
+                } label: {
+                    Label("Ajouter un champ", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .disabled(locked)
+            }
+            .padding(.top, 4)
+        }
+        .font(.caption)
+        .disabled(locked)
+    }
+
+    @ViewBuilder
+    private func fieldRow(field: Binding<OptionalField>) -> some View {
+        let tagName = field.tagName.wrappedValue
+        let isCustom = tagName.isEmpty || OptionalFieldCatalogue.template(forTag: tagName, location: location) == nil
+        HStack(spacing: 4) {
+            Menu {
+                ForEach(templates) { tpl in
+                    Button {
+                        field.tagName.wrappedValue = tpl.tagName
+                    } label: {
+                        Text("\(tpl.bt) - \(tpl.label)")
+                    }
+                }
+                Divider()
+                Button {
+                    field.tagName.wrappedValue = ""
+                } label: {
+                    Text("Personnalisee...")
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "tag")
+                    Text(tagName.isEmpty ? "Choisir une balise..." : labelFor(tagName: tagName))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
+                .frame(width: 320, alignment: .leading)
+            }
+            if isCustom {
+                let placeholder = OptionalFieldCatalogue.template(forTag: tagName, location: location)?.label ?? "ram:..."
+                TextField(placeholder, text: field.tagName).frame(width: 200)
+            }
+            TextField("Valeur", text: field.value).frame(maxWidth: .infinity)
+            InfoBadge(text: helpFor(tagName: tagName))
+            Button {
+                if let idx = fields.firstIndex(where: { $0.id == field.wrappedValue.id }) {
+                    fields.remove(at: idx)
+                }
+            } label: {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
 struct InvoiceEditorView: View {
     @Binding var invoice: Invoice
     @EnvironmentObject var store: InvoiceStore
@@ -1599,26 +1699,7 @@ struct InvoiceEditorView: View {
                                     }
                                 }
                                 companyScopePicker
-                                DisclosureGroup("Autres références") {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. contrat (BT-17)", text: Binding($invoice.contractRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-17 — Référence du contrat.")
-                                        }
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. appel d'offres (BT-18)", text: Binding($invoice.tenderRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-18 — Référence de l'appel d'offres.")
-                                        }
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. bon de réception (BT-19)", text: Binding($invoice.receivingAdviceRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-19 — Référence de l'avis de réception.")
-                                        }
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. bon de livraison (BT-20)", text: Binding($invoice.despatchAdviceRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-20 — Référence de l'avis d'expédition.")
-                                        }
-                                    }
-                                }
+                                OptionalFieldsSection(fields: $invoice.optionalFields, location: .header, locked: fieldLocked)
                                 .font(.caption)
                             }
                             VStack(alignment: .trailing, spacing: 4) {
@@ -1743,6 +1824,8 @@ struct InvoiceEditorView: View {
                                     Image(systemName: "minus.circle")
                                 }
                             }
+                            OptionalFieldsSection(fields: $line.optionalFields, location: .line, locked: fieldLocked)
+                                .padding(.leading, 4)
                         }
                         Button {
                             invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: invoice.lines.last?.vatRate ?? 20))
@@ -2289,7 +2372,7 @@ struct PartySection: View {
     enum Role {
         case seller, buyer
         var title: String { self == .seller ? "Émetteur" : "Destinataire" }
-        var defaultKind: DirectoryEntryKind { self == .seller ? .fournisseur : .client }
+        var defaultKind: DirectoryEntryKind { self == .seller ? .societe : .client }
     }
 
     @Binding var party: InvoiceParty
@@ -2335,7 +2418,7 @@ struct PartySection: View {
                 Spacer()
             }
 
-            PartyEditorView(party: $party, isFournisseur: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showSuperPDPSearch) {
@@ -2449,9 +2532,8 @@ struct PartyPickerSheet: View {
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let roleKind = role.defaultKind
         var active = directory.entries.filter {
-            !$0.isArchived && ($0.kind == roleKind || $0.kind == .both)
+            !$0.isArchived && (role == .seller ? $0.kind == .societe : ($0.kind == .client || $0.kind == .both))
         }
         if role == .seller, let scope = auth.visibleDirectoryEntryIDs(for: auth.currentUser) {
             active = active.filter { scope.contains($0.id) }
@@ -2689,30 +2771,23 @@ struct DirectoryView: View {
     @State private var showImport = false
     @State private var importResult: ExportGenerator.PartyImportResult?
 
-    private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
-
-    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
+    private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var base = directory.entries.filter { showArchived || !$0.isArchived }
-        if let scope = scope {
-            base = base.filter { entry in
-                if entry.kind == .fournisseur { return scope.contains(entry.id) }
-                if entry.kind == .both { return scope.contains(entry.id) }
-                if let cid = entry.companyID { return scope.contains(cid) }
-                return false
+        base = base.filter { $0.kind != .societe }
+        guard q.isEmpty else {
+            return base.filter {
+                $0.displayName.lowercased().contains(q)
+                    || ($0.party.siren ?? "").lowercased().contains(q)
+                    || ($0.party.siret ?? "").lowercased().contains(q)
+                    || ($0.party.vatNumber ?? "").lowercased().contains(q)
+                    || $0.party.city.lowercased().contains(q)
             }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         }
-        guard !q.isEmpty else { return base }
-        return base.filter {
-            $0.displayName.lowercased().contains(q)
-                || ($0.party.siren ?? "").lowercased().contains(q)
-                || ($0.party.siret ?? "").lowercased().contains(q)
-                || ($0.party.vatNumber ?? "").lowercased().contains(q)
-                || $0.party.city.lowercased().contains(q)
-        }
-        .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
     var body: some View {
@@ -2823,7 +2898,7 @@ struct DirectoryView: View {
                                     if selectedEntry?.id == entry.id { selectedEntry = nil }
                                 } label: { Label("Supprimer", systemImage: "trash") }
                             } else {
-                                Text("Fournisseur : modification réservée à l'administrateur")
+                                Text("Modification non autorisée")
                             }
                         }
                     }
@@ -2882,7 +2957,7 @@ struct DirectoryView: View {
     }
 
     private func canEditEntry(_ entry: DirectoryEntry) -> Bool {
-        if entry.kind == .fournisseur || entry.kind == .both { return canManageFournisseurs }
+        if entry.kind == .societe { return canManageSocietes }
         return true
     }
 
@@ -3277,10 +3352,10 @@ struct DirectoryEditorView: View {
         return isEditing ? "Modifier : \(entry.party.name)" : "Nouveau tiers : \(entry.party.name)"
     }
 
-    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
+    private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     private var availableKinds: [DirectoryEntryKind] {
-        if canManageFournisseurs { return DirectoryEntryKind.allCases }
+        if canManageSocietes { return DirectoryEntryKind.allCases }
         return [.client]
     }
 
@@ -3326,9 +3401,9 @@ struct DirectoryEditorView: View {
             Picker("Type", selection: $entry.kind) {
                 ForEach(availableKinds, id: \.self) { Text($0.label).tag($0) }
             }.pickerStyle(.segmented)
-            .disabled(!canManageFournisseurs && entry.kind == .fournisseur)
+            .disabled(!canManageSocietes && entry.kind == .societe)
 
-            if entry.kind == .client || entry.kind == .both {
+            if entry.kind == .client {
                 GroupBox("Société (périmètre)") {
                     HStack {
                         Text("Société").frame(width: 80, alignment: .leading)
@@ -3347,7 +3422,7 @@ struct DirectoryEditorView: View {
             }
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kind == .societe)
             }
 
             if !tagStore.tags.isEmpty {
@@ -3822,6 +3897,138 @@ struct OrderStatusSettingsView: View {
     }
 }
 
+struct SocietiesAdminView: View {
+    @Binding var editingEntry: DirectoryEntry?
+    @Binding var creatingNew: Bool
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var query = ""
+    @State private var selectedID: UUID?
+    @State private var editingLogoEntry: DirectoryEntry?
+
+    private var societies: [DirectoryEntry] {
+        directory.entries.filter { $0.kind == .societe }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private var filtered: [DirectoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return societies }
+        return societies.filter {
+            $0.displayName.lowercased().contains(q)
+                || ($0.party.siren ?? "").lowercased().contains(q)
+                || ($0.party.siret ?? "").lowercased().contains(q)
+                || ($0.party.vatNumber ?? "").lowercased().contains(q)
+                || $0.party.city.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button {
+                    creatingNew = true
+                } label: { Label("Nouvelle société", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+                Spacer()
+                Text("\(societies.count) société(s) — \(societies.filter { !$0.isArchived }.count) active(s)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Les sociétés sont les entités émettrices de l'application. Elles définissent le périmètre des utilisateurs et l'émetteur des factures. Elles ne sont pas affichées dans l'onglet Annuaire.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher une société", text: $query)
+                    .textFieldStyle(.plain)
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+
+            if filtered.isEmpty {
+                Text("Aucune société. Cliquez sur « Nouvelle société ».")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.vertical, 12)
+            } else {
+                Table(filtered, selection: Binding(
+                    get: { selectedID },
+                    set: { selectedID = $0 }
+                )) {
+                    TableColumn("Nom") { e in
+                        HStack(spacing: 6) {
+                            Text(e.displayName)
+                            if e.isArchived {
+                                Text("Archive")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.2), in: Capsule())
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
+                    TableColumn("SIREN") { e in Text((e.party.siren ?? "").isEmpty ? "—" : e.party.siren!) }
+                    TableColumn("Ville") { e in Text(e.party.city.isEmpty ? "—" : e.party.city) }
+                    TableColumn("IBAN") { e in Text((e.party.iban ?? "").isEmpty ? "—" : e.party.iban!) }
+                        .width(min: 120, ideal: 160)
+                    TableColumn("Logo") { e in
+                        Group {
+                            if let data = e.logoData, let img = NSImage(data: data) {
+                                Image(nsImage: img)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 36, height: 24)
+                                    .background(RoundedRectangle(cornerRadius: 4).stroke(.secondary, lineWidth: 0.3))
+                            } else {
+                                Text("-").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .width(min: 48, ideal: 60)
+                }
+                .frame(minHeight: 180)
+                if let id = selectedID, let entry = societies.first(where: { $0.id == id }) {
+                    HStack {
+                        Button {
+                            editingEntry = entry
+                        } label: { Label("Modifier", systemImage: "pencil") }
+                            .buttonStyle(.bordered)
+                        Button {
+                            editingLogoEntry = entry
+                        } label: { Label(entry.logoData == nil ? "Ajouter logo" : "Modifier logo", systemImage: "photo") }
+                            .buttonStyle(.bordered)
+                        if entry.logoData != nil {
+                            Button(role: .destructive) {
+                                var e = entry
+                                e.logoData = nil
+                                directory.upsert(e)
+                            } label: { Label("Retirer logo", systemImage: "trash") }
+                                .buttonStyle(.bordered)
+                        }
+                        Button(role: .destructive) {
+                            directory.delete(entry)
+                            selectedID = nil
+                        } label: { Label("Supprimer", systemImage: "trash.fill") }
+                            .buttonStyle(.bordered)
+                        Spacer()
+                    }.padding(.top, 4)
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(item: $editingLogoEntry) { entry in
+            PartyLogoEditor(entry: entry, isPresented: Binding(
+                get: { editingLogoEntry != nil },
+                set: { if !$0 { editingLogoEntry = nil } }
+            ))
+        }
+    }
+}
+
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
@@ -3840,14 +4047,23 @@ struct ApplicationSettingsView: View {
     @State private var superPDPExpanded = false
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
-    @State private var logosExpanded = false
-    @State private var editingLogoEntry: DirectoryEntry?
+    @State private var editingSociety: DirectoryEntry?
+    @State private var creatingSociety = false
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                GroupBox {
+                    SocietiesAdminView(
+                        editingEntry: $editingSociety,
+                        creatingNew: $creatingSociety
+                    )
+                } label: {
+                    Label("Sociétés du périmètre", systemImage: "building.2.fill")
+                        .font(.headline)
+                }
                 GroupBox {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
@@ -4112,59 +4328,6 @@ struct ApplicationSettingsView: View {
                 .onChange(of: store.numberStart) { _ in store.save() }
                 .onChange(of: store.numberUseSeparator) { _ in store.save() }
 
-                DisclosureGroup(isExpanded: $logosExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Associez un logo (PNG, JPEG ou TIFF) à chaque fournisseur émetteur. Le logo est affiché en en-tête du PDF lisible des factures émises par ce fournisseur.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        let fournisseurs = directory.entries.filter { ($0.kind == .fournisseur || $0.kind == .both) && !$0.isArchived }
-                        if fournisseurs.isEmpty {
-                            Text("Aucun fournisseur dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(fournisseurs, id: \.id) { entry in
-                                HStack(spacing: 10) {
-                                    if let data = entry.logoData, let img = NSImage(data: data) {
-                                        Image(nsImage: img)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 36, height: 24)
-                                            .background(RoundedRectangle(cornerRadius: 4).stroke(.secondary, lineWidth: 0.3))
-                                    } else {
-                                        Image(systemName: "photo")
-                                            .font(.title3)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 36, height: 24)
-                                    }
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(entry.displayName).font(.callout)
-                                        if entry.logoData != nil {
-                                            Text("Logo configuré").font(.caption2).foregroundStyle(.green)
-                                        } else {
-                                            Text("Aucun logo").font(.caption2).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    Spacer()
-                                    Button {
-                                        editingLogoEntry = entry
-                                    } label: { Label(entry.logoData == nil ? "Ajouter" : "Modifier", systemImage: "photo") }
-                                        .buttonStyle(.bordered).controlSize(.small)
-                                    if entry.logoData != nil {
-                                        Button(role: .destructive) {
-                                            var e = entry
-                                            e.logoData = nil
-                                            directory.upsert(e)
-                                        } label: { Image(systemName: "trash") }
-                                            .buttonStyle(.bordered).controlSize(.small)
-                                    }
-                                }
-                                Divider()
-                            }
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Logos des fournisseurs", systemImage: "photo.on.rectangle")
-                        .font(.headline)
-                }
-
                 Divider()
                 HStack {
                     Text("Facture_elec v0.3.0").font(.caption).foregroundStyle(.secondary)
@@ -4177,11 +4340,20 @@ struct ApplicationSettingsView: View {
                 Spacer()
             }.padding()
         }
-        .sheet(item: $editingLogoEntry) { entry in
-            PartyLogoEditor(entry: entry, isPresented: Binding(
-                get: { editingLogoEntry != nil },
-                set: { if !$0 { editingLogoEntry = nil } }
-            ))
+        .sheet(item: $editingSociety) { entry in
+            DirectoryEditorView(entry: entry, onSave: { updated in
+                directory.upsert(updated)
+                editingSociety = nil
+            }, onDelete: { toDelete in
+                directory.delete(toDelete)
+                editingSociety = nil
+            })
+        }
+        .sheet(isPresented: $creatingSociety) {
+            DirectoryEditorView(initialKind: .societe) { newEntry in
+                directory.upsert(newEntry)
+                creatingSociety = false
+            }
         }
     }
 
@@ -5070,7 +5242,7 @@ struct PartyEditorView: View {
     @Binding var routingAddresses: [PartyRoutingAddress]
     @Binding var contacts: [PartyContact]
     var showWebButton: Bool
-    var isFournisseur: Bool = false
+    var isSociete: Bool = false
     var hideEmail: Bool = false
     var isMultiContact: Bool
     var directory: PartyDirectory?
@@ -5088,10 +5260,10 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false, hideEmail: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
-        self.isFournisseur = isFournisseur
+        self.isSociete = isSociete
         self.hideEmail = hideEmail
         self.isMultiContact = contacts != nil
         self.directory = directory
@@ -5305,7 +5477,7 @@ struct PartyEditorView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            if isFournisseur {
+            if isSociete {
                 DisclosureGroup("Coordonnées bancaires & conditions de paiement") {
                     VStack(alignment: .leading, spacing: 6) {
                         TextField("IBAN", text: Binding($party.iban, replacingNilWith: ""))
@@ -5585,8 +5757,8 @@ struct NormRefPicker: View {
 struct OrderPartySection: View {
     enum Role {
         case buyer, seller
-        var title: String { self == .buyer ? "Acheteur" : "Fournisseur" }
-        var defaultKind: DirectoryEntryKind { self == .buyer ? .client : .fournisseur }
+        var title: String { self == .buyer ? "Acheteur" : "Société" }
+        var defaultKind: DirectoryEntryKind { self == .buyer ? .client : .societe }
     }
 
     @Binding var party: InvoiceParty
@@ -5607,7 +5779,7 @@ struct OrderPartySection: View {
                 Spacer()
             }
 
-            PartyEditorView(party: $party, isFournisseur: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -6281,9 +6453,9 @@ extension Binding {
     }
 }
 
-/// Édition du logo d'une fiche tiers (fournisseur). Le logo est persisté
+/// Édition du logo d'une fiche tiers (société). Le logo est persisté
 /// sur le DirectoryEntry et réutilisé automatiquement en en-tête du PDF
-/// des factures émises par ce fournisseur.
+/// des factures émises par cette société.
 struct PartyLogoEditor: View {
     let entry: DirectoryEntry
     @EnvironmentObject var directory: PartyDirectory
@@ -6294,7 +6466,7 @@ struct PartyLogoEditor: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("Logo « \(entry.displayName) »").font(.headline)
-            Text("Image (PNG, JPEG ou TIFF) affichée en en-tête du PDF lisible des factures émises par ce fournisseur. Le logo n'est pas embarqué dans le XML Factur-X.")
+            Text("Image (PNG, JPEG ou TIFF) affichée en en-tête du PDF lisible des factures émises par cette société. Le logo n'est pas embarqué dans le XML Factur-X.")
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
             if let data = currentLogo, let img = NSImage(data: data) {
@@ -6309,7 +6481,7 @@ struct PartyLogoEditor: View {
                 Image(systemName: "photo")
                     .font(.system(size: 40))
                     .foregroundStyle(.secondary)
-                Text("Aucun logo pour ce fournisseur").font(.caption).foregroundStyle(.secondary)
+                Text("Aucun logo pour cette société").font(.caption).foregroundStyle(.secondary)
             }
 
             HStack {

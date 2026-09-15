@@ -24,7 +24,7 @@ final class OrderXCoreTests: XCTestCase {
                 endpointSchemeID: "0225"
             ),
             seller: InvoiceParty(
-                name: "Fournisseur Exemple SAS",
+                name: "Société Exemple SAS",
                 street: "8 avenue des Champs",
                 postcode: "75008",
                 city: "Paris",
@@ -147,7 +147,7 @@ final class OrderXCoreTests: XCTestCase {
         XCTAssertFalse(v.isValid)
         XCTAssertTrue(v.errors.contains(where: { $0.contains("numéro de commande") }))
         XCTAssertTrue(v.errors.contains(where: { $0.contains("acheteur") }))
-        XCTAssertTrue(v.errors.contains(where: { $0.contains("fournisseur") }))
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("client") }))
         XCTAssertTrue(v.errors.contains(where: { $0.contains("au moins une ligne") }))
     }
 
