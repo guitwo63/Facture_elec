@@ -277,7 +277,7 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
     public var label: String {
         switch self {
         case .draft: return "Brouillon"
-        case .issued: return "Émise"
+        case .issued: return "Validée (non envoyée)"
         case .sentToPDP: return "Transmise au PDP"
         case .accepted: return "Acceptée par le PDP"
         case .rejected: return "Rejetée par le PDP"
@@ -309,6 +309,56 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .cancelled: return "8C8C8C"
         }
     }
+
+    public var locksInvoice: Bool {
+        switch self {
+        case .accepted, .paid, .cancelled: return true
+        default: return false
+        }
+    }
+
+    /// Ordre du cycle de vie (pour empêcher tout rapatriement rétrograde depuis la PDP).
+    public var lifecycleRank: Int {
+        switch self {
+        case .draft: return 0
+        case .issued: return 1
+        case .sentToPDP: return 2
+        case .accepted: return 3
+        case .rejected: return 3
+        case .paid: return 4
+        case .cancelled: return 4
+        }
+    }
+
+    /// Transitions autorisées pour un comptable (cycle de vie normé sans annulation).
+    public func allowedTransitions() -> [InvoiceStatus] {
+        switch self {
+        case .draft:
+            return [.issued]
+        case .issued:
+            return [.sentToPDP, .rejected]
+        case .sentToPDP:
+            return [.accepted, .rejected]
+        case .accepted:
+            return [.paid, .rejected]
+        case .rejected:
+            return []
+        case .paid:
+            return []
+        case .cancelled:
+            return []
+        }
+    }
+
+    public static func allowedTransitions(from status: InvoiceStatus, isAdmin: Bool) -> [InvoiceStatus] {
+        let standard = status.allowedTransitions()
+        guard isAdmin else { return standard }
+        var extended = standard
+        if status != .cancelled && !extended.contains(.cancelled) {
+            extended.append(.cancelled)
+        }
+        return extended.sorted { $0.label < $1.label }
+    }
 }
 
 public struct Invoice: Codable, Hashable, Identifiable {
@@ -317,6 +367,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var type: InvoiceTypeCode
     public var status: InvoiceStatus
     public var issueDate: Date
+    public var createdAt: Date
     public var dueDate: Date
     public var currency: String
     public var profile: FacturXProfile
@@ -341,6 +392,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var legalNotePMD: String
     public var legalNoteAAB: String
     public var prepaidAmount: Double
+    public var superPDPRemoteID: String?
 
     public init(
         id: UUID = UUID(),
@@ -348,6 +400,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         type: InvoiceTypeCode = .commercialInvoice,
         status: InvoiceStatus = .draft,
         issueDate: Date = Date(),
+        createdAt: Date = Date(),
         dueDate: Date = Date().addingTimeInterval(30 * 86400),
         currency: String = "EUR",
         profile: FacturXProfile = .en16931,
@@ -371,13 +424,15 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNotePMT: String = "Indemnité forfaitaire pour frais de recouvrement due à compter du 1er jour de retard : 40 EUR",
         legalNotePMD: String = "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur",
         legalNoteAAB: String = "Escompte pour paiement anticipé : aucun",
-        prepaidAmount: Double = 0
+        prepaidAmount: Double = 0,
+        superPDPRemoteID: String? = nil
     ) {
         self.id = id
         self.number = number
         self.type = type
         self.status = status
         self.issueDate = issueDate
+        self.createdAt = createdAt
         self.dueDate = dueDate
         self.currency = currency
         self.profile = profile
@@ -402,12 +457,13 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.legalNotePMD = legalNotePMD
         self.legalNoteAAB = legalNoteAAB
         self.prepaidAmount = prepaidAmount
+        self.superPDPRemoteID = superPDPRemoteID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer, companyID
+        case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
         case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
-        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount
+        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID
     }
 
     public init(from decoder: Decoder) throws {
@@ -417,6 +473,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         type = try c.decodeIfPresent(InvoiceTypeCode.self, forKey: .type) ?? .commercialInvoice
         status = try c.decodeIfPresent(InvoiceStatus.self, forKey: .status) ?? .draft
         issueDate = try c.decodeIfPresent(Date.self, forKey: .issueDate) ?? Date()
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         dueDate = try c.decodeIfPresent(Date.self, forKey: .dueDate) ?? Date().addingTimeInterval(30 * 86400)
         currency = try c.decodeIfPresent(String.self, forKey: .currency) ?? "EUR"
         profile = try c.decodeIfPresent(FacturXProfile.self, forKey: .profile) ?? .en16931
@@ -441,6 +498,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNotePMD = try c.decodeIfPresent(String.self, forKey: .legalNotePMD) ?? "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur"
         legalNoteAAB = try c.decodeIfPresent(String.self, forKey: .legalNoteAAB) ?? "Escompte pour paiement anticipé : aucun"
         prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
+        superPDPRemoteID = try c.decodeIfPresent(String.self, forKey: .superPDPRemoteID)
     }
 
     public var netToPay: Double {

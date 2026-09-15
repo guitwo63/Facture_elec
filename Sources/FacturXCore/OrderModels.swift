@@ -264,6 +264,16 @@ public struct OrderStatusOverride: Codable, Hashable, Identifiable {
         self.systemImage = systemImage
         self.hexColor = hexColor
     }
+
+    private static let pdpKeys: Set<String> = [
+        OrderStatus.sentToSupplier.rawValue,
+        OrderStatus.accepted.rawValue,
+        OrderStatus.rejected.rawValue,
+        OrderStatus.confirmed.rawValue,
+        OrderStatus.cancelled.rawValue
+    ]
+
+    public var isPDPStatus: Bool { Self.pdpKeys.contains(id) }
 }
 
 public final class OrderStatusStore: ObservableObject {

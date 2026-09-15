@@ -263,6 +263,24 @@ public enum EmailValidator {
 
 // MARK: - Journal d'audit (B1)
 
+public enum AuditObjectType: String, Codable, CaseIterable {
+    case invoice
+    case order
+    case party
+    case user
+    case other
+
+    public var label: String {
+        switch self {
+        case .invoice: return "Facture"
+        case .order: return "Commande"
+        case .party: return "Tiers"
+        case .user: return "Utilisateur"
+        case .other: return "Autre"
+        }
+    }
+}
+
 public struct AuditLogEntry: Codable, Identifiable, Hashable {
     public var id: UUID
     public var timestamp: Date
@@ -270,14 +288,40 @@ public struct AuditLogEntry: Codable, Identifiable, Hashable {
     public var action: String
     public var target: String
     public var details: String
+    public var objectType: AuditObjectType?
+    public var objectCode: String?
+    public var statusFrom: String?
+    public var statusTo: String?
 
-    public init(id: UUID = UUID(), timestamp: Date = Date(), actor: String, action: String, target: String, details: String = "") {
+    public init(id: UUID = UUID(), timestamp: Date = Date(), actor: String, action: String, target: String, details: String = "", objectType: AuditObjectType? = nil, objectCode: String? = nil, statusFrom: String? = nil, statusTo: String? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.actor = actor
         self.action = action
         self.target = target
         self.details = details
+        self.objectType = objectType
+        self.objectCode = objectCode
+        self.statusFrom = statusFrom
+        self.statusTo = statusTo
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, actor, action, target, details, objectType, objectCode, statusFrom, statusTo
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        timestamp = try c.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
+        actor = try c.decodeIfPresent(String.self, forKey: .actor) ?? ""
+        action = try c.decodeIfPresent(String.self, forKey: .action) ?? ""
+        target = try c.decodeIfPresent(String.self, forKey: .target) ?? ""
+        details = try c.decodeIfPresent(String.self, forKey: .details) ?? ""
+        objectType = try c.decodeIfPresent(AuditObjectType.self, forKey: .objectType)
+        objectCode = try c.decodeIfPresent(String.self, forKey: .objectCode)
+        statusFrom = try c.decodeIfPresent(String.self, forKey: .statusFrom)
+        statusTo = try c.decodeIfPresent(String.self, forKey: .statusTo)
     }
 }
 
@@ -304,10 +348,29 @@ public final class AuditStore: ObservableObject {
         }
     }
 
-    public func record(actor: String, action: String, target: String, details: String = "") {
-        entries.insert(AuditLogEntry(actor: actor, action: action, target: target, details: details), at: 0)
+    public func record(actor: String, action: String, target: String, details: String = "", objectType: AuditObjectType? = nil, objectCode: String? = nil) {
+        entries.insert(AuditLogEntry(actor: actor, action: action, target: target, details: details, objectType: objectType, objectCode: objectCode), at: 0)
         if entries.count > maxEntries { entries.removeLast(entries.count - maxEntries) }
         save()
+    }
+
+    public func recordStatusChange(actor: String, objectType: AuditObjectType, objectCode: String, statusFrom: String?, statusTo: String, details: String = "") {
+        entries.insert(AuditLogEntry(
+            actor: actor,
+            action: "status_change",
+            target: objectCode,
+            details: details,
+            objectType: objectType,
+            objectCode: objectCode,
+            statusFrom: statusFrom,
+            statusTo: statusTo
+        ), at: 0)
+        if entries.count > maxEntries { entries.removeLast(entries.count - maxEntries) }
+        save()
+    }
+
+    public func entries(forInvoice number: String) -> [AuditLogEntry] {
+        entries.filter { ($0.objectType == .invoice && ($0.objectCode ?? $0.target) == number) || $0.target == number }
     }
 
     public func clear() {

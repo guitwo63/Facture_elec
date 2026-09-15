@@ -74,19 +74,27 @@ public final class OrderStore: ObservableObject {
 
     public func upsert(_ order: SalesOrder) {
         let isNew = !orders.contains(where: { $0.id == order.id })
+        let previousStatus = orders.first(where: { $0.id == order.id })?.status
         if let idx = orders.firstIndex(where: { $0.id == order.id }) {
             orders[idx] = order
         } else {
             orders.insert(order, at: 0)
         }
         save()
-        audit?.record(actor: actorName, action: isNew ? "order_created" : "order_updated", target: order.number)
+        if let prev = previousStatus, prev != order.status {
+            audit?.recordStatusChange(actor: actorName, objectType: .order, objectCode: order.number,
+                                      statusFrom: prev.label, statusTo: order.status.label)
+        } else {
+            audit?.record(actor: actorName, action: isNew ? "order_created" : "order_updated", target: order.number,
+                           objectType: .order, objectCode: order.number)
+        }
     }
 
     public func delete(_ order: SalesOrder) {
         orders.removeAll { $0.id == order.id }
         save()
-        audit?.record(actor: actorName, action: "order_deleted", target: order.number)
+        audit?.record(actor: actorName, action: "order_deleted", target: order.number,
+                       objectType: .order, objectCode: order.number)
     }
 
     public func newDraft(directory: PartyDirectory? = nil, preferredBuyerEntryID: UUID? = nil, companyID: UUID? = nil) -> SalesOrder {

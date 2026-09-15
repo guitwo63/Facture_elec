@@ -85,20 +85,29 @@ public final class InvoiceStore: ObservableObject {
 
     public func upsert(_ invoice: Invoice) {
         let isNew = !invoices.contains(where: { $0.id == invoice.id })
+        let previousStatus = invoices.first(where: { $0.id == invoice.id })?.status
         if let idx = invoices.firstIndex(where: { $0.id == invoice.id }) {
             invoices[idx] = invoice
         } else {
             invoices.insert(invoice, at: 0)
         }
         save()
-        audit?.record(actor: actorName, action: isNew ? "invoice_created" : "invoice_updated",
-                       target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture")
+        if let prev = previousStatus, prev != invoice.status {
+            audit?.recordStatusChange(actor: actorName, objectType: .invoice, objectCode: invoice.number,
+                                      statusFrom: prev.label, statusTo: invoice.status.label,
+                                      details: invoice.type.isCreditNote ? "avoir" : "facture")
+        } else {
+            audit?.record(actor: actorName, action: isNew ? "invoice_created" : "invoice_updated",
+                           target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture",
+                           objectType: .invoice, objectCode: invoice.number)
+        }
     }
 
     public func delete(_ invoice: Invoice) {
         invoices.removeAll { $0.id == invoice.id }
         save()
-        audit?.record(actor: actorName, action: "invoice_deleted", target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture")
+        audit?.record(actor: actorName, action: "invoice_deleted", target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture",
+                       objectType: .invoice, objectCode: invoice.number)
     }
 
     public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil, preferredSellerEntryID: UUID? = nil) -> Invoice {

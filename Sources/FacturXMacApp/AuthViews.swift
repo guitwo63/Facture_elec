@@ -30,6 +30,8 @@ struct LoginView: View {
                 SecureField("Mot de passe", text: $password)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 280)
+                    .submitLabel(.go)
+                    .onSubmit { attemptLogin() }
                 if let err = errorMessage {
                     Text(err).font(.caption).foregroundStyle(.red)
                 }
@@ -112,13 +114,20 @@ struct LoginView: View {
 struct AuditLogView: View {
     @EnvironmentObject var auth: AuthStore
     @State private var query = ""
+    @State private var typeFilter: AuditObjectType? = nil
+    @State private var statusOnly = false
 
     var filtered: [AuditLogEntry] {
+        var result = auth.audit.entries
+        if let t = typeFilter { result = result.filter { $0.objectType == t } }
+        if statusOnly { result = result.filter { $0.action == "status_change" } }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return auth.audit.entries }
-        return auth.audit.entries.filter {
+        guard !q.isEmpty else { return result }
+        return result.filter {
             $0.actor.lowercased().contains(q) || $0.action.lowercased().contains(q)
             || $0.target.lowercased().contains(q) || $0.details.lowercased().contains(q)
+            || ($0.objectCode ?? "").lowercased().contains(q)
+            || ($0.statusFrom ?? "").lowercased().contains(q) || ($0.statusTo ?? "").lowercased().contains(q)
         }
     }
 
@@ -134,18 +143,39 @@ struct AuditLogView: View {
                 } label: { Label("Vider", systemImage: "trash") }
                     .buttonStyle(.bordered)
             }.padding(10)
-            TextField("Rechercher", text: $query)
-                .textFieldStyle(.roundedBorder).padding(.horizontal, 10)
+            HStack {
+                TextField("Rechercher", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Type", selection: $typeFilter) {
+                    Text("Tous").tag(AuditObjectType?.none)
+                    ForEach(AuditObjectType.allCases, id: \.self) { t in
+                        Text(t.label).tag(AuditObjectType?.some(t))
+                    }
+                }
+                .pickerStyle(.menu).frame(width: 160)
+                Toggle("Statuts uniquement", isOn: $statusOnly)
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
             Divider()
             Table(filtered) {
                 TableColumn("Date") { e in
                     Text(e.timestamp, format: .dateTime.day().month().year().hour().minute())
                         .font(.caption.monospacedDigit())
                 }.width(140)
-                TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(140)
+                TableColumn("Type") { e in
+                    Text(e.objectType?.label ?? "").font(.caption)
+                }.width(90)
+                TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(120)
+                TableColumn("Code") { e in Text(e.objectCode ?? e.target).font(.caption) }.width(120)
                 TableColumn("Action") { e in Text(e.action).font(.caption) }.width(120)
-                TableColumn("Cible") { e in Text(e.target).font(.caption) }.width(140)
-                TableColumn("Détails") { e in Text(e.details).font(.caption) }
+                TableColumn("Détails") { e in
+                    if e.action == "status_change" {
+                        Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
+                            .font(.caption)
+                    } else {
+                        Text(e.details).font(.caption)
+                    }
+                }
             }
         }
     }
@@ -673,6 +703,105 @@ struct ProfileSettingsView: View {
             confirmPw = ""
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+struct DataAdminView: View {
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
+    @State private var query = ""
+    @State private var editingID: UUID?
+    @State private var remoteIDDraft = ""
+    @State private var savedID: UUID?
+
+    private var filtered: [Invoice] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return store.invoices.sorted { $0.number < $1.number } }
+        return store.invoices.filter {
+            $0.number.lowercased().contains(q)
+            || ($0.superPDPRemoteID ?? "").lowercased().contains(q)
+            || $0.status.label.lowercased().contains(q)
+        }.sorted { $0.number < $1.number }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Administration des données").font(.title2.bold())
+                Spacer()
+                Text("\(store.invoices.count) factures")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(10)
+            HStack {
+                TextField("Rechercher (n°, statut, remote ID)", text: $query)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Réparer le remote ID Super PDP d'une facture désynchronisée.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(filtered) { inv in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(inv.number).font(.headline)
+                                Text(inv.type.label).font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Image(systemName: inv.status.systemImage)
+                                    .foregroundColor(Color(hex: inv.status.hexColor))
+                                Text(inv.status.label).font(.caption)
+                                Text(inv.issueDate, format: .dateTime.day().month().year())
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text("Remote ID :")
+                                    .font(.caption.bold())
+                                if editingID == inv.id {
+                                    TextField("Remote ID Super PDP", text: $remoteIDDraft)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button {
+                                        var updated = inv
+                                        let trimmed = remoteIDDraft.trimmingCharacters(in: .whitespaces)
+                                        updated.superPDPRemoteID = trimmed.isEmpty ? nil : trimmed
+                                        store.upsert(updated)
+                                        editingID = nil
+                                        remoteIDDraft = ""
+                                        savedID = inv.id
+                                    } label: { Label("OK", systemImage: "checkmark.circle.fill") }
+                                        .buttonStyle(.borderedProminent).controlSize(.small)
+                                    Button {
+                                        editingID = nil
+                                        remoteIDDraft = ""
+                                    } label: { Image(systemName: "xmark") }
+                                        .buttonStyle(.bordered).controlSize(.small)
+                                } else {
+                                    Text(inv.superPDPRemoteID ?? "—")
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(inv.superPDPRemoteID == nil ? .secondary : .primary)
+                                    Spacer()
+                                    Button {
+                                        editingID = inv.id
+                                        remoteIDDraft = inv.superPDPRemoteID ?? ""
+                                    } label: { Label("Modifier", systemImage: "pencil") }
+                                        .buttonStyle(.bordered).controlSize(.small)
+                                }
+                            }
+                            if savedID == inv.id {
+                                Text("Remote ID enregistré.")
+                                    .font(.caption).foregroundStyle(.green)
+                            }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+                    }
+                }
+                .padding(10)
+            }
+        }
+        .onChange(of: savedID) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedID = nil }
         }
     }
 }

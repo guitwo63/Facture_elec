@@ -99,6 +99,7 @@ struct FacturXMacApp: App {
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
     @StateObject private var statusStore = OrderStatusStore.shared
+    @StateObject private var invoiceStatusStore = InvoiceStatusStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -113,6 +114,7 @@ struct FacturXMacApp: App {
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
+                .environmentObject(invoiceStatusStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -192,6 +194,7 @@ struct RootView: View {
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var tab: RootTab = .invoices
@@ -226,6 +229,7 @@ struct RootView: View {
         tagStore.load()
         kindColors.load()
         statusStore.load()
+        invoiceStatusStore.load()
         AuditStore.shared.load()
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
@@ -412,6 +416,26 @@ enum InvoiceTypeFilter: String, CaseIterable, Hashable {
     case all = "Tous"
     case invoice = "Factures"
     case creditNote = "Avoirs"
+}
+
+enum InvoiceFilterField: String, CaseIterable, Hashable {
+    case none = "Aucun"
+    case number = "N° facture"
+    case buyerName = "Client"
+    case buyerSiren = "SIREN client"
+    case buyerVat = "TVA client"
+    case sellerName = "Émetteur"
+    case sellerSiren = "SIREN émetteur"
+    case amountMin = "Montant TTC min"
+    case amountMax = "Montant TTC max"
+    case issueDateFrom = "Émise depuis"
+    case issueDateTo = "Émise jusqu'à"
+    case dueDateFrom = "Échue depuis"
+    case purchaseOrderRef = "Réf. commande"
+    case contractRef = "Réf. contrat"
+    case precedingInvoiceRef = "Facture antérieure"
+    case status = "Statut"
+    case type = "Type"
 }
 
 struct ExportSheet: View {
@@ -825,8 +849,16 @@ struct InvoicesTabView: View {
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
+    @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
     @State private var showExport = false
+    @State private var showAdvancedFilters = false
+    @State private var advField1: InvoiceFilterField = .none
+    @State private var advValue1 = ""
+    @State private var advField2: InvoiceFilterField = .none
+    @State private var advValue2 = ""
+    @State private var advField3: InvoiceFilterField = .none
+    @State private var advValue3 = ""
 
     var filteredInvoices: [Invoice] {
         var result = store.invoices
@@ -844,6 +876,12 @@ struct InvoicesTabView: View {
         case .creditNote:
             result = result.filter { $0.type.isCreditNote }
         }
+        if let sf = statusFilter {
+            result = result.filter { $0.status == sf }
+        }
+        result = applyAdvancedFilter(result, field: advField1, value: advValue1)
+        result = applyAdvancedFilter(result, field: advField2, value: advValue2)
+        result = applyAdvancedFilter(result, field: advField3, value: advValue3)
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
         return result.filter { invoice in
@@ -878,6 +916,14 @@ struct InvoicesTabView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 260)
+                    Picker("Statut", selection: $statusFilter) {
+                        Text("Tous statuts").tag(InvoiceStatus?.none)
+                        ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                            Label(s.label, systemImage: s.systemImage).tag(InvoiceStatus?.some(s))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 200)
                     Spacer()
                     Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
                         .buttonStyle(.bordered)
@@ -895,6 +941,40 @@ struct InvoicesTabView: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+                DisclosureGroup(isExpanded: $showAdvancedFilters) {
+                    HStack(alignment: .center, spacing: 12) {
+                        advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
+                        if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
+                        }
+                        if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.caption)
+                        Text("Filtres avancés")
+                            .font(.caption.bold())
+                        Text("(\(activeAdvancedFilterCount))")
+                            .font(.caption.bold())
+                            .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
+                        if activeAdvancedFilterCount > 0 {
+                            Button {
+                                resetAdvancedFilters()
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Réinitialiser les filtres avancés")
+                        }
+                    }
+                }
             }
             .padding(12)
 
@@ -960,13 +1040,13 @@ struct InvoicesTabView: View {
                             } label: { Label("Supprimer", systemImage: "trash") }
                         }
                     }
-                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
+                    .frame(minWidth: 180, idealWidth: 230, maxWidth: 270)
                 }
 
                 if let id = selectedID,
-                   store.invoices.contains(where: { $0.id == id }) {
+                   filteredInvoices.contains(where: { $0.id == id }) {
                     InvoiceEditorView(invoice: binding(for: id))
-                        .frame(minWidth: 380)
+                        .frame(minWidth: 420)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
@@ -989,6 +1069,16 @@ struct InvoicesTabView: View {
                 },
                 onCancel: { showOrderPicker = false }
             )
+        }
+        .onChange(of: filteredInvoices) { newList in
+            if let id = selectedID, !newList.contains(where: { $0.id == id }) {
+                selectedID = nil
+            }
+        }
+        .onChange(of: selectedID) { id in
+            if let id = id, !filteredInvoices.contains(where: { $0.id == id }) {
+                selectedID = nil
+            }
         }
         .sheet(isPresented: $showExport) {
             ExportSheet(
@@ -1025,10 +1115,7 @@ struct InvoicesTabView: View {
         Binding(
             get: { store.invoices.first(where: { $0.id == id }) ?? Invoice(number: "", seller: store.myCompany, buyer: .init(name: "", street: "", postcode: "", city: "")) },
             set: { newValue in
-                if let idx = store.invoices.firstIndex(where: { $0.id == id }) {
-                    store.invoices[idx] = newValue
-                    store.save()
-                }
+                store.upsert(newValue)
             }
         )
     }
@@ -1042,6 +1129,136 @@ struct InvoicesTabView: View {
         }
         return visible.first?.id
     }
+
+    private func applyAdvancedFilter(_ invoices: [Invoice], field: InvoiceFilterField, value: String) -> [Invoice] {
+        let raw = value.trimmingCharacters(in: .whitespaces)
+        let v = raw.lowercased()
+        guard field != .none, !v.isEmpty else { return invoices }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "fr_FR_POSIX")
+        df.dateFormat = "yyyy-MM-dd"
+        func parseDate(_ s: String) -> Date? {
+            if let d = df.date(from: s) { return d }
+            df.dateFormat = "dd/MM/yyyy"
+            return df.date(from: s)
+        }
+        switch field {
+        case .number:
+            return invoices.filter { $0.number.lowercased().contains(v) }
+        case .buyerName:
+            return invoices.filter { $0.buyer.name.lowercased().contains(v) }
+        case .buyerSiren:
+            return invoices.filter { ($0.buyer.siren ?? "").lowercased().contains(v) }
+        case .buyerVat:
+            return invoices.filter { ($0.buyer.vatNumber ?? "").lowercased().contains(v) }
+        case .sellerName:
+            return invoices.filter { $0.seller.name.lowercased().contains(v) }
+        case .sellerSiren:
+            return invoices.filter { ($0.seller.siren ?? "").lowercased().contains(v) }
+        case .amountMin:
+            if let min = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return invoices.filter { $0.grandTotal >= min }
+            }
+            return invoices
+        case .amountMax:
+            if let max = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return invoices.filter { $0.grandTotal <= max }
+            }
+            return invoices
+        case .issueDateFrom:
+            if let d = parseDate(raw) { return invoices.filter { $0.issueDate >= d } }
+            return invoices
+        case .issueDateTo:
+            if let d = parseDate(raw) { return invoices.filter { $0.issueDate <= d } }
+            return invoices
+        case .dueDateFrom:
+            if let d = parseDate(raw) { return invoices.filter { $0.dueDate >= d } }
+            return invoices
+        case .purchaseOrderRef:
+            return invoices.filter { ($0.purchaseOrderRef ?? "").lowercased().contains(v) }
+        case .contractRef:
+            return invoices.filter { ($0.contractRef ?? "").lowercased().contains(v) }
+        case .precedingInvoiceRef:
+            return invoices.filter { ($0.precedingInvoiceRef ?? "").lowercased().contains(v) }
+        case .status:
+            return invoices.filter { $0.status.rawValue.lowercased() == v || $0.status.label.lowercased().contains(v) }
+        case .type:
+            return invoices.filter { $0.type.label.lowercased().contains(v) || ($0.type.isCreditNote ? "avoir" : "facture").contains(v) }
+        case .none:
+            return invoices
+        }
+    }
+
+    @ViewBuilder
+    private func advancedFilterRow(field: Binding<InvoiceFilterField>, value: Binding<String>, index: Int) -> some View {
+        let isDate = {
+            switch field.wrappedValue {
+            case .issueDateFrom, .issueDateTo, .dueDateFrom: return true
+            default: return false
+            }
+        }()
+        let isAmount = (field.wrappedValue == .amountMin || field.wrappedValue == .amountMax)
+        HStack(spacing: 8) {
+            Picker("", selection: field) {
+                ForEach(InvoiceFilterField.allCases, id: \.self) { f in
+                    Text(f.rawValue).tag(f)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+            if isDate {
+                let dateBinding = Binding<Date>(
+                    get: {
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        if let d = df.date(from: value.wrappedValue) { return d }
+                        df.dateFormat = "dd/MM/yyyy"
+                        return df.date(from: value.wrappedValue) ?? Date()
+                    },
+                    set: { newDate in
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        value.wrappedValue = df.string(from: newDate)
+                    }
+                )
+                DatePicker("", selection: dateBinding, displayedComponents: .date)
+                    .labelsHidden()
+                    .frame(width: 130)
+            } else if isAmount {
+                TextField("Valeur", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 130)
+            } else {
+                TextField("Recherche", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+            }
+            if !value.wrappedValue.isEmpty {
+                Button { value.wrappedValue = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var activeAdvancedFilterCount: Int {
+        var n = 0
+        if advField1 != .none && !advValue1.isEmpty { n += 1 }
+        if advField2 != .none && !advValue2.isEmpty { n += 1 }
+        if advField3 != .none && !advValue3.isEmpty { n += 1 }
+        return n
+    }
+
+    private func resetAdvancedFilters() {
+        advField1 = .none; advValue1 = ""
+        advField2 = .none; advValue2 = ""
+        advField3 = .none; advValue3 = ""
+    }
 }
 
 struct InvoiceEditorView: View {
@@ -1054,13 +1271,22 @@ struct InvoiceEditorView: View {
     @State private var duplicatedNumber: String?
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
-    @State private var isLocked = false
+    @State private var isManuallyLocked = false
     @State private var showUnlockAlert = false
     @State private var showPrecedingInvoicePicker = false
     @State private var showMandatoryDetails = false
     @State private var superPDPSubmitting = false
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
+    @State private var syncingFromPDP = false
+    @State private var lastSentPDPStatusCode: String?
+    @State private var showStatusJournal = false
+    @State private var showLegalMentions = false
+
+    private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
+    private var statusLocked: Bool { invoice.status.locksInvoice }
+    private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
+    private var fieldLocked: Bool { isLocked && !isAdmin }
 
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
@@ -1098,21 +1324,25 @@ struct InvoiceEditorView: View {
             HStack {
                 Text("Édition : \(invoice.number)").font(.title2.bold())
                 if isLocked {
-                    Label("Lecture seule", systemImage: "lock.fill")
+                    Label(statusLocked ? "Verrouillée (statut)" : "Lecture seule", systemImage: "lock.fill")
                         .font(.caption.bold())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(statusLocked ? Color(hex: invoice.status.hexColor) : .secondary)
                         .padding(.horizontal, 6)
                         .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
+                    if isAdmin {
+                        Text("(admin : modification autorisée)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                if isLocked {
+                if isManuallyLocked && !statusLocked && !isAdmin {
                     Button { showUnlockAlert = true } label: {
                         Label("Modifier", systemImage: "lock.open")
                     }
                     .buttonStyle(.bordered)
                     .help("Repasser en édition (la facture n'est plus protégée)")
-                } else if validation?.isValid == true {
-                    Button { isLocked = true } label: {
+                } else if !isLocked && validation?.isValid == true {
+                    Button { isManuallyLocked = true } label: {
                         Label("Verrouiller", systemImage: "lock")
                     }
                     .buttonStyle(.bordered)
@@ -1124,10 +1354,10 @@ struct InvoiceEditorView: View {
                     duplicatedNumber = copy.number
                 } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
                     .buttonStyle(.bordered)
-                    .disabled(isLocked)
+                    .help("Créer une copie de la facture")
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
-                    .disabled(isLocked)
+                    .disabled(fieldLocked)
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
@@ -1136,12 +1366,14 @@ struct InvoiceEditorView: View {
                         .buttonStyle(.bordered)
                     Button("Générer le Factur-X") { export() }
                         .buttonStyle(.borderedProminent)
-                    Button {
-                        depositToSuperPDP()
-                    } label: { Label("Super PDP", systemImage: "paperplane.fill") }
-                        .buttonStyle(.bordered)
-                        .disabled(isLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
-                        .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
+                    if isAdmin {
+                        Button {
+                            depositToSuperPDP()
+                        } label: { Label("Super PDP", systemImage: "paperplane.fill") }
+                            .buttonStyle(.bordered)
+                            .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                            .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
+                    }
                 }
             }
             .padding(12)
@@ -1166,17 +1398,29 @@ struct InvoiceEditorView: View {
                         .onChange(of: invoice.number) { _ in duplicatedNumber = nil }
                 }
                 if let m = superPDPMessage {
-                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
-                        .onChange(of: invoice.number) { _ in superPDPMessage = nil }
-                }
-                if let sub = superPDPSubmission {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        if m.hasPrefix("Échec") {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        } else if let sub = superPDPSubmission {
+                            Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
+                                .foregroundStyle(sub.isProcessed ? .green : .orange)
+                            Image(systemName: sub.direction == .sent ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                                .foregroundStyle(sub.direction == .sent ? .blue : .teal)
+                                .help(sub.direction == .sent ? "Envoyé à Super PDP" : "Reçu de Super PDP")
+                        } else {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                        }
+                        Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .primary)
+                    }
+                    .onChange(of: invoice.number) { _ in superPDPMessage = nil; superPDPSubmission = nil }
+                } else if let sub = superPDPSubmission {
+                    HStack(spacing: 6) {
                         Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
                             .foregroundStyle(sub.isProcessed ? .green : .orange)
-                        Text("SUPER PDP — id \(sub.remoteID ?? "?") · statut \(sub.status)").font(.caption)
-                        Button("Rafraîchir") { refreshSuperPDPStatus() }
-                            .buttonStyle(.bordered)
-                            .disabled(superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                        Image(systemName: sub.direction == .sent ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                            .foregroundStyle(sub.direction == .sent ? .blue : .teal)
+                            .help(sub.direction == .sent ? "Envoyé à Super PDP" : "Reçu de Super PDP")
+                        Text("SUPER PDP — id \(sub.remoteID ?? "?") · statut \(sub.status) · \(sub.direction == .sent ? "envoyé" : "reçu")").font(.caption)
                     }
                     .onChange(of: invoice.number) { _ in superPDPSubmission = nil }
                 }
@@ -1205,6 +1449,61 @@ struct InvoiceEditorView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: invoice.status.systemImage)
+                            .foregroundColor(Color(hex: invoice.status.hexColor))
+                            .font(.caption2)
+                        let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
+                        if transitions.isEmpty {
+                            Text(invoice.status.label)
+                                .frame(width: 200, alignment: .leading)
+                                .foregroundStyle(.secondary)
+                                .help("Statut terminal — aucune transition possible.")
+                        } else {
+                            Menu {
+                                Button {
+                                } label: {
+                                    Label(invoice.status.label, systemImage: invoice.status.systemImage)
+                                }.disabled(true)
+                                Divider()
+                                ForEach(transitions, id: \.self) { s in
+                                    Button {
+                                        invoice.status = s
+                                    } label: {
+                                        Label(s.label, systemImage: s.systemImage)
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(invoice.status.label).lineLimit(1)
+                                    Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .frame(width: 200, alignment: .leading)
+                            }
+                            .help("Statut actuel : \(invoice.status.label). Transitions autorisées affichées dans le menu.")
+                        }
+                        Button {
+                            refreshSuperPDPStatus()
+                        } label: {
+                            if superPDPSubmitting {
+                                HStack(spacing: 4) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Statut PDP…")
+                                }
+                            } else {
+                                Label("Statut PDP", systemImage: "antenna.radar")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(superPDPSubmitting
+                                  || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                  || !superPDPSettings.credentials.isConfigured)
+                        .help("Interroger le statut de la facture sur SUPER PDP")
+                    }
+                }
                 GroupBox("En-tête") {
                     VStack(alignment: .leading, spacing: 8) {
                         if !linkedCreditNotes.isEmpty {
@@ -1244,13 +1543,22 @@ struct InvoiceEditorView: View {
                                         InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
                                     }
                                     HStack(spacing: 3) {
+                                        Image(systemName: "clock.badge.checkmark")
+                                            .foregroundStyle(.secondary)
+                                            .font(.caption)
+                                        Text(invoice.createdAt, format: .dateTime.day().month().year().hour().minute())
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .help("Date de création de la facture dans l'application (non modifiable).")
+                                    HStack(spacing: 3) {
                                         DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
                                         InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
                                     }
                                 }
                                 HStack(spacing: 3) {
                                     TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
-                                    InfoBadge(text: "BT-13 — Référence de la commande acheteur. Remontée en haut de la facture.")
+                                    InfoBadge(text: "BT-13 — Numéro de commande acheteur (BuyerOrderReferencedDocument/IssuerAssignedID). Distinct du BT-10 : c'est le numéro du bon de commande, pas la référence de routage.")
                                 }
                                 if invoice.type.requiresPrecedingInvoice || invoice.type == .internalCreditNote {
                                     VStack(alignment: .leading, spacing: 2) {
@@ -1317,7 +1625,10 @@ struct InvoiceEditorView: View {
                                         ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                                     }
                                     fieldHighlight(NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160), forRuleIDs: ["BR-5"])
-                                    TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
+                                    HStack(spacing: 3) {
+                                        TextField("Référence acheteur (BT-10)", text: Binding($invoice.buyerReference, replacingNilWith: "")).frame(width: 220)
+                                        InfoBadge(text: "BT-10 — Référence acheteur (ram:BuyerReference). Distincte du BT-13 : référence de routage/traitement attribuée par l'acheteur (ex. Leitweg-ID), pas le numéro de commande.")
+                                    }
                                 }
                                 HStack {
                                     HStack(spacing: 3) {
@@ -1350,7 +1661,8 @@ struct InvoiceEditorView: View {
                                 }
                                 .font(.caption)
                             }
-                            VStack(alignment: .trailing) {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                VStack(alignment: .trailing) {
                                 row("Total HT", invoice.lineTotal)
                                 ForEach(invoice.vatBreakdown, id: \.rate) { item in
                                     row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
@@ -1360,12 +1672,13 @@ struct InvoiceEditorView: View {
                                     row("Acompte déjà payé", -invoice.prepaidAmount)
                                     row("Net à payer", invoice.netToPay, bold: true)
                                 }
+                                }
+                                .padding(8)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                             }
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
                         }
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 HStack(alignment: .top, spacing: 12) {
                     GroupBox("Émetteur (vous)") {
@@ -1374,12 +1687,12 @@ struct InvoiceEditorView: View {
                             invoice.paymentBIC = p.bic
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
                         })
-                    }.lockable(isLocked)
+                    }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
                         PartySection(party: $invoice.buyer, role: .buyer)
-                    }.lockable(isLocked)
+                    }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-25", "BR-26", "BR-46"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                 }
@@ -1424,40 +1737,48 @@ struct InvoiceEditorView: View {
                             invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: invoice.lines.last?.vatRate ?? 20))
                         } label: { Label("Ajouter une ligne", systemImage: "plus") }
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 GroupBox("Paiement") {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
+                        if let iban = invoice.paymentIBAN, !iban.isEmpty {
                             HStack(spacing: 3) {
-                                TextField("IBAN", text: Binding($invoice.paymentIBAN, replacingNilWith: ""))
-                                InfoBadge(text: "BT-84 — IBAN pour le virement SEPA.")
+                                Text(iban).font(.caption.monospaced())
+                                InfoBadge(text: "BT-84 — IBAN hérité de l'émetteur (annuaire).")
                             }
+                        }
+                        if let bic = invoice.paymentBIC, !bic.isEmpty {
                             HStack(spacing: 3) {
-                                TextField("BIC", text: Binding($invoice.paymentBIC, replacingNilWith: ""))
-                                InfoBadge(text: "BT-85 — BIC de la banque (requis si IBAN hors SEPA).")
+                                Text(bic).font(.caption.monospaced())
+                                InfoBadge(text: "BT-85 — BIC hérité de l'émetteur (annuaire).")
                             }
                         }
                         TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
-                GroupBox("Mentions légales (FR)") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Frais de recouvrement (SubjectCode PMT) :").font(.caption.bold())
-                        TextField("Indemnité forfaitaire pour frais de recouvrement", text: $invoice.legalNotePMT)
-                        Text("Pénalités de retard (SubjectCode PMD) :").font(.caption.bold())
-                        TextField("Taux d'intérêt des pénalités de retard", text: $invoice.legalNotePMD)
-                        Text("Escompte (SubjectCode AAB) :").font(.caption.bold())
-                        TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
-                        TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
-                    }.padding(8)
-                }.lockable(isLocked)
+                GroupBox {
+                    DisclosureGroup(isExpanded: $showLegalMentions) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Frais de recouvrement (SubjectCode PMT) :").font(.caption.bold())
+                            TextField("Indemnité forfaitaire pour frais de recouvrement", text: $invoice.legalNotePMT)
+                            Text("Pénalités de retard (SubjectCode PMD) :").font(.caption.bold())
+                            TextField("Taux d'intérêt des pénalités de retard", text: $invoice.legalNotePMD)
+                            Text("Escompte (SubjectCode AAB) :").font(.caption.bold())
+                            TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
+                            TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
+                        }.padding(.top, 4)
+                    } label: {
+                        Label("Mentions légales (FR) — cliquer pour déplier", systemImage: "text.scroll")
+                            .font(.headline)
+                    }
+                }.lockable(fieldLocked)
+                statusJournalSection
             }.padding()
         }
             .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
                 Button("Annuler", role: .cancel) { }
-                Button("Modifier", role: .destructive) { isLocked = false }
+                Button("Modifier", role: .destructive) { isManuallyLocked = false }
             } message: {
                 Text("La facture était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout dépôt PDP.")
             }
@@ -1479,6 +1800,10 @@ struct InvoiceEditorView: View {
                     },
                     onCancel: { showPrecedingInvoicePicker = false }
                 )
+            }
+            .onChange(of: invoice.status) { newStatus in
+                guard !syncingFromPDP else { return }
+                notifyPDPStatusChange(to: newStatus)
             }
         }
     }
@@ -1591,6 +1916,14 @@ struct InvoiceEditorView: View {
     }
 
     private func depositToSuperPDP() {
+        if let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty {
+            superPDPMessage = "Facture déjà déposée sur SUPER PDP (id distant \(rid)). Ré-interrogez le statut plutôt que de redéposer."
+            return
+        }
+        if invoice.status == .accepted || invoice.status == .paid || invoice.status == .cancelled {
+            superPDPMessage = "Dépôt refusé : la facture est déjà « \(invoice.status.label) ». Un dépôt n'est possible que depuis Brouillon / Validée / Transmise."
+            return
+        }
         superPDPSubmitting = true
         superPDPMessage = nil
         let preCheck = FacturXValidator().validate(invoice: invoice)
@@ -1606,31 +1939,208 @@ struct InvoiceEditorView: View {
                 let facturx = try FacturXGenerator().generate(invoice: invoice)
                 let service = SuperPDPService()
                 let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
-                superPDPSubmission = submission
-                superPDPMessage = "Facture déposée sur SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
+                superPDPSubmission = SuperPDPInvoiceSubmission(
+                    id: submission.id, remoteID: submission.remoteID, status: submission.status,
+                    enInvoiceRef: submission.enInvoiceRef, submittedAt: submission.submittedAt,
+                    lastCheckedAt: submission.lastCheckedAt, message: submission.message, direction: .sent
+                )
+                if let rid = submission.remoteID, !rid.isEmpty {
+                    invoice.superPDPRemoteID = rid
+                    if invoice.status == .issued || invoice.status == .draft {
+                        invoice.status = .sentToPDP
+                    }
+                    store.upsert(invoice)
+                }
+                superPDPMessage = "↑ Envoyé à SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_deposit_sent",
+                    target: invoice.number,
+                    details: "Dépôt facture sur SUPER PDP (envoyé) — id distant : \(submission.remoteID ?? "?")",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec dépôt SUPER PDP : \(e.localizedDescription)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_deposit_error",
+                    target: invoice.number,
+                    details: "Échec dépôt SUPER PDP : \(e.localizedDescription)",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             } catch {
                 superPDPMessage = "Échec dépôt SUPER PDP : \(error)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_deposit_error",
+                    target: invoice.number,
+                    details: "Échec dépôt SUPER PDP : \(error)",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             }
             superPDPSubmitting = false
         }
     }
 
+    private static func mapPDPStatusToLocal(_ pdpStatus: String) -> InvoiceStatus? {
+        let s = pdpStatus.lowercased()
+        switch s {
+        case "accepted", "processed", "received": return .accepted
+        case "rejected": return .rejected
+        case "fr:212", "encaissée", "encaissee", "paid": return .paid
+        case "fr:320", "annulée", "annulee", "cancelled": return .cancelled
+        default: return nil
+        }
+    }
+
     private func refreshSuperPDPStatus() {
-        guard let rid = superPDPSubmission?.remoteID, !rid.isEmpty else { return }
+        guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         superPDPSubmitting = true
+        let priorStatus = superPDPSubmission?.status
         Task {
             do {
                 let service = SuperPDPService()
                 let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: superPDPSettings.credentials)
-                superPDPSubmission = updated
-                superPDPMessage = "Statut SUPER PDP mis à jour : \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "")."
+                superPDPSubmission = SuperPDPInvoiceSubmission(
+                    id: updated.id, remoteID: updated.remoteID, status: updated.status,
+                    enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
+                    lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
+                )
+                if let mapped = Self.mapPDPStatusToLocal(updated.status) {
+                    // Ne jamais rétrograder le statut local : on n'applique le statut PDP
+                    // que s'il représente un avancement dans le cycle de vie (ou une annulation).
+                    let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
+                    let isCancellation = mapped == .cancelled && invoice.status != .cancelled && invoice.status != .paid
+                    if (isAdvance || isCancellation) && mapped != invoice.status {
+                        syncingFromPDP = true
+                        invoice.status = mapped
+                        store.upsert(invoice)
+                        syncingFromPDP = false
+                        superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status) — id distant \(rid). Statut facture mis à jour : \(mapped.label)."
+                    } else if mapped == invoice.status {
+                        superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
+                    } else {
+                        superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status). Statut local « \(invoice.status.label) » conservé (supérieur dans le cycle de vie, pas de rétrogradation)."
+                    }
+                } else {
+                    superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
+                }
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_received",
+                    target: invoice.number,
+                    details: "Statut SUPER PDP reçu : \(updated.status)\(priorStatus.map { " (avant : \($0))" } ?? "") — id distant : \(rid)",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             } catch {
                 superPDPMessage = "Échec rafraîchissement : \(error.localizedDescription)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_error",
+                    target: invoice.number,
+                    details: "Échec interrogation statut SUPER PDP : \(error.localizedDescription)",
+                    objectType: .invoice,
+                    objectCode: invoice.number
+                )
             }
             superPDPSubmitting = false
         }
+    }
+
+    private func notifyPDPStatusChange(to newStatus: InvoiceStatus) {
+        guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
+        guard superPDPSettings.credentials.isConfigured else { return }
+        let statusCode: String
+        var detailLabel: String
+        switch newStatus {
+        case .paid:
+            statusCode = "fr:212"
+            detailLabel = "Encaissée"
+        case .cancelled:
+            statusCode = "fr:320"
+            detailLabel = "Annulée"
+        case .accepted:
+            statusCode = "fr:310"
+            detailLabel = "Acceptée"
+        case .rejected:
+            statusCode = "fr:311"
+            detailLabel = "Rejetée"
+        default:
+            return
+        }
+        if let last = lastSentPDPStatusCode, last == statusCode {
+            superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
+            return
+        }
+        superPDPSubmitting = true
+        let invoiceRef = invoice
+        Task {
+            do {
+                let service = SuperPDPService()
+                var reported: [[String: Any]]? = nil
+                if newStatus == .paid {
+                    reported = invoiceRef.lines.compactMap { line -> [String: Any]? in
+                        let amount = (line.quantity * line.unitPrice) * (1 + line.vatRate / 100)
+                        return [
+                            "amount": String(format: "%.2f", amount),
+                            "currency_code": invoiceRef.currency,
+                            "type_code": "MEN",
+                            "value_percent": String(format: "%.1f", line.vatRate),
+                            "date": Self.pdpDateString(invoiceRef.issueDate)
+                        ]
+                    }
+                }
+                try await service.sendInvoiceEvent(remoteID: rid, statusCode: statusCode, credentials: superPDPSettings.credentials, reportedData: reported)
+                lastSentPDPStatusCode = statusCode
+                superPDPSubmission = SuperPDPInvoiceSubmission(
+                    id: UUID().uuidString, remoteID: rid, status: detailLabel,
+                    enInvoiceRef: superPDPSubmission?.enInvoiceRef,
+                    submittedAt: Date(), lastCheckedAt: Date(),
+                    message: "Statut \(detailLabel) envoyé", direction: .sent
+                )
+                superPDPMessage = "↑ Envoyé à SUPER PDP : statut \(detailLabel) — id distant \(rid)."
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_sent",
+                    target: invoiceRef.number,
+                    details: "Envoi statut \(detailLabel) à SUPER PDP (envoyé) — id distant : \(rid)",
+                    objectType: .invoice,
+                    objectCode: invoiceRef.number
+                )
+            } catch let e as SuperPDPError {
+                superPDPMessage = "Échec envoi statut SUPER PDP : \(e.localizedDescription)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_send_error",
+                    target: invoiceRef.number,
+                    details: "Échec envoi statut \(detailLabel) à SUPER PDP : \(e.localizedDescription)",
+                    objectType: .invoice,
+                    objectCode: invoiceRef.number
+                )
+            } catch {
+                superPDPMessage = "Échec envoi statut SUPER PDP : \(error)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_send_error",
+                    target: invoiceRef.number,
+                    details: "Échec envoi statut \(detailLabel) à SUPER PDP : \(error)",
+                    objectType: .invoice,
+                    objectCode: invoiceRef.number
+                )
+            }
+            superPDPSubmitting = false
+        }
+    }
+
+    private static func pdpDateString(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt.string(from: date)
     }
 
     private func exportPlainPDF() {
@@ -1669,6 +2179,46 @@ struct InvoiceEditorView: View {
         }
     }
 
+    private var statusJournalSection: some View {
+        let logs = auth.audit.entries.filter {
+            $0.objectType == .invoice && ($0.objectCode ?? $0.target) == invoice.number
+        }
+        return DisclosureGroup(isExpanded: $showStatusJournal) {
+            if logs.isEmpty {
+                Text("Aucun événement enregistré pour cette facture.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(logs) { e in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(e.timestamp, format: .dateTime.day().month().year().hour().minute())
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .frame(width: 130, alignment: .leading)
+                            Text(e.actor).font(.caption).frame(width: 100, alignment: .leading)
+                            if e.action == "status_change" {
+                                Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
+                                    .font(.caption.bold())
+                                if !e.details.isEmpty {
+                                    Text(e.details).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            } else {
+                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_sent" ? "Dépôt PDP envoyé" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_received" ? "Statut PDP reçu" : e.action == "pdp_status_sent" ? "Statut PDP envoyé" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action == "pdp_status_send_error" ? "Envoi statut PDP échoué" : e.action)
+                                    .font(.caption)
+                                if !e.details.isEmpty {
+                                    Text(e.details).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Journal de la facture (\(logs.count))", systemImage: "list.bullet.clipboard")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func validationPanel(_ v: FacturXValidationResult) -> some View {
         let ruleErrors = v.businessRules.filter { $0.severity == .error }
         let ruleWarnings = v.businessRules.filter { $0.severity == .warning }
@@ -1683,19 +2233,6 @@ struct InvoiceEditorView: View {
                             .foregroundStyle(.red)
                     }
                     Spacer()
-                    HStack(spacing: 4) {
-                        Image(systemName: invoice.status.systemImage)
-                            .foregroundColor(Color(hex: invoice.status.hexColor))
-                            .font(.caption2)
-                        Picker("Statut", selection: $invoice.status) {
-                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
-                                Label(s.label, systemImage: s.systemImage).tag(s)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                        .help("Statut de la facture (modifiable à tout moment)")
-                    }
                     Button { showValidation = false } label: {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
@@ -3090,6 +3627,7 @@ struct SettingsTabView: View {
                     Text("Tables").tag(1)
                     Text("Application").tag(2)
                     Text("Journal").tag(3)
+                    Text("Données").tag(4)
                 }
             }
             .pickerStyle(.segmented)
@@ -3102,6 +3640,8 @@ struct SettingsTabView: View {
                 ValueTablesView()
             case 3:
                 AuditLogView()
+            case 4:
+                DataAdminView()
             default:
                 ApplicationSettingsView()
             }
@@ -3151,8 +3691,19 @@ struct OrderStatusSettingsView: View {
                 .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
             TextField("Libellé", text: binding.label)
                 .frame(minWidth: 180)
-            TextField("Icône SF", text: binding.systemImage)
-                .frame(width: 120)
+            if override.isPDPStatus {
+                HStack(spacing: 4) {
+                    Image(systemName: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(override.id)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.1)))
+                .help("Clé technique non modifiable (statut lié à la PDP)")
+            }
             ColorPicker(selection: Binding(
                 get: { Color(hex: binding.wrappedValue.hexColor) },
                 set: { newColor in
@@ -3191,7 +3742,6 @@ struct ApplicationSettingsView: View {
     @State private var dinumExpanded = true
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = false
-    @State private var appearanceExpanded = true
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
     @State private var newTagName = ""
@@ -3378,33 +3928,6 @@ struct ApplicationSettingsView: View {
                         .font(.headline)
                 }
 
-                DisclosureGroup(isExpanded: $appearanceExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Couleurs des étiquettes de type de tiers (Client / Fournisseur / Client-Fournisseur).")
-                            .font(.caption).foregroundStyle(.secondary)
-                        ForEach(DirectoryEntryKind.allCases, id: \.self) { kind in
-                            HStack {
-                                Text(kind.label).frame(width: 140, alignment: .leading)
-                                ColorPicker(selection: Binding(
-                                    get: { Color(hex: kindColors.hexColor(for: kind)) },
-                                    set: { newColor in
-                                        kindColors.colors[kind] = hexString(from: newColor)
-                                        kindColors.save()
-                                    }
-                                )) {
-                                    Text(kind.label)
-                                }
-                                .labelsHidden()
-                                Text(kindColors.hexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
-                                Spacer()
-                            }
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Apparence (couleurs des types)", systemImage: "paintpalette")
-                        .font(.headline)
-                }
-
                 DisclosureGroup(isExpanded: $tagsExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Définissez des tags personnalisés pour classifier vos tiers. Chaque tier peut porter plusieurs tags.")
@@ -3519,6 +4042,7 @@ extension DirectoryEntryKind: Identifiable {
 }
 
 enum ValueTable: String, CaseIterable, Identifiable {
+    case invoiceStatuses
     case orderStatuses
     case tags
     case kindColors
@@ -3531,6 +4055,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .invoiceStatuses: return "Statuts des factures"
         case .orderStatuses: return "Statuts des commandes"
         case .tags: return "Tags des tiers"
         case .kindColors: return "Couleurs des types de tiers"
@@ -3543,6 +4068,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .invoiceStatuses: return "doc.text.fill"
         case .orderStatuses: return "list.bullet.rectangle"
         case .tags: return "tag"
         case .kindColors: return "paintpalette"
@@ -3555,7 +4081,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var isEditable: Bool {
         switch self {
-        case .orderStatuses, .tags, .kindColors: return true
+        case .invoiceStatuses, .orderStatuses, .tags, .kindColors: return true
         default: return false
         }
     }
@@ -3563,11 +4089,13 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
 struct ValueTablesView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @State private var selectedTable: ValueTable = .orderStatuses
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
+    @State private var editingInvoiceStatus: InvoiceStatusOverride?
     @State private var editingTag: PartyTag?
     @State private var editingKind: DirectoryEntryKind?
     @State private var newTagName = ""
@@ -3595,6 +4123,14 @@ struct ValueTablesView: View {
                 if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     statusStore.overrides[i] = updated
                     statusStore.save()
+                }
+            }
+        }
+        .sheet(item: $editingInvoiceStatus) { override in
+            InvoiceStatusEditorSheet(override: override) { updated in
+                if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    invoiceStatusStore.overrides[i] = updated
+                    invoiceStatusStore.save()
                 }
             }
         }
@@ -3650,6 +4186,7 @@ struct ValueTablesView: View {
     @ViewBuilder
     private var valuesPanel: some View {
         switch selectedTable {
+        case .invoiceStatuses: invoiceStatusesPanel
         case .orderStatuses: orderStatusesPanel
         case .tags: tagsPanel
         case .kindColors: kindColorsPanel
@@ -3658,6 +4195,99 @@ struct ValueTablesView: View {
         case .countries: refPanel(NormRefs.countries)
         case .endpointSchemes: refPanel(NormRefs.endpointSchemes)
         }
+    }
+
+    private var invoiceStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des factures").font(.title3.bold())
+                Spacer()
+                Button {
+                    let id = "custom-\(UUID().uuidString.prefix(8))"
+                    invoiceStatusStore.append(InvoiceStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
+                } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            Text("Personnalisez le libellé des statuts. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'équivalent envoyé/rapatrié vers la PDP ; les transitions affichent le cycle de vie normé.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredInvoiceStatuses) { override in
+                        invoiceStatusRow(override)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func invoiceStatusRow(_ override: InvoiceStatusOverride) -> some View {
+        let transitionLabels: [String] = override.transitionCodes.compactMap { code in
+            invoiceStatusStore.overrides.first { $0.id == code }?.label
+                ?? InvoiceStatus(rawValue: code)?.label
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: override.systemImage)
+                    .frame(width: 22)
+                    .foregroundStyle(Color(hex: override.hexColor))
+                Text(override.label).font(.body)
+                if override.isReformStatus {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(override.reformCode ?? "")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.12)))
+                    .help("Statut lié à la réforme (PDP) — code \(override.reformCode ?? ""). Non supprimable, libellé modifiable.")
+                } else {
+                    Text("hors réforme")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button {
+                    editingInvoiceStatus = override
+                } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Modifier le libellé")
+                if !override.isReformStatus {
+                    Button(role: .destructive) {
+                        if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                            invoiceStatusStore.remove(at: i)
+                        }
+                    } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                        .help("Supprimer ce statut")
+                }
+            }
+            if !transitionLabels.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Transitions : " + transitionLabels.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.06)))
+    }
+
+    private var filteredInvoiceStatuses: [InvoiceStatusOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return invoiceStatusStore.overrides }
+        return invoiceStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
     }
 
     private var orderStatusesPanel: some View {
@@ -3681,7 +4311,19 @@ struct ValueTablesView: View {
                                 .frame(width: 22)
                                 .foregroundStyle(Color(hex: override.hexColor))
                             Text(override.label).font(.body)
-                            Text(override.systemImage).font(.caption).foregroundStyle(.secondary)
+                            if override.isPDPStatus {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "lock.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text(override.id)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.1)))
+                                .help("Clé technique non modifiable (statut lié à la PDP)")
+                            }
                             Spacer()
                             Button {
                                 editingStatus = override
@@ -3893,6 +4535,73 @@ struct OrderStatusEditorSheet: View {
         }
         .padding()
         .frame(width: 420, height: 300)
+    }
+}
+
+struct InvoiceStatusEditorSheet: View {
+    var override: InvoiceStatusOverride
+    let onSave: (InvoiceStatusOverride) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var systemImage: String
+    @State private var hexColor: String
+
+    init(override: InvoiceStatusOverride, onSave: @escaping (InvoiceStatusOverride) -> Void) {
+        self.override = override
+        self.onSave = onSave
+        _label = State(initialValue: override.label)
+        _systemImage = State(initialValue: override.systemImage)
+        _hexColor = State(initialValue: override.hexColor)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le statut facture").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            if override.isReformStatus {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                    Text("Statut de réforme (PDP) — code \(override.reformCode ?? ""). Seul le libellé est modifiable.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.1)))
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Icône SF").frame(width: 100, alignment: .leading)
+                    TextField("Icône SF", text: $systemImage).textFieldStyle(.roundedBorder)
+                        .disabled(override.isReformStatus)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                    .disabled(override.isReformStatus)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(InvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: override.transitionCodes))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 320)
     }
 }
 
