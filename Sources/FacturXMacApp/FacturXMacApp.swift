@@ -1449,7 +1449,7 @@ struct InvoiceEditorView: View {
                             if superPDPSubmitting {
                                 ProgressView().controlSize(.small)
                             } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Image(systemName: "antenna.radar")
                             }
                         }
                         .buttonStyle(.borderless)
