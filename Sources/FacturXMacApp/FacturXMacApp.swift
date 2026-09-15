@@ -941,7 +941,7 @@ struct InvoicesTabView: View {
                     }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                 DisclosureGroup(isExpanded: $showAdvancedFilters) {
                     HStack(alignment: .center, spacing: 12) {
                         advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
@@ -1687,7 +1687,7 @@ struct InvoiceEditorView: View {
                                 }
                                 }
                                 .padding(8)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                             }
                         }
                     }.padding(8)
@@ -2749,7 +2749,7 @@ struct DirectoryView: View {
                     }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
             }
             .padding(12)
 
@@ -3120,7 +3120,7 @@ struct DirectoryDetailView: View {
                                         .help("Supprimer ce contact")
                                 }
                                 .padding(8)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                             }
                         } else if (entry.party.contactName?.isEmpty ?? true)
                             && (entry.party.contactEmail?.isEmpty ?? true)
@@ -3184,7 +3184,7 @@ struct DirectoryDetailView: View {
                                     .help("Supprimer cette adresse")
                             }
                             .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                         }
 
                         if let note = entry.note, !note.isEmpty {
@@ -3798,7 +3798,7 @@ struct OrderStatusSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 6).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .textBackgroundColor)))
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.clear))
                 .help("Clé technique non modifiable (statut lié à la PDP)")
             }
             ColorPicker(selection: Binding(
@@ -4440,7 +4440,7 @@ struct ValueTablesView: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
     }
 
     private var filteredInvoiceStatuses: [InvoiceStatusOverride] {
@@ -4480,7 +4480,7 @@ struct ValueTablesView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .textBackgroundColor)))
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.clear))
                                 .help("Clé technique non modifiable (statut lié à la PDP)")
                             }
                             Spacer()
@@ -4499,7 +4499,7 @@ struct ValueTablesView: View {
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
                     }
                 }
                 .padding(12)
@@ -4541,7 +4541,7 @@ struct ValueTablesView: View {
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
                     }
                     Divider().padding(.vertical, 6)
                     Text("Ajouter un tag").font(.caption.bold())
@@ -4601,7 +4601,7 @@ struct ValueTablesView: View {
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
                     }
                 }
                 .padding(12)
@@ -5260,7 +5260,7 @@ struct PartyEditorView: View {
                                 .help("Supprimer ce contact")
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
                     }
                 }
             } else if linkedEntry != nil {
@@ -5287,7 +5287,7 @@ struct PartyEditorView: View {
                             Spacer()
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
                     }
                 }
             } else {
@@ -5353,7 +5353,7 @@ struct PartyEditorView: View {
                             .help("Supprimer cette adresse")
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
                 }
             }
             if !dinumResults.isEmpty {
@@ -5519,7 +5519,7 @@ struct RoutingAddressQuickEditor: View {
                             .buttonStyle(.borderless)
                     }
                     .padding(6)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                 }
             }
             Button {
@@ -5709,7 +5709,7 @@ struct OrdersTabView: View {
                     }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
             }
             .padding(12)
 
@@ -6031,7 +6031,7 @@ struct OrderEditorView: View {
                                 row("Reste à facturer", max(0, order.grandTotal - linkedInvoicesAmount), bold: true)
                             }
                             .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                         }
                     }.padding(8)
                 }.lockable(isLocked)
