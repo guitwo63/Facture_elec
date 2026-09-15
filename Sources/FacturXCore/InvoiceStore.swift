@@ -140,10 +140,10 @@ public final class InvoiceStore: ObservableObject {
         }()
         return Invoice(
             number: nextNumber(companyID: companyID),
+            profile: sellerEntry?.profile ?? .en16931,
             seller: seller,
             buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""),
             companyID: companyID,
-            profile: sellerEntry?.profile ?? .en16931,
             lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
             paymentIBAN: seller.iban,
             paymentBIC: seller.bic,
