@@ -1373,6 +1373,7 @@ struct InvoiceEditorView: View {
                             .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
                             .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
                     }
+                }
             }
             .padding(12)
             Divider()
