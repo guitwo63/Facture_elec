@@ -2688,29 +2688,23 @@ struct DirectoryView: View {
     @State private var showImport = false
     @State private var importResult: ExportGenerator.PartyImportResult?
 
-    private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
-
     private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var base = directory.entries.filter { showArchived || !$0.isArchived }
-        if let scope = scope {
-            base = base.filter { entry in
-                if entry.kind == .societe { return scope.contains(entry.id) }
-                if let cid = entry.companyID { return scope.contains(cid) }
-                return false
+        base = base.filter { $0.kind != .societe }
+        guard q.isEmpty else {
+            return base.filter {
+                $0.displayName.lowercased().contains(q)
+                    || ($0.party.siren ?? "").lowercased().contains(q)
+                    || ($0.party.siret ?? "").lowercased().contains(q)
+                    || ($0.party.vatNumber ?? "").lowercased().contains(q)
+                    || $0.party.city.lowercased().contains(q)
             }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         }
-        guard !q.isEmpty else { return base }
-        return base.filter {
-            $0.displayName.lowercased().contains(q)
-                || ($0.party.siren ?? "").lowercased().contains(q)
-                || ($0.party.siret ?? "").lowercased().contains(q)
-                || ($0.party.vatNumber ?? "").lowercased().contains(q)
-                || $0.party.city.lowercased().contains(q)
-        }
-        .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
     var body: some View {
@@ -2821,7 +2815,7 @@ struct DirectoryView: View {
                                     if selectedEntry?.id == entry.id { selectedEntry = nil }
                                 } label: { Label("Supprimer", systemImage: "trash") }
                             } else {
-                                Text("Société : modification réservée à l'administrateur")
+                                Text("Modification non autorisée")
                             }
                         }
                     }
@@ -3820,6 +3814,93 @@ struct OrderStatusSettingsView: View {
     }
 }
 
+struct SocietiesAdminView: View {
+    @Binding var editingEntry: DirectoryEntry?
+    @Binding var creatingNew: Bool
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var query = ""
+    @State private var selectedID: UUID?
+
+    private var societies: [DirectoryEntry] {
+        directory.entries.filter { $0.kind == .societe }
+    }
+
+    private var filtered: [DirectoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return societies }
+        return societies.filter {
+            $0.displayName.lowercased().contains(q)
+                || ($0.party.siren ?? "").lowercased().contains(q)
+                || ($0.party.siret ?? "").lowercased().contains(q)
+                || ($0.party.vatNumber ?? "").lowercased().contains(q)
+                || $0.party.city.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button {
+                    creatingNew = true
+                } label: { Label("Nouvelle société", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+                Spacer()
+                Text("\(societies.count) société(s)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Les sociétés sont les entités émettrices de l'application. Elles définissent le périmètre des utilisateurs et l'émetteur des factures. Elles ne sont pas affichées dans l'onglet Annuaire.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher une société", text: $query)
+                    .textFieldStyle(.plain)
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+
+            if filtered.isEmpty {
+                Text("Aucune société. Cliquez sur « Nouvelle société ».")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.vertical, 12)
+            } else {
+                Table(filtered, selection: Binding(
+                    get: { selectedID },
+                    set: { selectedID = $0 }
+                )) {
+                    TableColumn("Nom") { e in Text(e.displayName) }
+                    TableColumn("SIREN") { e in Text((e.party.siren ?? "").isEmpty ? "—" : e.party.siren!) }
+                    TableColumn("Ville") { e in Text(e.party.city.isEmpty ? "—" : e.party.city) }
+                    TableColumn("IBAN") { e in Text((e.party.iban ?? "").isEmpty ? "—" : e.party.iban!) }
+                        .width(min: 120, ideal: 160)
+                }
+                .frame(minHeight: 180)
+                if let id = selectedID, let entry = societies.first(where: { $0.id == id }) {
+                    HStack {
+                        Button {
+                            editingEntry = entry
+                        } label: { Label("Modifier", systemImage: "pencil") }
+                            .buttonStyle(.bordered)
+                        Button(role: .destructive) {
+                            directory.delete(entry)
+                            selectedID = nil
+                        } label: { Label("Supprimer", systemImage: "trash") }
+                        .buttonStyle(.bordered)
+                        Spacer()
+                    }.padding(.top, 4)
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
@@ -3839,6 +3920,9 @@ struct ApplicationSettingsView: View {
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
     @State private var logosExpanded = false
+    @State private var societiesExpanded = true
+    @State private var editingSociety: DirectoryEntry?
+    @State private var creatingSociety = false
     @State private var editingLogoEntry: DirectoryEntry?
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
@@ -3846,6 +3930,15 @@ struct ApplicationSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                GroupBox {
+                    SocietiesAdminView(
+                        editingEntry: $editingSociety,
+                        creatingNew: $creatingSociety
+                    )
+                } label: {
+                    Label("Sociétés du périmètre", systemImage: "building.2.fill")
+                        .font(.headline)
+                }
                 GroupBox {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
@@ -4180,6 +4273,21 @@ struct ApplicationSettingsView: View {
                 get: { editingLogoEntry != nil },
                 set: { if !$0 { editingLogoEntry = nil } }
             ))
+        }
+        .sheet(item: $editingSociety) { entry in
+            DirectoryEditorView(entry: entry, onSave: { updated in
+                directory.upsert(updated)
+                editingSociety = nil
+            }, onDelete: { toDelete in
+                directory.delete(toDelete)
+                editingSociety = nil
+            })
+        }
+        .sheet(isPresented: $creatingSociety) {
+            DirectoryEditorView(initialKind: .societe) { newEntry in
+                directory.upsert(newEntry)
+                creatingSociety = false
+            }
         }
     }
 
