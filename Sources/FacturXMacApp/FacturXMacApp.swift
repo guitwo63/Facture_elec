@@ -1455,7 +1455,7 @@ struct InvoiceEditorView: View {
                         }
                         .labelsHidden()
                         .frame(width: 200)
-                        .help("Statut de la facture (transitions autorisées par le cycle de vie normé). Admin : tous statuts.)"
+                        .help("Statut de la facture (transitions autorisées par le cycle de vie normé). Admin : tous statuts.)")
                         Button {
                             refreshSuperPDPStatus()
                         } label: {
