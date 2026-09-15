@@ -7,17 +7,20 @@ public struct SuperPDPCredentials: Codable, Equatable {
     public var clientSecret: String
     public var apiBaseURL: String
     public var useSandbox: Bool
+    public var usePDP: Bool
 
     public init(
         clientID: String,
         clientSecret: String,
         apiBaseURL: String = SuperPDPCredentials.defaultProductionBase,
-        useSandbox: Bool = true
+        useSandbox: Bool = true,
+        usePDP: Bool = true
     ) {
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.apiBaseURL = apiBaseURL.isEmpty ? SuperPDPCredentials.defaultProductionBase : apiBaseURL
         self.useSandbox = useSandbox
+        self.usePDP = usePDP
     }
 
     public static let defaultProductionBase = "https://api.superpdp.tech"
@@ -34,7 +37,7 @@ public struct SuperPDPCredentials: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case clientID, clientSecret, apiBaseURL, useSandbox
+        case clientID, clientSecret, apiBaseURL, useSandbox, usePDP
     }
 
     public init(from decoder: Decoder) throws {
@@ -43,6 +46,7 @@ public struct SuperPDPCredentials: Codable, Equatable {
         clientSecret = try c.decodeIfPresent(String.self, forKey: .clientSecret) ?? ""
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? SuperPDPCredentials.defaultProductionBase
         useSandbox = try c.decodeIfPresent(Bool.self, forKey: .useSandbox) ?? true
+        usePDP = try c.decodeIfPresent(Bool.self, forKey: .usePDP) ?? true
     }
 }
 

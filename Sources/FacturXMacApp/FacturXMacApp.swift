@@ -1463,25 +1463,28 @@ struct InvoiceEditorView: View {
                     .buttonStyle(.bordered)
                     .help("Protéger la facture validée en lecture seule")
                 }
-                Button("Valider") { runValidation() }
-                    .buttonStyle(.bordered)
-                    .disabled(fieldLocked)
-                if isAdmin {
-                    Button {
-                        validatePDP()
-                    } label: {
-                        if pdpValidating {
-                            HStack(spacing: 4) {
-                                ProgressView().controlSize(.small)
-                                Text("Valider…")
+                if superPDPSettings.credentials.usePDP {
+                    if isAdmin {
+                        Button {
+                            validatePDP()
+                        } label: {
+                            if pdpValidating {
+                                HStack(spacing: 4) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Valider…")
+                                }
+                            } else {
+                                Label("Valider PDP", systemImage: "checkmark.shield")
                             }
-                        } else {
-                            Label("Valider PDP", systemImage: "checkmark.shield")
                         }
+                        .buttonStyle(.bordered)
+                        .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
+                        .help("Valider le Factur-X sur SUPER PDP avant dépôt")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
-                    .help("Valider le Factur-X sur SUPER PDP avant dépôt")
+                } else {
+                    Button("Valider") { runValidation() }
+                        .buttonStyle(.bordered)
+                        .disabled(fieldLocked)
                 }
                 Spacer()
                 Menu {
@@ -1496,7 +1499,7 @@ struct InvoiceEditorView: View {
                         store.upsert(copy)
                         duplicatedNumber = copy.number
                     } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
-                    if isAdmin {
+                    if isAdmin && superPDPSettings.credentials.usePDP {
                         Divider()
                         Button {
                             downloadPDPInvoice()
@@ -1515,7 +1518,7 @@ struct InvoiceEditorView: View {
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
-                } else if isAdmin {
+                } else if isAdmin && superPDPSettings.credentials.usePDP {
                     Button {
                         depositToSuperPDP()
                     } label: { Label("Super PDP", systemImage: "paperplane.fill") }
@@ -1768,6 +1771,7 @@ struct InvoiceEditorView: View {
                                         .fixedSize()
                                         .help("Statut actuel : \(invoice.status.label). Transitions autorisées affichées dans le menu.")
                                     }
+                                    if superPDPSettings.credentials.usePDP {
                                     Button {
                                         refreshSuperPDPStatus()
                                     } label: {
@@ -1796,6 +1800,7 @@ struct InvoiceEditorView: View {
                                     .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
                                               || !superPDPSettings.credentials.isConfigured)
                                     .help("Historique des événements de cycle de vie sur SUPER PDP")
+                                    }
                                 }
                                 VStack(alignment: .trailing) {
                                 row("Total HT", invoice.lineTotal)
@@ -4349,6 +4354,13 @@ struct ApplicationSettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("SUPER PDP est une Plateforme Agréée (PA) API-first pour envoyer et recevoir des factures électroniques conformes (Factur-X/UBL) et consulter l'annuaire des destinataires.")
                             .font(.caption).foregroundStyle(.secondary)
+                        Toggle(isOn: $superPDPSettings.credentials.usePDP) {
+                            Text("Utiliser PDP").font(.body.weight(.semibold))
+                        }
+                        .toggleStyle(.switch)
+                        .onChange(of: superPDPSettings.credentials.usePDP) { _ in superPDPSettings.save() }
+                        .help("Active les fonctions de dépôt et validation des factures via SUPER PDP. Si désactivé, seul le bouton « Valider » reste disponible sur la facture.")
+                        if superPDPSettings.credentials.usePDP {
                         HStack {
                             Text("Client ID").frame(width: 100, alignment: .leading)
                             TextField("Client ID", text: $superPDPSettings.credentials.clientID)
@@ -4423,6 +4435,7 @@ struct ApplicationSettingsView: View {
                         if let m = pdpSessionMessage {
                             Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") || m.contains("non autoris") ? .orange : .green)
                         }
+                        } // fin if usePDP
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Endpoint OAuth : https://api.superpdp.tech/oauth2/token").font(.caption2).foregroundStyle(.tertiary)
                             Text("API : https://api.superpdp.tech/v1.beta/…").font(.caption2).foregroundStyle(.tertiary)
