@@ -194,6 +194,7 @@ struct RootView: View {
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var tab: RootTab = .invoices
