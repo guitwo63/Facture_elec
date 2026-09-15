@@ -2976,6 +2976,20 @@ struct PartyImportSheet: View {
     }
 }
 
+enum DirectoryKindFilter: String, CaseIterable, Hashable {
+    case all = "Tous"
+    case clients = "Clients"
+    case fournisseurs = "Fournisseurs"
+
+    func matches(_ kind: DirectoryEntryKind) -> Bool {
+        switch self {
+        case .all: return kind != .societe
+        case .clients: return kind == .client || kind == .both
+        case .fournisseurs: return kind == .fournisseur || kind == .both
+        }
+    }
+}
+
 struct DirectoryView: View {
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
@@ -2989,13 +3003,14 @@ struct DirectoryView: View {
     @State private var showExport = false
     @State private var showImport = false
     @State private var importResult: ExportGenerator.PartyImportResult?
+    @State private var kindFilter: DirectoryKindFilter = .all
 
     private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var base = directory.entries.filter { showArchived || !$0.isArchived }
-        base = base.filter { $0.kind != .societe }
+        base = base.filter { kindFilter.matches($0.kind) }
         guard q.isEmpty else {
             return base.filter {
                 $0.displayName.lowercased().contains(q)
@@ -3018,6 +3033,13 @@ struct DirectoryView: View {
                     } label: { Label("Nouveau tiers", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Annuaire des tiers").font(.title2.bold())
+                    Picker("Type", selection: $kindFilter) {
+                        ForEach(DirectoryKindFilter.allCases, id: \.self) { f in
+                            Text(f.rawValue).tag(f)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
                     Spacer()
                     Button { showImport = true } label: { Label("Importer", systemImage: "square.and.arrow.down") }
                         .buttonStyle(.bordered)
