@@ -1468,23 +1468,6 @@ struct InvoiceEditorView: View {
                     .disabled(fieldLocked)
                 if isAdmin {
                     Button {
-                        downloadPDPInvoice()
-                    } label: {
-                        if pdpDownloading {
-                            HStack(spacing: 4) {
-                                ProgressView().controlSize(.small)
-                                Text("Copie…")
-                            }
-                        } else {
-                            Label("Copie PDP", systemImage: "square.and.arrow.down")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(pdpDownloading
-                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                              || !superPDPSettings.credentials.isConfigured)
-                    .help("Télécharger la copie de la facture déposée sur SUPER PDP")
-                    Button {
                         validatePDP()
                     } label: {
                         if pdpValidating {
@@ -1500,6 +1483,7 @@ struct InvoiceEditorView: View {
                     .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
                     .help("Valider le Factur-X sur SUPER PDP avant dépôt")
                 }
+                Spacer()
                 Menu {
                     Button {
                         previewPDFData = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: sellerLogo)
@@ -1511,11 +1495,21 @@ struct InvoiceEditorView: View {
                         store.upsert(copy)
                         duplicatedNumber = copy.number
                     } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                    if isAdmin {
+                        Divider()
+                        Button {
+                            downloadPDPInvoice()
+                        } label: { Label("Copie PDP", systemImage: "square.and.arrow.down") }
+                            .disabled(pdpDownloading
+                                      || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                      || !superPDPSettings.credentials.isConfigured)
+                            .help("Télécharger la copie de la facture déposée sur SUPER PDP")
+                    }
                 } label: {
                     Label("Autre action", systemImage: "ellipsis.circle")
                 }
                 .buttonStyle(.bordered)
-                .help("Visualiser, exporter XML, dupliquer…")
+                .help("Visualiser, exporter XML, dupliquer, copie PDP…")
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
