@@ -419,9 +419,19 @@ enum InvoiceFilterField: String, CaseIterable, Hashable {
     case number = "N° facture"
     case buyerName = "Client"
     case buyerSiren = "SIREN client"
+    case buyerVat = "TVA client"
     case sellerName = "Émetteur"
+    case sellerSiren = "SIREN émetteur"
     case amountMin = "Montant TTC min"
     case amountMax = "Montant TTC max"
+    case issueDateFrom = "Émise depuis"
+    case issueDateTo = "Émise jusqu'à"
+    case dueDateFrom = "Échue depuis"
+    case purchaseOrderRef = "Réf. commande"
+    case contractRef = "Réf. contrat"
+    case precedingInvoiceRef = "Facture antérieure"
+    case status = "Statut"
+    case type = "Type"
 }
 
 struct ExportSheet: View {
@@ -928,7 +938,7 @@ struct InvoicesTabView: View {
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
                 DisclosureGroup(isExpanded: $showAdvancedFilters) {
-                    VStack(spacing: 6) {
+                    HStack(alignment: .center, spacing: 12) {
                         advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
                         if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
                             advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
@@ -936,36 +946,28 @@ struct InvoicesTabView: View {
                         if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
                             advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
                         }
-                        HStack {
-                            Spacer()
-                            Button {
-                                advField1 = .none; advValue1 = ""
-                                advField2 = .none; advValue2 = ""
-                                advField3 = .none; advValue3 = ""
-                            } label: {
-                                Label("Réinitialiser", systemImage: "xmark.circle")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .disabled(advField1 == .none && advValue1.isEmpty
-                                      && advField2 == .none && advValue2.isEmpty
-                                      && advField3 == .none && advValue3.isEmpty)
-                        }
+                        Spacer(minLength: 0)
                     }
                     .padding(.top, 4)
                 } label: {
-                    HStack {
+                    HStack(spacing: 6) {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                             .font(.caption)
                         Text("Filtres avancés")
                             .font(.caption.bold())
-                        let active = (advField1 != .none && !advValue1.isEmpty)
-                            || (advField2 != .none && !advValue2.isEmpty)
-                            || (advField3 != .none && !advValue3.isEmpty)
-                        if active {
-                            Text("•")
-                                .font(.caption.bold())
-                                .foregroundStyle(Color.accentColor)
+                        Text("(\(activeAdvancedFilterCount))")
+                            .font(.caption.bold())
+                            .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
+                        if activeAdvancedFilterCount > 0 {
+                            Button {
+                                resetAdvancedFilters()
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Réinitialiser les filtres avancés")
                         }
                     }
                 }
@@ -1034,13 +1036,13 @@ struct InvoicesTabView: View {
                             } label: { Label("Supprimer", systemImage: "trash") }
                         }
                     }
-                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
+                    .frame(minWidth: 180, idealWidth: 230, maxWidth: 270)
                 }
 
                 if let id = selectedID,
                    filteredInvoices.contains(where: { $0.id == id }) {
                     InvoiceEditorView(invoice: binding(for: id))
-                        .frame(minWidth: 380)
+                        .frame(minWidth: 420)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
@@ -1125,8 +1127,17 @@ struct InvoicesTabView: View {
     }
 
     private func applyAdvancedFilter(_ invoices: [Invoice], field: InvoiceFilterField, value: String) -> [Invoice] {
-        let v = value.trimmingCharacters(in: .whitespaces).lowercased()
+        let raw = value.trimmingCharacters(in: .whitespaces)
+        let v = raw.lowercased()
         guard field != .none, !v.isEmpty else { return invoices }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "fr_FR_POSIX")
+        df.dateFormat = "yyyy-MM-dd"
+        func parseDate(_ s: String) -> Date? {
+            if let d = df.date(from: s) { return d }
+            df.dateFormat = "dd/MM/yyyy"
+            return df.date(from: s)
+        }
         switch field {
         case .number:
             return invoices.filter { $0.number.lowercased().contains(v) }
@@ -1134,8 +1145,12 @@ struct InvoicesTabView: View {
             return invoices.filter { $0.buyer.name.lowercased().contains(v) }
         case .buyerSiren:
             return invoices.filter { ($0.buyer.siren ?? "").lowercased().contains(v) }
+        case .buyerVat:
+            return invoices.filter { ($0.buyer.vatNumber ?? "").lowercased().contains(v) }
         case .sellerName:
             return invoices.filter { $0.seller.name.lowercased().contains(v) }
+        case .sellerSiren:
+            return invoices.filter { ($0.seller.siren ?? "").lowercased().contains(v) }
         case .amountMin:
             if let min = Double(v.replacingOccurrences(of: ",", with: ".")) {
                 return invoices.filter { $0.grandTotal >= min }
@@ -1146,6 +1161,25 @@ struct InvoicesTabView: View {
                 return invoices.filter { $0.grandTotal <= max }
             }
             return invoices
+        case .issueDateFrom:
+            if let d = parseDate(raw) { return invoices.filter { $0.issueDate >= d } }
+            return invoices
+        case .issueDateTo:
+            if let d = parseDate(raw) { return invoices.filter { $0.issueDate <= d } }
+            return invoices
+        case .dueDateFrom:
+            if let d = parseDate(raw) { return invoices.filter { $0.dueDate >= d } }
+            return invoices
+        case .purchaseOrderRef:
+            return invoices.filter { ($0.purchaseOrderRef ?? "").lowercased().contains(v) }
+        case .contractRef:
+            return invoices.filter { ($0.contractRef ?? "").lowercased().contains(v) }
+        case .precedingInvoiceRef:
+            return invoices.filter { ($0.precedingInvoiceRef ?? "").lowercased().contains(v) }
+        case .status:
+            return invoices.filter { $0.status.rawValue.lowercased() == v || $0.status.label.lowercased().contains(v) }
+        case .type:
+            return invoices.filter { $0.type.label.lowercased().contains(v) || ($0.type.isCreditNote ? "avoir" : "facture").contains(v) }
         case .none:
             return invoices
         }
@@ -1153,22 +1187,45 @@ struct InvoicesTabView: View {
 
     @ViewBuilder
     private func advancedFilterRow(field: Binding<InvoiceFilterField>, value: Binding<String>, index: Int) -> some View {
+        let isDate = {
+            switch field.wrappedValue {
+            case .issueDateFrom, .issueDateTo, .dueDateFrom: return true
+            default: return false
+            }
+        }()
+        let isAmount = (field.wrappedValue == .amountMin || field.wrappedValue == .amountMax)
         HStack(spacing: 8) {
-            Text("Filtre \(index)")
-                .font(.caption)
-                .frame(width: 60, alignment: .leading)
-                .foregroundStyle(.secondary)
             Picker("", selection: field) {
                 ForEach(InvoiceFilterField.allCases, id: \.self) { f in
                     Text(f.rawValue).tag(f)
                 }
             }
             .labelsHidden()
-            .frame(width: 160)
-            if field.wrappedValue == .amountMin || field.wrappedValue == .amountMax {
+            .frame(width: 170)
+            if isDate {
+                let dateBinding = Binding<Date>(
+                    get: {
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        if let d = df.date(from: value.wrappedValue) { return d }
+                        df.dateFormat = "dd/MM/yyyy"
+                        return df.date(from: value.wrappedValue) ?? Date()
+                    },
+                    set: { newDate in
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        value.wrappedValue = df.string(from: newDate)
+                    }
+                )
+                DatePicker("", selection: dateBinding, displayedComponents: .date)
+                    .labelsHidden()
+                    .frame(width: 130)
+            } else if isAmount {
                 TextField("Valeur", text: value)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 160)
+                    .frame(width: 130)
             } else {
                 TextField("Recherche", text: value)
                     .textFieldStyle(.roundedBorder)
@@ -1183,6 +1240,20 @@ struct InvoicesTabView: View {
                 .buttonStyle(.borderless)
             }
         }
+    }
+
+    private var activeAdvancedFilterCount: Int {
+        var n = 0
+        if advField1 != .none && !advValue1.isEmpty { n += 1 }
+        if advField2 != .none && !advValue2.isEmpty { n += 1 }
+        if advField3 != .none && !advValue3.isEmpty { n += 1 }
+        return n
+    }
+
+    private func resetAdvancedFilters() {
+        advField1 = .none; advValue1 = ""
+        advField2 = .none; advValue2 = ""
+        advField3 = .none; advValue3 = ""
     }
 }
 
@@ -1204,6 +1275,7 @@ struct InvoiceEditorView: View {
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
     @State private var showStatusJournal = false
+    @State private var showLegalMentions = false
 
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
@@ -1629,16 +1701,21 @@ struct InvoiceEditorView: View {
                     }.padding(8)
                 }.lockable(fieldLocked)
 
-                GroupBox("Mentions légales (FR)") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Frais de recouvrement (SubjectCode PMT) :").font(.caption.bold())
-                        TextField("Indemnité forfaitaire pour frais de recouvrement", text: $invoice.legalNotePMT)
-                        Text("Pénalités de retard (SubjectCode PMD) :").font(.caption.bold())
-                        TextField("Taux d'intérêt des pénalités de retard", text: $invoice.legalNotePMD)
-                        Text("Escompte (SubjectCode AAB) :").font(.caption.bold())
-                        TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
-                        TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
-                    }.padding(8)
+                GroupBox {
+                    DisclosureGroup(isExpanded: $showLegalMentions) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Frais de recouvrement (SubjectCode PMT) :").font(.caption.bold())
+                            TextField("Indemnité forfaitaire pour frais de recouvrement", text: $invoice.legalNotePMT)
+                            Text("Pénalités de retard (SubjectCode PMD) :").font(.caption.bold())
+                            TextField("Taux d'intérêt des pénalités de retard", text: $invoice.legalNotePMD)
+                            Text("Escompte (SubjectCode AAB) :").font(.caption.bold())
+                            TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
+                            TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
+                        }.padding(.top, 4)
+                    } label: {
+                        Label("Mentions légales (FR) — cliquer pour déplier", systemImage: "text.scroll")
+                            .font(.headline)
+                    }
                 }.lockable(fieldLocked)
                 statusJournalSection
             }.padding()
