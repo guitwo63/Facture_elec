@@ -197,9 +197,7 @@ public struct OptionalFieldTemplate: Identifiable, Hashable {
 }
 
 public enum OptionalFieldCatalogue {
-    public static let header: [OptionalFieldTemplate] = [
-        OptionalFieldTemplate("BT-11", "Ref. projet", "ram:SpecifiedProcuringProject/ram:ID", .header, "BT-11 - Reference du projet d'achat (SpecifiedProcuringProject/ID)."),
-    ]
+    public static let header: [OptionalFieldTemplate] = []
     public static let line: [OptionalFieldTemplate] = [
         OptionalFieldTemplate("BT-133", "Ref. contrat ligne", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .line, "BT-133 - Reference de contrat au niveau de la ligne."),
         OptionalFieldTemplate("BT-134", "Ref. commande ligne", "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID", .line, "BT-134 - Reference de commande au niveau de la ligne."),
