@@ -1274,6 +1274,7 @@ struct InvoiceEditorView: View {
     @State private var superPDPSubmitting = false
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
+    @State private var syncingFromPDP = false
     @State private var showStatusJournal = false
     @State private var showLegalMentions = false
 
@@ -1377,7 +1378,10 @@ struct InvoiceEditorView: View {
                         .onChange(of: invoice.number) { _ in exportError = nil }
                         .onChange(of: invoice.seller.name) { _ in exportError = nil }
                         .onChange(of: invoice.buyer.name) { _ in exportError = nil }
-                        .onChange(of: invoice.status) { newStatus in notifyPDPStatusChange(to: newStatus) }
+                        .onChange(of: invoice.status) { newStatus in
+                            guard !syncingFromPDP else { return }
+                            notifyPDPStatusChange(to: newStatus)
+                        }
                 }
                 if let url = exportedURL {
                     Text("Fichier généré : \(url.lastPathComponent)").font(.caption).foregroundStyle(.green)
@@ -1931,6 +1935,17 @@ struct InvoiceEditorView: View {
         }
     }
 
+    private static func mapPDPStatusToLocal(_ pdpStatus: String) -> InvoiceStatus? {
+        let s = pdpStatus.lowercased()
+        switch s {
+        case "accepted", "processed", "received": return .accepted
+        case "rejected": return .rejected
+        case "fr:212", "encaissée", "encaissee", "paid": return .paid
+        case "fr:320", "annulée", "annulee", "cancelled": return .cancelled
+        default: return nil
+        }
+    }
+
     private func refreshSuperPDPStatus() {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         superPDPSubmitting = true
@@ -1944,7 +1959,15 @@ struct InvoiceEditorView: View {
                     enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
                     lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
                 )
-                superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
+                if let mapped = Self.mapPDPStatusToLocal(updated.status), mapped != invoice.status {
+                    syncingFromPDP = true
+                    invoice.status = mapped
+                    store.upsert(invoice)
+                    syncingFromPDP = false
+                    superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status) — id distant \(rid). Statut facture mis à jour : \(mapped.label)."
+                } else {
+                    superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
+                }
                 store.audit?.record(
                     actor: store.actorName,
                     action: "pdp_status_received",
