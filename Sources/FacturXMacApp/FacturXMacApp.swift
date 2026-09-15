@@ -1898,13 +1898,13 @@ struct InvoiceEditorView: View {
                     store.upsert(invoice)
                 }
                 superPDPMessage = "↑ Envoyé à SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
-                store.audit?.recordStatusChange(
+                store.audit?.record(
                     actor: store.actorName,
+                    action: "pdp_deposit_sent",
+                    target: invoice.number,
+                    details: "Dépôt facture sur SUPER PDP (envoyé) — id distant : \(submission.remoteID ?? "?")",
                     objectType: .invoice,
-                    objectCode: invoice.number,
-                    statusFrom: nil,
-                    statusTo: submission.status,
-                    details: "Dépôt facture sur SUPER PDP (envoyé) — id distant : \(submission.remoteID ?? "?")"
+                    objectCode: invoice.number
                 )
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec dépôt SUPER PDP : \(e.localizedDescription)"
@@ -1945,14 +1945,13 @@ struct InvoiceEditorView: View {
                     lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
                 )
                 superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
-                let actor = store.actorName
-                store.audit?.recordStatusChange(
-                    actor: actor,
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_received",
+                    target: invoice.number,
+                    details: "Statut SUPER PDP reçu : \(updated.status)\(priorStatus.map { " (avant : \($0))" } ?? "") — id distant : \(rid)",
                     objectType: .invoice,
-                    objectCode: invoice.number,
-                    statusFrom: priorStatus,
-                    statusTo: updated.status,
-                    details: "Interrogation statut SUPER PDP (reçu) — id distant : \(rid)"
+                    objectCode: invoice.number
                 )
             } catch {
                 superPDPMessage = "Échec rafraîchissement : \(error.localizedDescription)"
@@ -2017,13 +2016,13 @@ struct InvoiceEditorView: View {
                     message: "Statut \(detailLabel) envoyé", direction: .sent
                 )
                 superPDPMessage = "↑ Envoyé à SUPER PDP : statut \(detailLabel) — id distant \(rid)."
-                store.audit?.recordStatusChange(
+                store.audit?.record(
                     actor: store.actorName,
+                    action: "pdp_status_sent",
+                    target: invoiceRef.number,
+                    details: "Envoi statut \(detailLabel) à SUPER PDP (envoyé) — id distant : \(rid)",
                     objectType: .invoice,
-                    objectCode: invoiceRef.number,
-                    statusFrom: priorStatus,
-                    statusTo: detailLabel,
-                    details: "Envoi statut \(detailLabel) à SUPER PDP (envoyé) — id distant : \(rid)"
+                    objectCode: invoiceRef.number
                 )
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec envoi statut SUPER PDP : \(e.localizedDescription)"
@@ -2115,7 +2114,7 @@ struct InvoiceEditorView: View {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
                                 }
                             } else {
-                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action == "pdp_status_send_error" ? "Envoi statut PDP échoué" : e.action)
+                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_sent" ? "Dépôt PDP envoyé" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_received" ? "Statut PDP reçu" : e.action == "pdp_status_sent" ? "Statut PDP envoyé" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action == "pdp_status_send_error" ? "Envoi statut PDP échoué" : e.action)
                                     .font(.caption)
                                 if !e.details.isEmpty {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
