@@ -1453,9 +1453,8 @@ struct InvoiceEditorView: View {
                         TextField("Escompte pour paiement anticipé", text: $invoice.legalNoteAAB)
                         TextField("Notes libres", text: Binding($invoice.notes, replacingNilWith: ""))
                     }.padding(8)
-                }
-                statusJournalSection
                 }.lockable(isLocked)
+                statusJournalSection
             }.padding()
         }
             .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
