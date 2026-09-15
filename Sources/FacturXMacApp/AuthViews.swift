@@ -3,6 +3,7 @@ import FacturXCore
 
 struct LoginView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var appEnv: AppEnvironment
     @State private var username = ""
     @State private var password = ""
     @State private var errorMessage: String?
@@ -21,6 +22,34 @@ struct LoginView: View {
                     .foregroundStyle(Color.accentColor)
                 Text("Factur-X").font(.largeTitle.bold())
                 Text("Connexion").font(.title3).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 12) {
+                Button {
+                    appEnv.setMode(.production)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.title2)
+                        Text("PRODUCTION")
+                            .font(.caption.bold())
+                    }
+                    .frame(width: 130, height: 56)
+                }
+                .buttonStyle(.bordered)
+                .tint(appEnv.mode == .production ? .green : .secondary)
+                Button {
+                    appEnv.setMode(.test)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "flask.fill")
+                            .font(.title2)
+                        Text("TEST")
+                            .font(.caption.bold())
+                    }
+                    .frame(width: 130, height: 56)
+                }
+                .buttonStyle(.bordered)
+                .tint(appEnv.mode == .test ? .orange : .secondary)
             }
             VStack(spacing: 12) {
                 TextField("Adresse e-mail", text: $username)

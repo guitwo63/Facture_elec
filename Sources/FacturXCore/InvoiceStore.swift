@@ -113,8 +113,14 @@ public final class InvoiceStore: ObservableObject {
     public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil, preferredSellerEntryID: UUID? = nil) -> Invoice {
         let dir = directory ?? PartyDirectory.shared
         let sellerEntryID = preferredSellerEntryID ?? defaultSellerEntryID
-        let seller: InvoiceParty = {
+        let sellerEntry: DirectoryEntry? = {
             if let id = sellerEntryID, let entry = dir.entries.first(where: { $0.id == id }) {
+                return entry
+            }
+            return nil
+        }()
+        let seller: InvoiceParty = {
+            if let entry = sellerEntry {
                 var p = entry.party
                 if let routing = entry.defaultRoutingAddress, routing.isActive {
                     let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
@@ -134,6 +140,7 @@ public final class InvoiceStore: ObservableObject {
         }()
         return Invoice(
             number: nextNumber(companyID: companyID),
+            profile: sellerEntry?.profile ?? .en16931,
             seller: seller,
             buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""),
             companyID: companyID,
