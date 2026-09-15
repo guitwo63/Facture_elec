@@ -46,8 +46,8 @@ public final class InvoicePDFRenderer {
     private func drawLogo(context: CGContext, logo: Data?, y: CGFloat, maxWidth: CGFloat, maxHeight: CGFloat) -> CGRect? {
         guard let data = logo, !data.isEmpty,
               let provider = CGDataProvider(data: data as CFData),
-              let image = CGImageCreateWithPNGDataProvider(provider, nil, false, .colorSkipLast)
-                    ?? CGImageCreateWithJPEGDataProvider(provider, nil, false, .colorSkipLast) else {
+              let image = CGImageCreateWithPNGDataProvider(provider, nil, false, .defaultIntent)
+                    ?? CGImageCreateWithJPEGDataProvider(provider, nil, false, .defaultIntent) else {
             return nil
         }
         let imgW = CGFloat(image.width)

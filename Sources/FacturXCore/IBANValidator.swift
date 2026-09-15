@@ -50,8 +50,8 @@ public enum IBANValidator {
         }
         let rearranged = cleaned.dropFirst(4) + cleaned.prefix(4)
         let numeric = rearranged.map { charToDigit($0) }.joined()
-        guard let n = Decimal(string: numeric) else { return false }
-        let remainder = (n % 97)
+        guard !numeric.isEmpty else { return false }
+        let remainder = mod97(numeric)
         return remainder == 1
     }
 
@@ -80,5 +80,16 @@ public enum IBANValidator {
         if let d = ch.wholeNumberValue { return String(d) }
         let scalar = ch.uppercased().unicodeScalars.first?.value ?? 0
         return String(scalar - 55)
+    }
+
+    /// Calcule le reste modulo 97 d'une grande chaîne de chiffres, par blocs
+    /// (évite tout dépassement d'entier, indépendant de la longueur de l'IBAN).
+    private static func mod97(_ digits: String) -> Int {
+        var remainder = 0
+        for ch in digits {
+            guard let d = ch.wholeNumberValue else { continue }
+            remainder = (remainder * 10 + d) % 97
+        }
+        return remainder
     }
 }
