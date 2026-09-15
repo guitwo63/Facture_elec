@@ -11,6 +11,12 @@ public final class InvoicePDFRenderer {
     private let margin: CGFloat = 50.0
 
     public func render(invoice: Invoice) -> Data {
+        render(invoice: invoice, logo: nil)
+    }
+
+    /// Rend le PDF lisible. Si `logo` est fourni (données d'image PNG/JPEG/TIFF),
+    /// il est dessiné en en-tête à gauche, à la place du nom de l'émetteur.
+    public func render(invoice: Invoice, logo: Data?) -> Data {
         let pdfData = NSMutableData()
         guard let consumer = CGDataConsumer(data: pdfData as CFMutableData) else {
             return Data()
@@ -24,7 +30,8 @@ public final class InvoicePDFRenderer {
         context.beginPage(mediaBox: &mediaBox)
 
         let yTop = pageRect.height - margin
-        drawHeader(context: context, invoice: invoice, y: yTop)
+        let logoBox: CGRect? = drawLogo(context: context, logo: logo, y: yTop, maxWidth: 160, maxHeight: 60)
+        drawHeader(context: context, invoice: invoice, y: yTop, logoBox: logoBox)
         drawParties(context: context, invoice: invoice, y: yTop - 70)
         let tableY = drawLinesTable(context: context, invoice: invoice, y: yTop - 230)
         drawTotals(context: context, invoice: invoice, y: tableY - 20)
@@ -36,7 +43,27 @@ public final class InvoicePDFRenderer {
         return pdfData as Data
     }
 
-    private func drawHeader(context: CGContext, invoice: Invoice, y: CGFloat) {
+    private func drawLogo(context: CGContext, logo: Data?, y: CGFloat, maxWidth: CGFloat, maxHeight: CGFloat) -> CGRect? {
+        guard let data = logo, !data.isEmpty,
+              let provider = CGDataProvider(data: data as CFData),
+              let image = CGImageCreateWithPNGDataProvider(provider, nil, false, .colorSkipLast)
+                    ?? CGImageCreateWithJPEGDataProvider(provider, nil, false, .colorSkipLast) else {
+            return nil
+        }
+        let imgW = CGFloat(image.width)
+        let imgH = CGFloat(image.height)
+        guard imgW > 0, imgH > 0 else { return nil }
+        let scale = min(maxWidth / imgW, maxHeight / imgH, 1.0)
+        let drawW = imgW * scale
+        let drawH = imgH * scale
+        let rect = CGRect(x: margin, y: y - maxHeight + (maxHeight - drawH) / 2, width: drawW, height: drawH)
+        context.saveGState()
+        context.draw(image, in: rect)
+        context.restoreGState()
+        return rect
+    }
+
+    private func drawHeader(context: CGContext, invoice: Invoice, y: CGFloat, logoBox: CGRect?) {
         let title: String
         if invoice.type.isInternalCreditNote {
             title = "AVOIR INTERNE"
@@ -45,7 +72,8 @@ public final class InvoicePDFRenderer {
         } else {
             title = "FACTURE"
         }
-        drawText(context: context, text: title, x: margin, y: y, font: boldFont(size: 24), color: .black)
+        let titleX: CGFloat = (logoBox?.maxX ?? margin) + 10
+        drawText(context: context, text: title, x: titleX, y: y, font: boldFont(size: 24), color: .black)
         drawText(context: context, text: invoice.number, x: pageWidth - margin - 180, y: y, font: boldFont(size: 14), color: .black)
 
         let df = DateFormatter()

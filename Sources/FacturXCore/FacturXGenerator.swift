@@ -7,11 +7,15 @@ public struct FacturXGenerator {
     public init() {}
 
     public func generate(invoice: Invoice) throws -> Data {
+        try generate(invoice: invoice, logo: nil)
+    }
+
+    public func generate(invoice: Invoice, logo: Data?) throws -> Data {
         let xmlGenerator = CIIXMLGenerator()
         let xml = try xmlGenerator.generate(invoice: invoice)
 
         let renderer = InvoicePDFRenderer()
-        let pdf = renderer.render(invoice: invoice)
+        let pdf = renderer.render(invoice: invoice, logo: logo)
 
         let embedder = FacturXEmbedder()
         let facturx = try embedder.embed(pdfData: pdf, xml: xml, invoice: invoice)
@@ -24,7 +28,11 @@ public struct FacturXGenerator {
     }
 
     public func generateVisiblePDF(invoice: Invoice) -> Data {
+        generateVisiblePDF(invoice: invoice, logo: nil)
+    }
+
+    public func generateVisiblePDF(invoice: Invoice, logo: Data?) -> Data {
         let renderer = InvoicePDFRenderer()
-        return renderer.render(invoice: invoice)
+        return renderer.render(invoice: invoice, logo: logo)
     }
 }

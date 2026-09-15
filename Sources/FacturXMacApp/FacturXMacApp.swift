@@ -1282,6 +1282,8 @@ struct InvoiceEditorView: View {
     @State private var lastSentPDPStatusCode: String?
     @State private var showStatusJournal = false
     @State private var showLegalMentions = false
+    @State private var logoData: Data?
+    @State private var showLogoPicker = false
 
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
@@ -1358,6 +1360,23 @@ struct InvoiceEditorView: View {
                 Button("Valider") { runValidation() }
                     .buttonStyle(.bordered)
                     .disabled(fieldLocked)
+                Button {
+                    showLogoPicker = true
+                } label: {
+                    if logoData != nil {
+                        Label("Logo : ajouté", systemImage: "checkmark.rectangle.portrait")
+                    } else {
+                        Label("Ajouter un logo", systemImage: "photo")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Image (PNG/JPEG/TIFF) affichée en en-tête du PDF lisible")
+                if logoData != nil {
+                    Button {
+                        logoData = nil
+                    } label: { Label("Retirer le logo", systemImage: "trash") }
+                        .buttonStyle(.bordered)
+                }
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
@@ -1805,6 +1824,10 @@ struct InvoiceEditorView: View {
                 guard !syncingFromPDP else { return }
                 notifyPDPStatusChange(to: newStatus)
             }
+            .sheet(isPresented: $showLogoPicker) {
+                LogoPickerSheet(logoData: $logoData, isPresented: $showLogoPicker)
+            }
+            }
         }
     }
 
@@ -1879,7 +1902,7 @@ struct InvoiceEditorView: View {
         }
         do {
             store.upsert(invoice)
-            let data = try FacturXGenerator().generate(invoice: invoice)
+            let data = try FacturXGenerator().generate(invoice: invoice, logo: logoData)
             let postCheck = FacturXValidator().validate(pdf: data)
             if !postCheck.isValid {
                 validation = FacturXValidationResult(
@@ -1936,7 +1959,7 @@ struct InvoiceEditorView: View {
         }
         Task {
             do {
-                let facturx = try FacturXGenerator().generate(invoice: invoice)
+                let facturx = try FacturXGenerator().generate(invoice: invoice, logo: logoData)
                 let service = SuperPDPService()
                 let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
                 superPDPSubmission = SuperPDPInvoiceSubmission(
@@ -2147,7 +2170,7 @@ struct InvoiceEditorView: View {
         exportError = nil
         exportedURL = nil
         store.upsert(invoice)
-        let data = FacturXGenerator().generateVisiblePDF(invoice: invoice)
+        let data = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: logoData)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = "avoir-interne-\(invoice.number).pdf"
@@ -2776,6 +2799,14 @@ struct DirectoryView: View {
                                 }
                             }
                             Text(entry.party.fullAddressLine).font(.caption).foregroundStyle(.secondary)
+                            if let sn = entry.party.siren?.trimmingCharacters(in: .whitespaces), !sn.isEmpty,
+                               !SireneValidator.isValidSiren(sn) {
+                                Label("SIREN invalide", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.2), in: Capsule())
+                                    .foregroundColor(.orange)
+                            }
                             if let sub = entry.subtitle.isEmpty ? nil : entry.subtitle {
                                 Text(sub).font(.caption2).foregroundStyle(.tertiary)
                             }
@@ -2964,7 +2995,20 @@ struct DirectoryDetailView: View {
                         Divider()
                         Text("Identifiants").font(.headline)
                         if let s = entry.party.siren, !s.isEmpty {
-                            detailRow("SIREN", s)
+                            HStack(alignment: .top) {
+                                Text("SIREN").font(.callout.bold()).frame(width: 160, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(s).font(.body)
+                                    if SireneValidator.isValidSiren(s) {
+                                        Label("SIREN valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2).foregroundStyle(.green)
+                                    } else {
+                                        Label("SIREN invalide (9 chiffres attendus, clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                                            .font(.caption2).foregroundStyle(.orange)
+                                    }
+                                }
+                                Spacer()
+                            }
                         }
                         if let st = entry.party.siret, !st.isEmpty {
                             HStack(alignment: .top) {
@@ -5007,8 +5051,17 @@ struct PartyEditorView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("SIREN").font(.caption); star
-                        TextField("SIREN", text: Binding($party.siren, replacingNilWith: ""))
+                        TextField("SIREN (9 chiffres)", text: Binding($party.siren, replacingNilWith: ""))
                             .onChange(of: party.siren) { _ in scheduleDinumSearch() }
+                    }
+                    if let sn = party.siren?.trimmingCharacters(in: .whitespaces), !sn.isEmpty {
+                        if SireneValidator.isValidSiren(sn) {
+                            Label("SIREN valide (clé Luhn correcte)", systemImage: "checkmark.circle.fill")
+                                .font(.caption2).foregroundStyle(.green)
+                        } else {
+                            Label("SIREN invalide (9 chiffres attendus, clé Luhn incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2).foregroundStyle(.orange)
+                        }
                     }
                     HStack(spacing: 4) {
                         Text("TVA intra").font(.caption)
@@ -6101,5 +6154,61 @@ extension Binding {
             get: { source.wrappedValue ?? nilValue },
             set: { source.wrappedValue = $0 }
         )
+    }
+}
+
+struct LogoPickerSheet: View {
+    @Binding var logoData: Data?
+    @Binding var isPresented: Bool
+    @State private var selectedURL: URL?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Logo de l'en-tête").font(.headline)
+            Text("Image (PNG, JPEG ou TIFF) affichée en haut à gauche du PDF lisible. Le logo n'est pas embarqué dans le XML Factur-X.")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+
+            if let data = logoData, let img = NSImage(data: data) {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 220, maxHeight: 90)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).stroke(.secondary, lineWidth: 0.5))
+                Text("Logo chargé (\(data.count) octets)").font(.caption2).foregroundStyle(.secondary)
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text("Aucun logo sélectionné").font(.caption).foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.png, .jpeg, .tiff]
+                    panel.allowsMultipleSelection = false
+                    panel.canChooseDirectories = false
+                    if panel.runModal() == .OK, let url = panel.url {
+                        if let data = try? Data(contentsOf: url) {
+                            logoData = data
+                            selectedURL = url
+                        }
+                    }
+                } label: { Label("Choisir une image…", systemImage: "folder") }
+                .buttonStyle(.bordered)
+
+                if logoData != nil {
+                    Button(role: .destructive) { logoData = nil } label: { Label("Retirer", systemImage: "trash") }
+                        .buttonStyle(.bordered)
+                }
+            }
+
+            Spacer()
+            Button("Fermer") { isPresented = false }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(24)
+        .frame(width: 420, height: 320)
     }
 }
