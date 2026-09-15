@@ -341,6 +341,7 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         guard isAdmin else { return standard }
         return InvoiceStatus.allCases.filter { $0 != status }.sorted { $0.label < $1.label }
     }
+}
 
 public struct Invoice: Codable, Hashable, Identifiable {
     public var id: UUID
