@@ -3051,6 +3051,35 @@ struct DirectoryDetailView: View {
                         }
 
                         Divider()
+                        Text("Coordonnées bancaires").font(.headline)
+                        if let iban = entry.party.iban?.trimmingCharacters(in: .whitespaces), !iban.isEmpty {
+                            HStack(alignment: .top) {
+                                Text("IBAN").font(.callout.bold()).frame(width: 160, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(IBANValidator.formatted(iban)).font(.system(.body, design: .monospaced))
+                                    if IBANValidator.isValid(iban) {
+                                        Label("IBAN valide (clé mod 97 correcte)", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2).foregroundStyle(.green)
+                                    } else {
+                                        Label("IBAN invalide (clé de contrôle incorrecte)", systemImage: "exclamationmark.triangle.fill")
+                                            .font(.caption2).foregroundStyle(.orange)
+                                    }
+                                }
+                                Spacer()
+                            }
+                        }
+                        if let bic = entry.party.bic?.trimmingCharacters(in: .whitespaces), !bic.isEmpty {
+                            detailRow("BIC", bic)
+                        }
+                        if let pt = entry.party.paymentTerms?.trimmingCharacters(in: .whitespaces), !pt.isEmpty {
+                            detailRow("Conditions de paiement", pt)
+                        }
+                        if (entry.party.iban?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+                            && (entry.party.bic?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+                            && (entry.party.paymentTerms?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) {
+                            Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Divider()
                         HStack {
                             Text("Contact(s)").font(.headline)
                             Spacer()
@@ -5196,7 +5225,18 @@ struct PartyEditorView: View {
                 DisclosureGroup("Coordonnées bancaires & conditions de paiement") {
                     VStack(alignment: .leading, spacing: 6) {
                         TextField("IBAN", text: Binding($party.iban, replacingNilWith: ""))
+                            .textCase(.uppercase)
+                        if let iban = party.iban?.trimmingCharacters(in: .whitespaces), !iban.isEmpty {
+                            if IBANValidator.isValid(iban) {
+                                Label("IBAN valide (clé mod 97 correcte)", systemImage: "checkmark.circle.fill")
+                                    .font(.caption2).foregroundStyle(.green)
+                            } else {
+                                Label("IBAN invalide (clé de contrôle incorrecte ou longueur pays inattendue)", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
                         TextField("BIC", text: Binding($party.bic, replacingNilWith: ""))
+                            .textCase(.uppercase)
                         TextField("Conditions de paiement", text: Binding($party.paymentTerms, replacingNilWith: ""))
                     }
                 }
