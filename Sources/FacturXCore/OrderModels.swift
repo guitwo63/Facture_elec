@@ -308,7 +308,7 @@ public final class OrderStatusStore: ObservableObject {
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([OrderStatusOverride].self, from: data),
            !decoded.isEmpty {
-            var migrated = decoded.map { o -> OrderStatusOverride in
+            let migrated = decoded.map { o -> OrderStatusOverride in
                 var v = o
                 if v.id == "sentToSupplier" { v.id = OrderStatus.sentToSociete.rawValue }
                 return v
