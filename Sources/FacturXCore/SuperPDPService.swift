@@ -7,17 +7,20 @@ public struct SuperPDPCredentials: Codable, Equatable {
     public var clientSecret: String
     public var apiBaseURL: String
     public var useSandbox: Bool
+    public var usePDP: Bool
 
     public init(
         clientID: String,
         clientSecret: String,
         apiBaseURL: String = SuperPDPCredentials.defaultProductionBase,
-        useSandbox: Bool = true
+        useSandbox: Bool = true,
+        usePDP: Bool = true
     ) {
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.apiBaseURL = apiBaseURL.isEmpty ? SuperPDPCredentials.defaultProductionBase : apiBaseURL
         self.useSandbox = useSandbox
+        self.usePDP = usePDP
     }
 
     public static let defaultProductionBase = "https://api.superpdp.tech"
@@ -34,7 +37,7 @@ public struct SuperPDPCredentials: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case clientID, clientSecret, apiBaseURL, useSandbox
+        case clientID, clientSecret, apiBaseURL, useSandbox, usePDP
     }
 
     public init(from decoder: Decoder) throws {
@@ -43,6 +46,7 @@ public struct SuperPDPCredentials: Codable, Equatable {
         clientSecret = try c.decodeIfPresent(String.self, forKey: .clientSecret) ?? ""
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? SuperPDPCredentials.defaultProductionBase
         useSandbox = try c.decodeIfPresent(Bool.self, forKey: .useSandbox) ?? true
+        usePDP = try c.decodeIfPresent(Bool.self, forKey: .usePDP) ?? true
     }
 }
 
@@ -187,6 +191,105 @@ public struct SuperPDPValidationReport: Hashable {
         self.errors = errors
         self.warnings = warnings
         self.raw = raw
+    }
+}
+
+public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
+    public var id: String
+    public var statusCode: String
+    public var createdAt: Date?
+    public var direction: SuperPDPDirection
+    public var notes: String?
+    public var raw: [String: String]
+
+    public init(
+        id: String = UUID().uuidString,
+        statusCode: String,
+        createdAt: Date? = nil,
+        direction: SuperPDPDirection = .sent,
+        notes: String? = nil,
+        raw: [String: String] = [:]
+    ) {
+        self.id = id
+        self.statusCode = statusCode
+        self.createdAt = createdAt
+        self.direction = direction
+        self.notes = notes
+        self.raw = raw
+    }
+
+    public var detailLabel: String {
+        switch statusCode {
+        case "fr:204": return "Mis à disposition du destinataire"
+        case "fr:205": return "Lu par le destinataire"
+        case "fr:206": return "Refusé par le destinataire"
+        case "fr:207": return "Accepté par le destinataire"
+        case "fr:208": return "Facture en attente de paiement"
+        case "fr:209": return "Facture réglée"
+        case "fr:210": return "Facture en litige"
+        case "fr:211": return "Facture transférée"
+        case "fr:212": return "Facture encaissée"
+        case "fr:220": return "Facture rejetée par la PDP"
+        case "fr:320": return "Facture annulée"
+        default: return "Événement \(statusCode)"
+        }
+    }
+}
+
+public struct SuperPDPSession: Hashable {
+    public var status: String
+    public var isAuthorized: Bool
+    public var companyNumber: String?
+    public var raw: [String: String]
+
+    public init(status: String, isAuthorized: Bool, companyNumber: String? = nil, raw: [String: String] = [:]) {
+        self.status = status
+        self.isAuthorized = isAuthorized
+        self.companyNumber = companyNumber
+        self.raw = raw
+    }
+}
+
+public struct SuperPDPFrenchCompany: Identifiable, Hashable {
+    public var id: String { siren ?? siret ?? name ?? UUID().uuidString }
+    public var name: String?
+    public var siren: String?
+    public var siret: String?
+    public var vatNumber: String?
+    public var addressLine: String?
+    public var postcode: String?
+    public var city: String?
+    public var country: String?
+    public var raw: [String: String]
+
+    public init(
+        name: String? = nil,
+        siren: String? = nil,
+        siret: String? = nil,
+        vatNumber: String? = nil,
+        addressLine: String? = nil,
+        postcode: String? = nil,
+        city: String? = nil,
+        country: String? = nil,
+        raw: [String: String] = [:]
+    ) {
+        self.name = name
+        self.siren = siren
+        self.siret = siret
+        self.vatNumber = vatNumber
+        self.addressLine = addressLine
+        self.postcode = postcode
+        self.city = city
+        self.country = country
+        self.raw = raw
+    }
+
+    public var displaySubtitle: String {
+        var parts: [String] = []
+        if let siren = siren, !siren.isEmpty { parts.append("SIREN \(siren)") }
+        if let vat = vatNumber, !vat.isEmpty { parts.append(vat) }
+        if let city = city, !city.isEmpty { parts.append(city) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -550,6 +653,220 @@ public final class SuperPDPService {
         body.append("\(crlf)--\(boundary)--\(crlf)".data(using: .utf8)!)
         return body
     }
+
+    public func downloadInvoice(remoteID: String, credentials: SuperPDPCredentials) async throws -> Data {
+        let token = try await fetchToken(credentials: credentials)
+        let endpoint = trimmedBase(credentials) + "/v1.beta/invoices/\(urlEncode(remoteID))/download"
+        guard let url = URL(string: endpoint) else {
+            throw SuperPDPError.decoding("URL de téléchargement invalide : \(endpoint)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw SuperPDPError.decoding("Réponse non HTTP")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        return data
+    }
+
+    public func listInvoiceEvents(remoteID: String, credentials: SuperPDPCredentials) async throws -> [SuperPDPInvoiceEvent] {
+        let token = try await fetchToken(credentials: credentials)
+        let base = trimmedBase(credentials)
+        let idParam: String
+        if let n = Int(remoteID) { idParam = String(n) } else { idParam = urlEncode(remoteID) }
+        let endpoint = base + "/v1.beta/invoice_events?invoice_id=\(idParam)&limit=100"
+        guard let url = URL(string: endpoint) else {
+            throw SuperPDPError.decoding("URL d'événements invalide : \(endpoint)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw SuperPDPError.decoding("Réponse non HTTP")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        return try parseInvoiceEvents(data: data)
+    }
+
+    private func parseInvoiceEvents(data: Data) throws -> [SuperPDPInvoiceEvent] {
+        let obj: Any
+        do {
+            obj = try JSONSerialization.jsonObject(with: data, options: [])
+        } catch {
+            throw SuperPDPError.decoding("\(error)")
+        }
+        var arr: [[String: Any]] = []
+        if let dict = obj as? [String: Any] {
+            if let a = dict["data"] as? [[String: Any]] { arr = a }
+            else if let a = dict["invoice_events"] as? [[String: Any]] { arr = a }
+            else if let a = dict["events"] as? [[String: Any]] { arr = a }
+        } else if let a = obj as? [[String: Any]] {
+            arr = a
+        }
+        return arr.map { mapInvoiceEvent($0) }
+    }
+
+    private func mapInvoiceEvent(_ dict: [String: Any]) -> SuperPDPInvoiceEvent {
+        func s(_ key: String) -> String? {
+            if let v = dict[key] as? String { return v.isEmpty ? nil : v }
+            if let n = dict[key] as? NSNumber { return n.stringValue }
+            return nil
+        }
+        let statusCode = s("status_code") ?? s("status") ?? ""
+        let createdAtStr = s("created_at") ?? s("created")
+        let createdAt = createdAtStr.flatMap { parseISODate($0) }
+        let directionStr = s("direction") ?? "sent"
+        let direction: SuperPDPDirection = directionStr == "received" ? .received : .sent
+        let notes = s("notes") ?? s("note")
+        let id = s("id") ?? UUID().uuidString
+        var raw: [String: String] = [:]
+        for (k, v) in dict {
+            if let sv = v as? String { raw[k] = sv }
+            else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
+            else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
+        }
+        return SuperPDPInvoiceEvent(
+            id: id,
+            statusCode: statusCode,
+            createdAt: createdAt,
+            direction: direction,
+            notes: notes,
+            raw: raw
+        )
+    }
+
+    private func parseISODate(_ str: String) -> Date? {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = fmt.date(from: str) { return d }
+        let fmt2 = ISO8601DateFormatter()
+        return fmt2.date(from: str)
+    }
+
+    public func getSession(credentials: SuperPDPCredentials) async throws -> SuperPDPSession {
+        let token = try await fetchToken(credentials: credentials)
+        let endpoint = trimmedBase(credentials) + "/v1.beta/oauth2_sessions/me"
+        guard let url = URL(string: endpoint) else {
+            throw SuperPDPError.decoding("URL de session invalide : \(endpoint)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw SuperPDPError.decoding("Réponse non HTTP")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        return try parseSession(data: data)
+    }
+
+    private func parseSession(data: Data) throws -> SuperPDPSession {
+        guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            throw SuperPDPError.decoding("JSON session illisible")
+        }
+        let first = (obj["data"] as? [String: Any]) ?? obj
+        func s(_ key: String) -> String? {
+            if let v = first[key] as? String { return v.isEmpty ? nil : v }
+            if let n = first[key] as? NSNumber { return n.stringValue }
+            return nil
+        }
+        let status = s("status") ?? s("state") ?? "unknown"
+        let isAuthorized: Bool = {
+            if let b = first["is_authorized"] as? Bool { return b }
+            if let b = first["authorized"] as? Bool { return b }
+            let st = status.lowercased()
+            return st == "active" || st == "authorized" || st == "verified" || st == "ok"
+        }()
+        let companyNumber = s("company_number") ?? s("number")
+        var raw: [String: String] = [:]
+        for (k, v) in first {
+            if let sv = v as? String { raw[k] = sv }
+            else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
+            else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
+        }
+        return SuperPDPSession(status: status, isAuthorized: isAuthorized, companyNumber: companyNumber, raw: raw)
+    }
+
+    public func searchFrenchDirectory(sirenOrName: String, credentials: SuperPDPCredentials) async throws -> [SuperPDPFrenchCompany] {
+        let query = sirenOrName.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { throw SuperPDPError.emptyQuery }
+        let token = try await fetchToken(credentials: credentials)
+        let base = trimmedBase(credentials)
+        let endpoint = base + "/v1.beta/french_directory/companies?query=" + urlEncode(query)
+        guard let url = URL(string: endpoint) else {
+            throw SuperPDPError.decoding("URL d'annuaire français invalide : \(endpoint)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw SuperPDPError.decoding("Réponse non HTTP")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        return try parseFrenchDirectory(data: data)
+    }
+
+    private func parseFrenchDirectory(data: Data) throws -> [SuperPDPFrenchCompany] {
+        let obj: Any
+        do {
+            obj = try JSONSerialization.jsonObject(with: data, options: [])
+        } catch {
+            throw SuperPDPError.decoding("\(error)")
+        }
+        var arr: [[String: Any]] = []
+        if let dict = obj as? [String: Any] {
+            if let a = dict["data"] as? [[String: Any]] { arr = a }
+            else if let a = dict["companies"] as? [[String: Any]] { arr = a }
+            else if let a = dict["results"] as? [[String: Any]] { arr = a }
+            else if !dict.isEmpty && dict["name"] != nil { arr = [dict] }
+        } else if let a = obj as? [[String: Any]] {
+            arr = a
+        }
+        return arr.map { mapFrenchCompany($0) }
+    }
+
+    private func mapFrenchCompany(_ dict: [String: Any]) -> SuperPDPFrenchCompany {
+        func s(_ key: String) -> String? {
+            if let v = dict[key] as? String { return v.isEmpty ? nil : v }
+            if let n = dict[key] as? NSNumber { return n.stringValue }
+            return nil
+        }
+        let nestedAddr = dict["address"] as? [String: Any]
+        let name = s("name") ?? s("formal_name") ?? s("denomination") ?? s("raison_sociale")
+        let siren = s("siren") ?? s("number")
+        let siret = s("siret")
+        let vat = s("vat_number") ?? s("vat") ?? s("tva_number")
+        let addressLine = nestedAddr.flatMap { ($0["line_1"] as? String) } ?? s("address_line") ?? s("adresse") ?? s("address")
+        let postcode = nestedAddr.flatMap { ($0["postcode"] as? String) } ?? s("postcode") ?? s("zip") ?? s("code_postal")
+        let city = nestedAddr.flatMap { ($0["city"] as? String) } ?? s("city") ?? s("ville") ?? s("commune")
+        let country = nestedAddr.flatMap { ($0["country"] as? String) } ?? s("country") ?? s("pays") ?? "FR"
+        var raw: [String: String] = [:]
+        for (k, v) in dict {
+            if let sv = v as? String { raw[k] = sv }
+            else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
+            else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
+        }
+        return SuperPDPFrenchCompany(
+            name: name, siren: siren, siret: siret, vatNumber: vat,
+            addressLine: addressLine, postcode: postcode, city: city, country: country, raw: raw
+        )
+    }
 }
 
 // MARK: - Conversions
@@ -568,6 +885,23 @@ public extension SuperPDPDirectoryEntry {
             siret: siret,
             endpointID: routingAddress ?? sirenValue,
             endpointSchemeID: routingScheme ?? "0225"
+        )
+    }
+}
+
+public extension SuperPDPFrenchCompany {
+    func toInvoiceParty() -> InvoiceParty {
+        return InvoiceParty(
+            name: name ?? "",
+            street: addressLine ?? "",
+            postcode: postcode ?? "",
+            city: city ?? "",
+            country: country ?? "FR",
+            vatNumber: vatNumber,
+            siren: siren,
+            siret: siret,
+            endpointID: siren,
+            endpointSchemeID: "0225"
         )
     }
 }
