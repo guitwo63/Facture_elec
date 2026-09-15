@@ -1449,13 +1449,13 @@ struct InvoiceEditorView: View {
                             .foregroundColor(Color(hex: invoice.status.hexColor))
                             .font(.caption2)
                         Picker("Statut", selection: $invoice.status) {
-                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                            ForEach(InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin), id: \.self) { s in
                                 Label(s.label, systemImage: s.systemImage).tag(s)
                             }
                         }
                         .labelsHidden()
                         .frame(width: 200)
-                        .help("Statut de la facture (modifiable à tout moment, y compris facture verrouillée)")
+                        .help("Statut de la facture (transitions autorisées par le cycle de vie normé). Admin : tous statuts.)"
                         Button {
                             refreshSuperPDPStatus()
                         } label: {

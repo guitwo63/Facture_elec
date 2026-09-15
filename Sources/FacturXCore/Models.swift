@@ -316,7 +316,31 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         default: return false
         }
     }
-}
+
+    public func allowedTransitions() -> [InvoiceStatus] {
+        switch self {
+        case .draft:
+            return [.issued]
+        case .issued:
+            return [.sentToPDP, .rejected, .cancelled]
+        case .sentToPDP:
+            return [.accepted, .rejected, .cancelled]
+        case .accepted:
+            return [.paid, .rejected, .cancelled]
+        case .rejected:
+            return [.cancelled]
+        case .paid:
+            return [.cancelled]
+        case .cancelled:
+            return []
+        }
+    }
+
+    public static func allowedTransitions(from status: InvoiceStatus, isAdmin: Bool) -> [InvoiceStatus] {
+        let standard = status.allowedTransitions()
+        guard isAdmin else { return standard }
+        return InvoiceStatus.allCases.filter { $0 != status }.sorted { $0.label < $1.label }
+    }
 
 public struct Invoice: Codable, Hashable, Identifiable {
     public var id: UUID
