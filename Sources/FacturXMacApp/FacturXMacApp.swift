@@ -1899,6 +1899,9 @@ struct InvoiceEditorView: View {
                 )
                 if let rid = submission.remoteID, !rid.isEmpty {
                     invoice.superPDPRemoteID = rid
+                    if invoice.status == .issued || invoice.status == .draft {
+                        invoice.status = .sentToPDP
+                    }
                     store.upsert(invoice)
                 }
                 superPDPMessage = "↑ Envoyé à SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
