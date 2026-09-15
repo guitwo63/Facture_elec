@@ -1490,6 +1490,7 @@ struct InvoiceEditorView: View {
                         showInvoicePreview = true
                     } label: { Label("Visualiser", systemImage: "eye") }
                     Button { exportXML() } label: { Label("Exporter XML", systemImage: "chevron.left.forwardslash.chevron.right") }
+                    Button { export() } label: { Label("Générer le Factur-X", systemImage: "doc.text.fill") }
                     Button {
                         let copy = store.duplicate(from: invoice)
                         store.upsert(copy)
@@ -1509,21 +1510,18 @@ struct InvoiceEditorView: View {
                     Label("Autre action", systemImage: "ellipsis.circle")
                 }
                 .buttonStyle(.bordered)
-                .help("Visualiser, exporter XML, dupliquer, copie PDP…")
+                .controlSize(.small)
+                .help("Visualiser, exporter XML, générer le Factur-X, dupliquer, copie PDP…")
                 if invoice.type.isInternalCreditNote {
                     Button("Exporter PDF") { exportPlainPDF() }
                         .buttonStyle(.borderedProminent)
-                } else {
-                    Button("Générer le Factur-X") { export() }
-                        .buttonStyle(.borderedProminent)
-                    if isAdmin {
-                        Button {
-                            depositToSuperPDP()
-                        } label: { Label("Super PDP", systemImage: "paperplane.fill") }
-                            .buttonStyle(.bordered)
-                            .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
-                            .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
-                    }
+                } else if isAdmin {
+                    Button {
+                        depositToSuperPDP()
+                    } label: { Label("Super PDP", systemImage: "paperplane.fill") }
+                        .buttonStyle(.bordered)
+                        .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                        .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
                 }
             }
             .padding(12)
