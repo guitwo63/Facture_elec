@@ -1996,16 +1996,19 @@ struct InvoiceEditorView: View {
         Task {
             do {
                 let service = SuperPDPService()
-                let reported: [[String: Any]] = newStatus == .paid ? invoiceRef.lines.compactMap { line -> [String: Any]? in
-                    let amount = (line.quantity * line.unitPrice) * (1 + line.vatRate / 100)
-                    return [
-                        "amount": String(format: "%.2f", amount),
-                        "currency_code": invoiceRef.currency,
-                        "type_code": "MEN",
-                        "value_percent": String(format: "%.1f", line.vatRate),
-                        "date": Self.pdpDateString(invoiceRef.issueDate)
-                    ]
-                } : nil
+                var reported: [[String: Any]]? = nil
+                if newStatus == .paid {
+                    reported = invoiceRef.lines.compactMap { line -> [String: Any]? in
+                        let amount = (line.quantity * line.unitPrice) * (1 + line.vatRate / 100)
+                        return [
+                            "amount": String(format: "%.2f", amount),
+                            "currency_code": invoiceRef.currency,
+                            "type_code": "MEN",
+                            "value_percent": String(format: "%.1f", line.vatRate),
+                            "date": Self.pdpDateString(invoiceRef.issueDate)
+                        ]
+                    }
+                }
                 try await service.sendInvoiceEvent(remoteID: rid, statusCode: statusCode, credentials: superPDPSettings.credentials, reportedData: reported)
                 superPDPSubmission = SuperPDPInvoiceSubmission(
                     id: UUID().uuidString, remoteID: rid, status: detailLabel,
