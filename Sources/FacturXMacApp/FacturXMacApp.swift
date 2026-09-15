@@ -2522,7 +2522,7 @@ struct InvoiceEditorView: View {
                         Label("Validation SUPER PDP conforme", systemImage: "checkmark.shield.fill")
                             .foregroundStyle(.green)
                     } else {
-                        Label("Validation SUPER PDP non conforme \u2014 \(report.errors.count) erreur(s)", systemImage: "xmark.shield.fill")
+                        Label("Validation SUPER PDP non conforme — \(report.errors.count) erreur(s)", systemImage: "xmark.shield.fill")
                             .foregroundStyle(.red)
                     }
                     Spacer()
