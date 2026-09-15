@@ -106,14 +106,15 @@ L'OpenAPI expose des domaines entiers non couverts par l'app :
 
 ## 4. Recommandation de périmètre pour cette évolution
 
-Étant donné la complexité et le besoin de validation incrémentale, je recommande d'implémenter dans cette PR les **Priorités 1** (bouclage du cycle facture) :
+**Périmètre implémenté dans cette PR (P1 + P2) :**
 
-1. **P1.1** Téléchargement de la copie déposée.
-2. **P2.2** Vérification de session OAuth (diagnostic 403).
-3. **P1.2** Historique des événements de cycle de vie.
-4. **P1.3** Validation pré-dépôt SUPER PDP dans l'éditeur.
+1. **P1.1** Téléchargement de la copie déposée — `SuperPDPService.downloadInvoice` + bouton « Copie PDP ».
+2. **P1.2** Historique des événements de cycle de vie — `SuperPDPService.listInvoiceEvents` + feuille `SuperPDPEventsSheet`.
+3. **P1.3** Validation pré-dépôt SUPER PDP dans l'éditeur — bouton « Valider PDP » + feuille `SuperPDPValidationSheet`.
+4. **P2.1** Annuaire français national — `SuperPDPService.searchFrenchDirectory` + bouton « Annuaire FR » + feuille `SuperPDPFrenchDirectorySheet`.
+5. **P2.2** Vérification de session OAuth (diagnostic 403) — `SuperPDPService.getSession` + bouton « Vérifier la session » dans Réglages.
 
-Les Priorités 2-4 (annuaire français, e-reporting, conversion, mandats) peuvent faire l'objet d'évolutions suivantes une fois validées.
+Les Priorités 3-4 (e-reporting, conversion UBL, mandats, CRUD annuaire) restent des évolutions futures.
 
 ## 5. Détails techniques (implémentation P1)
 
