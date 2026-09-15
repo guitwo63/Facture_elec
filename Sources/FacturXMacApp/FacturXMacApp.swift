@@ -1343,57 +1343,6 @@ struct InvoiceEditorView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
-                HStack(spacing: 4) {
-                    Image(systemName: invoice.status.systemImage)
-                        .foregroundColor(Color(hex: invoice.status.hexColor))
-                        .font(.caption2)
-                    let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
-                    if transitions.isEmpty {
-                        Text(invoice.status.label)
-                            .foregroundStyle(.secondary)
-                            .help("Statut terminal — aucune transition possible.")
-                    } else {
-                        Menu {
-                            Button {
-                            } label: {
-                                Label(invoice.status.label, systemImage: invoice.status.systemImage)
-                            }.disabled(true)
-                            Divider()
-                            ForEach(transitions, id: \.self) { s in
-                                Button {
-                                    invoice.status = s
-                                } label: {
-                                    Label(s.label, systemImage: s.systemImage)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(invoice.status.label).lineLimit(1)
-                                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                        .fixedSize()
-                        .help("Statut actuel : \(invoice.status.label). Transitions autorisées affichées dans le menu.")
-                    }
-                    Button {
-                        refreshSuperPDPStatus()
-                    } label: {
-                        if superPDPSubmitting {
-                            HStack(spacing: 4) {
-                                ProgressView().controlSize(.small)
-                                Text("Statut PDP…")
-                            }
-                        } else {
-                            Label("Statut PDP", systemImage: "antenna.radar")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(superPDPSubmitting
-                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                              || !superPDPSettings.credentials.isConfigured)
-                    .help("Interroger le statut de la facture sur SUPER PDP")
-                }
                 Spacer()
                 if isManuallyLocked && !statusLocked && !isAdmin {
                     Button { showUnlockAlert = true } label: {
@@ -1673,6 +1622,57 @@ struct InvoiceEditorView: View {
                                 .font(.caption)
                             }
                             VStack(alignment: .trailing, spacing: 4) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: invoice.status.systemImage)
+                                        .foregroundColor(Color(hex: invoice.status.hexColor))
+                                        .font(.caption2)
+                                    let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
+                                    if transitions.isEmpty {
+                                        Text(invoice.status.label)
+                                            .foregroundStyle(.secondary)
+                                            .help("Statut terminal — aucune transition possible.")
+                                    } else {
+                                        Menu {
+                                            Button {
+                                            } label: {
+                                                Label(invoice.status.label, systemImage: invoice.status.systemImage)
+                                            }.disabled(true)
+                                            Divider()
+                                            ForEach(transitions, id: \.self) { s in
+                                                Button {
+                                                    invoice.status = s
+                                                } label: {
+                                                    Label(s.label, systemImage: s.systemImage)
+                                                }
+                                            }
+                                        } label: {
+                                            HStack(spacing: 4) {
+                                                Text(invoice.status.label).lineLimit(1)
+                                                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .fixedSize()
+                                        .help("Statut actuel : \(invoice.status.label). Transitions autorisées affichées dans le menu.")
+                                    }
+                                    Button {
+                                        refreshSuperPDPStatus()
+                                    } label: {
+                                        if superPDPSubmitting {
+                                            HStack(spacing: 4) {
+                                                ProgressView().controlSize(.small)
+                                                Text("Statut PDP…")
+                                            }
+                                        } else {
+                                            Label("Statut PDP", systemImage: "antenna.radar")
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .disabled(superPDPSubmitting
+                                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                              || !superPDPSettings.credentials.isConfigured)
+                                    .help("Interroger le statut de la facture sur SUPER PDP")
+                                }
                                 VStack(alignment: .trailing) {
                                 row("Total HT", invoice.lineTotal)
                                 ForEach(invoice.vatBreakdown, id: \.rate) { item in
