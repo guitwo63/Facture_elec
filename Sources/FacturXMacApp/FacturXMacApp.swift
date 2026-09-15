@@ -1450,9 +1450,11 @@ struct InvoiceEditorView: View {
                                 ProgressView().controlSize(.small)
                             } else {
                                 Image(systemName: "antenna.radar")
+                                    .imageScale(.medium)
                             }
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                         .disabled(superPDPSubmitting
                                   || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
                                   || !superPDPSettings.credentials.isConfigured)
