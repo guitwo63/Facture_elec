@@ -1393,7 +1393,7 @@ struct InvoiceEditorView: View {
     @State private var pdpDownloading = false
     @State private var pdpValidating = false
     @State private var pdpValidationReport: SuperPDPValidationReport?
-    @State private var showPDPValidation = false
+    @State private var showPDPValidationPanel = false
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
     private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
@@ -1529,7 +1529,7 @@ struct InvoiceEditorView: View {
             }
             .padding(12)
             Divider()
-            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil {
+            if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil {
                 VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
@@ -1594,6 +1594,10 @@ struct InvoiceEditorView: View {
 
                 if showValidation, let v = validation {
                     validationPanel(v)
+                }
+                if showPDPValidationPanel, let report = pdpValidationReport {
+                    pdpValidationPanel(report)
+                        .onChange(of: invoice.number) { _ in showPDPValidationPanel = false; pdpValidationReport = nil }
                 }
                 }.padding(12)
                 Divider()
@@ -1953,11 +1957,6 @@ struct InvoiceEditorView: View {
             .sheet(isPresented: $showPDPEvents) {
                 SuperPDPEventsSheet(events: pdpEvents, loading: pdpEventsLoading)
             }
-            .sheet(isPresented: $showPDPValidation) {
-                if let report = pdpValidationReport {
-                    SuperPDPValidationSheet(report: report)
-                }
-            }
         }
     }
 
@@ -2285,10 +2284,8 @@ struct InvoiceEditorView: View {
                 let service = SuperPDPService()
                 let report = try await service.validateInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
                 pdpValidationReport = report
-                showPDPValidation = true
-                superPDPMessage = report.isValid
-                    ? "✓ Validation SUPER PDP réussie\(report.warnings.isEmpty ? "" : " (\(report.warnings.count) avertissement(s))")."
-                    : "Validation SUPER PDP échouée : \(report.errors.count) erreur(s)."
+                showPDPValidationPanel = true
+                superPDPMessage = nil
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec validation SUPER PDP : \(e.localizedDescription)"
             } catch {
@@ -2508,6 +2505,53 @@ struct InvoiceEditorView: View {
                                 .foregroundStyle(.orange)
                                 .frame(width: 96, alignment: .leading)
                             Text(br.message)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func pdpValidationPanel(_ report: SuperPDPValidationReport) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    if report.isValid {
+                        Label("Validation SUPER PDP conforme", systemImage: "checkmark.shield.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Label("Validation SUPER PDP non conforme \u2014 \(report.errors.count) erreur(s)", systemImage: "xmark.shield.fill")
+                            .foregroundStyle(.red)
+                    }
+                    Spacer()
+                    Button { showPDPValidationPanel = false } label: {
+                        Image(systemName: "xmark.circle")
+                    }.buttonStyle(.plain)
+                }
+                if !report.errors.isEmpty {
+                    Text("Erreurs :").font(.caption.bold())
+                    ForEach(report.errors, id: \.self) { msg in
+                        HStack(alignment: .top, spacing: 4) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                            Text(msg)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+                if !report.warnings.isEmpty {
+                    if !report.errors.isEmpty { Divider().padding(.vertical, 2) }
+                    Text("Avertissements :").font(.caption.bold())
+                    ForEach(report.warnings, id: \.self) { msg in
+                        HStack(alignment: .top, spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                            Text(msg)
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }
