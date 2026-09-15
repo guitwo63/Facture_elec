@@ -198,6 +198,7 @@ public struct OptionalFieldTemplate: Identifiable, Hashable {
 
 public enum OptionalFieldCatalogue {
     public static let header: [OptionalFieldTemplate] = [
+        OptionalFieldTemplate("BT-10", "Ref. acheteur", "ram:BuyerReference", .header, "BT-10 - Reference acheteur (BuyerReference). Reference de routage/traitement attribuee par l'acheteur (ex. Leitweg-ID), distincte du numero de commande."),
         OptionalFieldTemplate("BT-11", "Ref. projet", "ram:SpecifiedProcuringProject/ram:ID", .header, "BT-11 - Reference du projet d'achat (SpecifiedProcuringProject/ID)."),
         OptionalFieldTemplate("BT-17", "Ref. contrat", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .header, "BT-17 - Reference du contrat."),
         OptionalFieldTemplate("BT-18", "Ref. appel d'offres", "ram:TendererReferencedDocument/ram:IssuerAssignedID", .header, "BT-18 - Reference de l'appel d'offres."),
@@ -450,7 +451,6 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var seller: InvoiceParty
     public var buyer: InvoiceParty
     public var companyID: UUID?
-    public var buyerReference: String?
     public var purchaseOrderRef: String?
     public var precedingInvoiceRef: String?
     public var precedingInvoiceDate: Date?
@@ -509,7 +509,6 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.seller = seller
         self.buyer = buyer
         self.companyID = companyID
-        self.buyerReference = buyerReference
         self.purchaseOrderRef = purchaseOrderRef
         self.precedingInvoiceRef = precedingInvoiceRef
         self.precedingInvoiceDate = precedingInvoiceDate
@@ -525,6 +524,12 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.prepaidAmount = prepaidAmount
         self.superPDPRemoteID = superPDPRemoteID
         self.optionalFields = optionalFields
+        self.buyerReference = buyerReference
+    }
+
+    public var buyerReference: String? {
+        get { referenceField("ram:BuyerReference") }
+        set { setReferenceField("ram:BuyerReference", newValue) }
     }
 
     public var contractRef: String? {
@@ -587,7 +592,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         seller = try c.decodeIfPresent(InvoiceParty.self, forKey: .seller) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         buyer = try c.decodeIfPresent(InvoiceParty.self, forKey: .buyer) ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
-        buyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
+        let legacyBuyerReference = try c.decodeIfPresent(String.self, forKey: .buyerReference)
         purchaseOrderRef = try c.decodeIfPresent(String.self, forKey: .purchaseOrderRef)
         precedingInvoiceRef = try c.decodeIfPresent(String.self, forKey: .precedingInvoiceRef)
         precedingInvoiceDate = try c.decodeIfPresent(Date.self, forKey: .precedingInvoiceDate)
@@ -603,6 +608,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
         superPDPRemoteID = try c.decodeIfPresent(String.self, forKey: .superPDPRemoteID)
         optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
+        migrateReference("ram:BuyerReference", legacyBuyerReference)
         migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
         migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))
         migrateReference("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .receivingAdviceRef))

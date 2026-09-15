@@ -1722,14 +1722,8 @@ struct InvoiceEditorView: View {
                                     }
                                 }
                                 HStack {
-                                    Picker("Profil Factur-X", selection: $invoice.profile) {
-                                        ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                                    }
                                     fieldHighlight(NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160), forRuleIDs: ["BR-5"])
-                                    HStack(spacing: 3) {
-                                        TextField("Référence acheteur (BT-10)", text: Binding($invoice.buyerReference, replacingNilWith: "")).frame(width: 220)
-                                        InfoBadge(text: "BT-10 — Référence acheteur (ram:BuyerReference). Distincte du BT-13 : référence de routage/traitement attribuée par l'acheteur (ex. Leitweg-ID), pas le numéro de commande.")
-                                    }
+                                    InfoBadge(text: "BT-5 — Code de la devise (ram:TaxCurrencyCode / ram:InvoiceCurrencyCode).")
                                 }
                                 HStack {
                                     HStack(spacing: 3) {
@@ -4248,6 +4242,20 @@ struct SocietiesAdminView: View {
                         } label: { Label("Supprimer", systemImage: "trash.fill") }
                             .buttonStyle(.bordered)
                         Spacer()
+                        Text("Profil Factur-X : ").font(.caption)
+                        Picker("Profil Factur-X", selection: Binding(
+                            get: { entry.profile },
+                            set: { newProfile in
+                                var e = entry
+                                e.profile = newProfile
+                                directory.upsert(e)
+                            }
+                        )) {
+                            ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 140)
+                        .help("Profil Factur-X par défaut des factures émises par cette société (hérité à la création).")
                     }.padding(.top, 4)
                 }
             }
