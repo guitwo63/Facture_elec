@@ -1109,10 +1109,7 @@ struct InvoicesTabView: View {
         Binding(
             get: { store.invoices.first(where: { $0.id == id }) ?? Invoice(number: "", seller: store.myCompany, buyer: .init(name: "", street: "", postcode: "", city: "")) },
             set: { newValue in
-                if let idx = store.invoices.firstIndex(where: { $0.id == id }) {
-                    store.invoices[idx] = newValue
-                    store.save()
-                }
+                store.upsert(newValue)
             }
         )
     }
@@ -1374,6 +1371,20 @@ struct InvoiceEditorView: View {
                         .labelsHidden()
                         .frame(width: 200)
                         .help("Statut de la facture (modifiable à tout moment, y compris facture verrouillée)")
+                        Button {
+                            refreshSuperPDPStatus()
+                        } label: {
+                            if superPDPSubmitting {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(superPDPSubmitting
+                                  || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                  || !superPDPSettings.credentials.isConfigured)
+                        .help("Interroger le statut de la facture sur SUPER PDP")
                     }
                 }
                 GroupBox("En-tête") {
@@ -1421,7 +1432,7 @@ struct InvoiceEditorView: View {
                                 }
                                 HStack(spacing: 3) {
                                     TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
-                                    InfoBadge(text: "BT-13 — Référence de la commande acheteur. Remontée en haut de la facture.")
+                                    InfoBadge(text: "BT-13 — Numéro de commande acheteur (BuyerOrderReferencedDocument/IssuerAssignedID). Distinct du BT-10 : c'est le numéro du bon de commande, pas la référence de routage.")
                                 }
                                 if invoice.type.requiresPrecedingInvoice || invoice.type == .internalCreditNote {
                                     VStack(alignment: .leading, spacing: 2) {
@@ -1488,7 +1499,10 @@ struct InvoiceEditorView: View {
                                         ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                                     }
                                     fieldHighlight(NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160), forRuleIDs: ["BR-5"])
-                                    TextField("Référence acheteur", text: Binding($invoice.buyerReference, replacingNilWith: ""))
+                                    HStack(spacing: 3) {
+                                        TextField("Référence acheteur (BT-10)", text: Binding($invoice.buyerReference, replacingNilWith: "")).frame(width: 220)
+                                        InfoBadge(text: "BT-10 — Référence acheteur (ram:BuyerReference). Distincte du BT-13 : référence de routage/traitement attribuée par l'acheteur (ex. Leitweg-ID), pas le numéro de commande.")
+                                    }
                                 }
                                 HStack {
                                     HStack(spacing: 3) {
@@ -1654,16 +1668,8 @@ struct InvoiceEditorView: View {
                     onCancel: { showPrecedingInvoicePicker = false }
                 )
             }
-            .onChange(of: invoice.status) { oldStatus in
+            .onChange(of: invoice.status) { _ in
                 store.upsert(invoice)
-                auth.audit.recordStatusChange(
-                    actor: auth.currentUser?.username ?? "system",
-                    objectType: .invoice,
-                    objectCode: invoice.number,
-                    statusFrom: oldStatus.rawValue,
-                    statusTo: invoice.status.rawValue,
-                    details: "Statut facture modifié"
-                )
             }
         }
     }
@@ -1792,6 +1798,10 @@ struct InvoiceEditorView: View {
                 let service = SuperPDPService()
                 let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
                 superPDPSubmission = submission
+                if let rid = submission.remoteID, !rid.isEmpty {
+                    invoice.superPDPRemoteID = rid
+                    store.upsert(invoice)
+                }
                 superPDPMessage = "Facture déposée sur SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec dépôt SUPER PDP : \(e.localizedDescription)"
@@ -1803,7 +1813,7 @@ struct InvoiceEditorView: View {
     }
 
     private func refreshSuperPDPStatus() {
-        guard let rid = superPDPSubmission?.remoteID, !rid.isEmpty else { return }
+        guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         superPDPSubmitting = true
         Task {
             do {
@@ -3408,7 +3418,6 @@ struct ApplicationSettingsView: View {
     @State private var dinumExpanded = true
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = false
-    @State private var appearanceExpanded = true
     @State private var tagsExpanded = true
     @State private var numberingExpanded = true
     @State private var newTagName = ""
@@ -3592,33 +3601,6 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("SUPER PDP (dépôt + annuaire)", systemImage: "paperplane.circle")
-                        .font(.headline)
-                }
-
-                DisclosureGroup(isExpanded: $appearanceExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Couleurs des étiquettes de type de tiers (Client / Fournisseur / Client-Fournisseur).")
-                            .font(.caption).foregroundStyle(.secondary)
-                        ForEach(DirectoryEntryKind.allCases, id: \.self) { kind in
-                            HStack {
-                                Text(kind.label).frame(width: 140, alignment: .leading)
-                                ColorPicker(selection: Binding(
-                                    get: { Color(hex: kindColors.hexColor(for: kind)) },
-                                    set: { newColor in
-                                        kindColors.colors[kind] = hexString(from: newColor)
-                                        kindColors.save()
-                                    }
-                                )) {
-                                    Text(kind.label)
-                                }
-                                .labelsHidden()
-                                Text(kindColors.hexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
-                                Spacer()
-                            }
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Apparence (couleurs des types)", systemImage: "paintpalette")
                         .font(.headline)
                 }
 

@@ -348,6 +348,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var legalNotePMD: String
     public var legalNoteAAB: String
     public var prepaidAmount: Double
+    public var superPDPRemoteID: String?
 
     public init(
         id: UUID = UUID(),
@@ -378,7 +379,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNotePMT: String = "Indemnité forfaitaire pour frais de recouvrement due à compter du 1er jour de retard : 40 EUR",
         legalNotePMD: String = "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur",
         legalNoteAAB: String = "Escompte pour paiement anticipé : aucun",
-        prepaidAmount: Double = 0
+        prepaidAmount: Double = 0,
+        superPDPRemoteID: String? = nil
     ) {
         self.id = id
         self.number = number
@@ -409,12 +411,13 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.legalNotePMD = legalNotePMD
         self.legalNoteAAB = legalNoteAAB
         self.prepaidAmount = prepaidAmount
+        self.superPDPRemoteID = superPDPRemoteID
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, dueDate, currency, profile, seller, buyer, companyID
         case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
-        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount
+        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID
     }
 
     public init(from decoder: Decoder) throws {
@@ -448,6 +451,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNotePMD = try c.decodeIfPresent(String.self, forKey: .legalNotePMD) ?? "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur"
         legalNoteAAB = try c.decodeIfPresent(String.self, forKey: .legalNoteAAB) ?? "Escompte pour paiement anticipé : aucun"
         prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
+        superPDPRemoteID = try c.decodeIfPresent(String.self, forKey: .superPDPRemoteID)
     }
 
     public var netToPay: Double {
