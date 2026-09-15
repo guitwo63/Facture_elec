@@ -353,7 +353,7 @@ struct UserDetailCard: View {
                 if user.isAdmin {
                     Text("L'administrateur accède à toutes les sociétés.").font(.caption).foregroundStyle(.secondary)
                 } else if auth.availableSocieties().isEmpty {
-                    Text("Aucune société (fiche fournisseur) définie dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
+                    Text("Aucune société (fiche société) définie dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(auth.availableSocieties()) { s in
@@ -477,9 +477,9 @@ struct UserEditorSheet: View {
                 }
                 if selectedRoles.contains(.comptable) || selectedRoles.contains(.acheteur) {
                     Divider()
-                    Text("Sociétés du périmètre (fiches fournisseurs de l'annuaire)").font(.headline)
+                    Text("Sociétés du périmètre (fiches sociétés de l'annuaire)").font(.headline)
                     if availableSocieties.isEmpty {
-                        Text("Aucune société disponible. Créez d'abord une fiche fournisseur dans l'onglet Annuaire.")
+                        Text("Aucune société disponible. Créez d'abord une fiche société dans l'onglet Annuaire.")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
@@ -547,7 +547,7 @@ struct UserEditorSheet: View {
     }
 
     private var availableSocieties: [DirectoryEntry] {
-        directory.entries.filter { !$0.isArchived && ($0.kind == .fournisseur || $0.kind == .both) }
+        directory.entries.filter { !$0.isArchived && ($0.kind == .societe || $0.kind == .both) }
     }
 
     private var validationError: String? {
@@ -611,7 +611,7 @@ struct ProfileSettingsView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Émetteur par défaut").font(.headline)
-                            Text("L’émetteur par défaut est un lien vers une fiche fournisseur de l’annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
+                            Text("L’émetteur par défaut est un lien vers une fiche société de l’annuaire. Les modifications de la fiche (IBAN, BIC, conditions de paiement…) sont reprises automatiquement à la création de chaque facture.")
                                 .font(.caption).foregroundStyle(.secondary)
                             let linkedEntry: DirectoryEntry? = (user.defaultSellerEntryID ?? store.defaultSellerEntryID).flatMap { id in directory.entries.first { $0.id == id } }
                             if let entry = linkedEntry {
@@ -645,7 +645,7 @@ struct ProfileSettingsView: View {
                                 Text("Aucun émetteur par défaut défini.").font(.caption).foregroundStyle(.tertiary)
                                 Button {
                                     showSellerPicker = true
-                                } label: { Label("Choisir un fournisseur dans l’annuaire", systemImage: "person.crop.circle.badge.plus") }
+                                } label: { Label("Choisir une société dans l’annuaire", systemImage: "person.crop.circle.badge.plus") }
                                     .buttonStyle(.bordered)
                             }
                         }.padding(8).frame(maxWidth: .infinity, alignment: .leading)

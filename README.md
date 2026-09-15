@@ -41,7 +41,7 @@ L'application intègre une connexion par **identifiant / mot de passe** (hachage
 - **Administrateur** : accès à toutes les factures et à la **Gestion utilisateurs** (bouton à droite de la barre d'outils).
 - **Comptable client** : ne voit et ne crée que les factures **rattachées à une des sociétés de son périmètre**.
 
-Le **périmètre** est fondé sur la **structure des tiers** de l'annuaire : une société du périmètre est une **fiche fournisseur** (`DirectoryEntry`) de l'annuaire. À la création d'un comptable, on lui associe une ou plusieurs fiches fournisseurs ; chaque facture est rattachée à une société (`Invoice.companyID`) et le sélecteur d'émetteur ne propose au comptable que les fournisseurs de son périmètre.
+Le **périmètre** est fondé sur la **structure des tiers** de l'annuaire : une société du périmètre est une **fiche société** (`DirectoryEntry`) de l'annuaire. À la création d'un comptable, on lui associe une ou plusieurs fiches sociétés ; chaque facture est rattachée à une société (`Invoice.companyID`) et le sélecteur d'émetteur ne propose au comptable que les sociétés de son périmètre.
 
 Un **compte admin par défaut** (`[email protected]` / `admin`) est créé au premier lancement — **à modifier dès la première connexion**. L'identifiant d'un utilisateur doit être une **adresse e-mail** valide.
 
@@ -119,7 +119,7 @@ La réforme française de la facturation électronique impose, à partir de 2026
 
 L'application intègre un **module de commandes** au format **Order-X** (profil **COMFORT**), accessible via l'onglet **« Commandes »** (structuré comme l'onglet Factures).
 
-Une commande Order-X est un **PDF/A-3** contenant un fichier **XML Cross Industry Order (CIO)** embarqué sous le nom `order-x.xml` avec `/AFRelationship /Alternative`, accompagné des métadonnées XMP (`fx:DocumentType = ORDER`). Le **profil ventes** modélise une commande de ventes : l'**acheteur** émet une commande (TypeCode `220`) à destination du **fournisseur**, en indiquant les lignes, la devise, et la date de livraison souhaitée.
+Une commande Order-X est un **PDF/A-3** contenant un fichier **XML Cross Industry Order (CIO)** embarqué sous le nom `order-x.xml` avec `/AFRelationship /Alternative`, accompagné des métadonnées XMP (`fx:DocumentType = ORDER`). Le **profil ventes** modélise une commande de ventes : l'**acheteur** émet une commande (TypeCode `220`) à destination de la **société**, en indiquant les lignes, la devise, et la date de livraison souhaitée.
 
 ### Conformité Order-X
 
@@ -147,7 +147,7 @@ Tests/FacturXCoreTests/
 
 ### Utilisation
 
-1. Sélectionnez l'**acheteur** (émetteur de la commande) et le **fournisseur** (destinataire) via les annuaires réutilisés.
+1. Sélectionnez l'**acheteur** (émetteur de la commande) et la **société** (destinataire) via les annuaires réutilisés.
 2. Ajoutez les lignes (désignation, quantité, unité, prix unitaire HT, taux TVA) et la **date de livraison souhaitée**.
 3. Choisissez le **TypeCode** (`220` commande par défaut) et les références (devis, commande-cadre, etc.).
 4. Cliquez **« Valider »** pour vérifier la conformité de la commande, puis **« Générer l'Order-X »** pour produire le PDF hybride.

@@ -2,22 +2,30 @@ import Foundation
 
 public enum DirectoryEntryKind: String, Codable, CaseIterable {
     case client
-    case fournisseur
+    case societe
     case both
 
     public var label: String {
         switch self {
         case .client: return "Client"
-        case .fournisseur: return "Fournisseur"
-        case .both: return "Client / Fournisseur"
+        case .societe: return "Société"
+        case .both: return "Client / Société"
         }
     }
 
     public var defaultHexColor: String {
         switch self {
         case .client: return "2A6EBB"
-        case .fournisseur: return "2E8B57"
+        case .societe: return "2E8B57"
         case .both: return "8A4FBD"
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "fournisseur": self = .societe
+        default: self = DirectoryEntryKind(rawValue: raw) ?? .client
         }
     }
 }
@@ -451,7 +459,7 @@ public final class KindColorStore: ObservableObject {
     public init() {
         self.colors = [
             .client: DirectoryEntryKind.client.defaultHexColor,
-            .fournisseur: DirectoryEntryKind.fournisseur.defaultHexColor,
+            .societe: DirectoryEntryKind.societe.defaultHexColor,
             .both: DirectoryEntryKind.both.defaultHexColor,
         ]
         load()
@@ -462,7 +470,7 @@ public final class KindColorStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
             colors = [
                 .client: decoded["client"] ?? DirectoryEntryKind.client.defaultHexColor,
-                .fournisseur: decoded["fournisseur"] ?? DirectoryEntryKind.fournisseur.defaultHexColor,
+                .societe: decoded["societe"] ?? decoded["fournisseur"] ?? DirectoryEntryKind.societe.defaultHexColor,
                 .both: decoded["both"] ?? DirectoryEntryKind.both.defaultHexColor,
             ]
         }
@@ -471,7 +479,7 @@ public final class KindColorStore: ObservableObject {
     public func save() {
         let dict = [
             "client": colors[.client] ?? DirectoryEntryKind.client.defaultHexColor,
-            "fournisseur": colors[.fournisseur] ?? DirectoryEntryKind.fournisseur.defaultHexColor,
+            "societe": colors[.societe] ?? DirectoryEntryKind.societe.defaultHexColor,
             "both": colors[.both] ?? DirectoryEntryKind.both.defaultHexColor,
         ]
         if let data = try? JSONEncoder().encode(dict) {

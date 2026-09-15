@@ -233,7 +233,7 @@ public enum AuthError: Error, LocalizedError {
         case .inactiveUser: return "Ce compte est désactivé."
         case .duplicateUsername: return "Cet identifiant existe déjà."
         case .emptyPassword: return "Le mot de passe ne peut pas être vide."
-        case .missingSociety: return "Un utilisateur non-administrateur doit être associé à au moins une société (fiche fournisseur de l'annuaire)."
+        case .missingSociety: return "Un utilisateur non-administrateur doit être associé à au moins une société (fiche société de l'annuaire)."
         case .invalidEmail: return "L'identifiant doit être une adresse e-mail valide."
         case .lockedOut(let retryAt):
             let f = DateFormatter()
@@ -664,7 +664,7 @@ public final class AuthStore: ObservableObject {
     // MARK: - Périmètre basé sur l'annuaire (DirectoryEntry)
 
     private func allSocietyEntries(in directory: PartyDirectory) -> [DirectoryEntry] {
-        directory.entries.filter { $0.kind == .fournisseur || $0.kind == .both }
+        directory.entries.filter { $0.kind == .societe || $0.kind == .both }
     }
 
     public func availableSocieties() -> [DirectoryEntry] {

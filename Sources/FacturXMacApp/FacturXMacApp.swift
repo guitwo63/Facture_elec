@@ -2289,7 +2289,7 @@ struct PartySection: View {
     enum Role {
         case seller, buyer
         var title: String { self == .seller ? "Émetteur" : "Destinataire" }
-        var defaultKind: DirectoryEntryKind { self == .seller ? .fournisseur : .client }
+        var defaultKind: DirectoryEntryKind { self == .seller ? .societe : .client }
     }
 
     @Binding var party: InvoiceParty
@@ -2335,7 +2335,7 @@ struct PartySection: View {
                 Spacer()
             }
 
-            PartyEditorView(party: $party, isFournisseur: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showSuperPDPSearch) {
@@ -2691,14 +2691,14 @@ struct DirectoryView: View {
 
     private var scope: Set<UUID>? { auth.visibleInvoiceCompanyIDs(for: auth.currentUser) }
 
-    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
+    private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var base = directory.entries.filter { showArchived || !$0.isArchived }
         if let scope = scope {
             base = base.filter { entry in
-                if entry.kind == .fournisseur { return scope.contains(entry.id) }
+                if entry.kind == .societe { return scope.contains(entry.id) }
                 if entry.kind == .both { return scope.contains(entry.id) }
                 if let cid = entry.companyID { return scope.contains(cid) }
                 return false
@@ -2823,7 +2823,7 @@ struct DirectoryView: View {
                                     if selectedEntry?.id == entry.id { selectedEntry = nil }
                                 } label: { Label("Supprimer", systemImage: "trash") }
                             } else {
-                                Text("Fournisseur : modification réservée à l'administrateur")
+                                Text("Société : modification réservée à l'administrateur")
                             }
                         }
                     }
@@ -2882,7 +2882,7 @@ struct DirectoryView: View {
     }
 
     private func canEditEntry(_ entry: DirectoryEntry) -> Bool {
-        if entry.kind == .fournisseur || entry.kind == .both { return canManageFournisseurs }
+        if entry.kind == .societe || entry.kind == .both { return canManageSocietes }
         return true
     }
 
@@ -3277,10 +3277,10 @@ struct DirectoryEditorView: View {
         return isEditing ? "Modifier : \(entry.party.name)" : "Nouveau tiers : \(entry.party.name)"
     }
 
-    private var canManageFournisseurs: Bool { auth.currentUser?.isAdmin == true }
+    private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     private var availableKinds: [DirectoryEntryKind] {
-        if canManageFournisseurs { return DirectoryEntryKind.allCases }
+        if canManageSocietes { return DirectoryEntryKind.allCases }
         return [.client]
     }
 
@@ -3326,7 +3326,7 @@ struct DirectoryEditorView: View {
             Picker("Type", selection: $entry.kind) {
                 ForEach(availableKinds, id: \.self) { Text($0.label).tag($0) }
             }.pickerStyle(.segmented)
-            .disabled(!canManageFournisseurs && entry.kind == .fournisseur)
+            .disabled(!canManageSocietes && entry.kind == .societe)
 
             if entry.kind == .client || entry.kind == .both {
                 GroupBox("Société (périmètre)") {
@@ -3347,7 +3347,7 @@ struct DirectoryEditorView: View {
             }
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isFournisseur: entry.kind == .fournisseur || entry.kind == .both)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kind == .societe || entry.kind == .both)
             }
 
             if !tagStore.tags.isEmpty {
@@ -4114,13 +4114,13 @@ struct ApplicationSettingsView: View {
 
                 DisclosureGroup(isExpanded: $logosExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Associez un logo (PNG, JPEG ou TIFF) à chaque fournisseur émetteur. Le logo est affiché en en-tête du PDF lisible des factures émises par ce fournisseur.")
+                        Text("Associez un logo (PNG, JPEG ou TIFF) à chaque société émettrice. Le logo est affiché en en-tête du PDF lisible des factures émises par cette société.")
                             .font(.caption).foregroundStyle(.secondary)
-                        let fournisseurs = directory.entries.filter { ($0.kind == .fournisseur || $0.kind == .both) && !$0.isArchived }
-                        if fournisseurs.isEmpty {
-                            Text("Aucun fournisseur dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
+                        let societes = directory.entries.filter { ($0.kind == .societe || $0.kind == .both) && !$0.isArchived }
+                        if societes.isEmpty {
+                            Text("Aucune société dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
                         } else {
-                            ForEach(fournisseurs, id: \.id) { entry in
+                            ForEach(societes, id: \.id) { entry in
                                 HStack(spacing: 10) {
                                     if let data = entry.logoData, let img = NSImage(data: data) {
                                         Image(nsImage: img)
@@ -4161,7 +4161,7 @@ struct ApplicationSettingsView: View {
                         }
                     }.padding(8)
                 } label: {
-                    Label("Logos des fournisseurs", systemImage: "photo.on.rectangle")
+                    Label("Logos des sociétés", systemImage: "photo.on.rectangle")
                         .font(.headline)
                 }
 
@@ -5070,7 +5070,7 @@ struct PartyEditorView: View {
     @Binding var routingAddresses: [PartyRoutingAddress]
     @Binding var contacts: [PartyContact]
     var showWebButton: Bool
-    var isFournisseur: Bool = false
+    var isSociete: Bool = false
     var hideEmail: Bool = false
     var isMultiContact: Bool
     var directory: PartyDirectory?
@@ -5088,10 +5088,10 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isFournisseur: Bool = false, hideEmail: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
-        self.isFournisseur = isFournisseur
+        self.isSociete = isSociete
         self.hideEmail = hideEmail
         self.isMultiContact = contacts != nil
         self.directory = directory
@@ -5305,7 +5305,7 @@ struct PartyEditorView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            if isFournisseur {
+            if isSociete {
                 DisclosureGroup("Coordonnées bancaires & conditions de paiement") {
                     VStack(alignment: .leading, spacing: 6) {
                         TextField("IBAN", text: Binding($party.iban, replacingNilWith: ""))
@@ -5585,8 +5585,8 @@ struct NormRefPicker: View {
 struct OrderPartySection: View {
     enum Role {
         case buyer, seller
-        var title: String { self == .buyer ? "Acheteur" : "Fournisseur" }
-        var defaultKind: DirectoryEntryKind { self == .buyer ? .client : .fournisseur }
+        var title: String { self == .buyer ? "Acheteur" : "Société" }
+        var defaultKind: DirectoryEntryKind { self == .buyer ? .client : .societe }
     }
 
     @Binding var party: InvoiceParty
@@ -5607,7 +5607,7 @@ struct OrderPartySection: View {
                 Spacer()
             }
 
-            PartyEditorView(party: $party, isFournisseur: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -6281,9 +6281,9 @@ extension Binding {
     }
 }
 
-/// Édition du logo d'une fiche tiers (fournisseur). Le logo est persisté
+/// Édition du logo d'une fiche tiers (société). Le logo est persisté
 /// sur le DirectoryEntry et réutilisé automatiquement en en-tête du PDF
-/// des factures émises par ce fournisseur.
+/// des factures émises par cette société.
 struct PartyLogoEditor: View {
     let entry: DirectoryEntry
     @EnvironmentObject var directory: PartyDirectory
@@ -6294,7 +6294,7 @@ struct PartyLogoEditor: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("Logo « \(entry.displayName) »").font(.headline)
-            Text("Image (PNG, JPEG ou TIFF) affichée en en-tête du PDF lisible des factures émises par ce fournisseur. Le logo n'est pas embarqué dans le XML Factur-X.")
+            Text("Image (PNG, JPEG ou TIFF) affichée en en-tête du PDF lisible des factures émises par cette société. Le logo n'est pas embarqué dans le XML Factur-X.")
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
             if let data = currentLogo, let img = NSImage(data: data) {
@@ -6309,7 +6309,7 @@ struct PartyLogoEditor: View {
                 Image(systemName: "photo")
                     .font(.system(size: 40))
                     .foregroundStyle(.secondary)
-                Text("Aucun logo pour ce fournisseur").font(.caption).foregroundStyle(.secondary)
+                Text("Aucun logo pour cette société").font(.caption).foregroundStyle(.secondary)
             }
 
             HStack {
