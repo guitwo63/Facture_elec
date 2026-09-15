@@ -3384,6 +3384,7 @@ struct SettingsTabView: View {
                     Text("Tables").tag(1)
                     Text("Application").tag(2)
                     Text("Journal").tag(3)
+                    Text("Données").tag(4)
                 }
             }
             .pickerStyle(.segmented)
@@ -3396,6 +3397,8 @@ struct SettingsTabView: View {
                 ValueTablesView()
             case 3:
                 AuditLogView()
+            case 4:
+                DataAdminView()
             default:
                 ApplicationSettingsView()
             }
