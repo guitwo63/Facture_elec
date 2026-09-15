@@ -898,18 +898,17 @@ struct InvoicesTabView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 HStack {
-                    Menu {
-                        Button {
-                            let draft = store.newDraft(companyID: defaultCompanyID(),
-                                                       preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
-                            store.upsert(draft)
-                            selectedID = draft.id
-                        } label: { Label("Facture vierge", systemImage: "doc") }
-                        Button {
-                            showOrderPicker = true
-                        } label: { Label("Facture depuis une commande", systemImage: "cart") }
+                    Button {
+                        let draft = store.newDraft(companyID: defaultCompanyID(),
+                                                   preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
+                        store.upsert(draft)
+                        selectedID = draft.id
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
+                    Button {
+                        showOrderPicker = true
+                    } label: { Label("Depuis une commande", systemImage: "cart") }
+                        .buttonStyle(.bordered)
                     Text("Factures").font(.title2.bold())
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
