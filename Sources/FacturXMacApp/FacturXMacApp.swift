@@ -1264,6 +1264,86 @@ struct InvoicesTabView: View {
     }
 }
 
+struct OptionalFieldsSection: View {
+    @Binding var fields: [OptionalField]
+    let location: OptionalFieldLocation
+    var locked: Bool = false
+
+    private var templates: [OptionalFieldTemplate] { OptionalFieldCatalogue.templates(for: location) }
+    private var title: String { location == .header ? "Champs optionnels (entete)" : "Champs optionnels (ligne)" }
+
+    private var curatedTagNames: Set<String> {
+        Set(templates.map { $0.tagName })
+    }
+
+    var body: some View {
+        DisclosureGroup(title) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(templates) { tpl in
+                    curatedRow(for: tpl)
+                }
+                Divider()
+                Text("Champs libres").font(.caption.bold())
+                ForEach($fields) { $field in
+                    if !curatedTagNames.contains(field.wrappedValue.tagName) {
+                        freeRow(field: $field)
+                    }
+                }
+                Button {
+                    fields.append(OptionalField(tagName: "", value: ""))
+                } label: {
+                    Label("Ajouter un champ libre", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .disabled(locked)
+            }
+            .padding(.top, 4)
+        }
+        .font(.caption)
+        .disabled(locked)
+    }
+
+    @ViewBuilder
+    private func curatedRow(for tpl: OptionalFieldTemplate) -> some View {
+        let binding = Binding<String>(
+            get: { fields.first(where: { $0.tagName == tpl.tagName })?.value ?? "" },
+            set: { newValue in
+                if let idx = fields.firstIndex(where: { $0.tagName == tpl.tagName }) {
+                    if newValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                        fields.remove(at: idx)
+                    } else {
+                        fields[idx].value = newValue
+                    }
+                } else if !newValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                    fields.append(OptionalField(tagName: tpl.tagName, value: newValue))
+                }
+            }
+        )
+        HStack(spacing: 4) {
+            Text(tpl.bt).font(.caption2.bold()).foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
+            Text(tpl.tagName).font(.caption2.monospaced()).frame(width: 300, alignment: .leading)
+            TextField(tpl.label, text: binding).frame(maxWidth: .infinity)
+            InfoBadge(text: tpl.help)
+        }
+    }
+
+    @ViewBuilder
+    private func freeRow(field: Binding<OptionalField>) -> some View {
+        HStack(spacing: 4) {
+            TextField("Balise (ex. ram:...)", text: field.tagName).frame(width: 240)
+            TextField("Valeur", text: field.value).frame(maxWidth: .infinity)
+            Button {
+                if let idx = fields.firstIndex(where: { $0.id == field.wrappedValue.id }) {
+                    fields.remove(at: idx)
+                }
+            } label: {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
 struct InvoiceEditorView: View {
     @Binding var invoice: Invoice
     @EnvironmentObject var store: InvoiceStore
@@ -1619,6 +1699,7 @@ struct InvoiceEditorView: View {
                                         }
                                     }
                                 }
+                                OptionalFieldsSection(fields: $invoice.optionalFields, location: .header, locked: fieldLocked)
                                 .font(.caption)
                             }
                             VStack(alignment: .trailing, spacing: 4) {
@@ -1743,6 +1824,8 @@ struct InvoiceEditorView: View {
                                     Image(systemName: "minus.circle")
                                 }
                             }
+                            OptionalFieldsSection(fields: $line.optionalFields, location: .line, locked: fieldLocked)
+                                .padding(.leading, 4)
                         }
                         Button {
                             invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: invoice.lines.last?.vatRate ?? 20))

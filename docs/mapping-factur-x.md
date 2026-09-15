@@ -129,3 +129,20 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 - **internalCreditNote** (INT) : émis en `381` (avoir) dans le CII pour la conformité.
 - **TotalPrepaidAmount** : doit suivre `GrandTotalAmount` dans l'ordre du XSD (sinon erreur de validation).
 - Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-12/13/53/CO-16) ne sont pas mappées à un champ d'encadré.
+
+
+## Champs optionnels EN 16931 (catalogue + champs libres)
+
+La section condensee "Champs optionnels" (entete + ligne) permet de saisir des champs optionnels du schema EN 16931 non couverts par les champs dedies. Chaque entree couple un nom de balise CII et une valeur. Les champs du catalogue prdefini sont emis dans le CII a leur position conforme ; les champs libres sont stockes et affiches mais non emis dans le XML (emission best-effort a venir).
+
+| Champ optionnel | Balise CII | BT/BG | Position CII | Emission |
+|---|---|---|---|---|
+| Ref. projet | `ram:SpecifiedProcuringProject/ram:ID` | BT-11 | `ApplicableHeaderTradeAgreement/SpecifiedProcuringProject/ID` | catalogue (conforme) |
+| ID produit vendeur | `ram:GlobalID` (schemeID=0160) | BT-155 | `IncludedSupplyChainTradeLineItem/SpecifiedTradeProduct/GlobalID` | catalogue (conforme, schemeID requis) |
+| Ref. contrat ligne | `ram:ContractReferencedDocument/ram:IssuerAssignedID` | BT-133 | `SpecifiedLineTradeAgreement/ContractReferencedDocument/IssuerAssignedID` | catalogue (avertissement CII-SR-110) |
+| Ref. commande ligne | `ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID` | BT-134 | `SpecifiedLineTradeAgreement/BuyerOrderReferencedDocument/IssuerAssignedID` | catalogue (avertissement CII-SR-108) |
+
+**Notes d'implementation** :
+- Les champs optionnels sont persistes sur `Invoice.optionalFields` et `InvoiceLine.optionalFields` (tableaux `OptionalField`, `Codable`, migration via `decodeIfPresent` -> `[]`).
+- `GlobalID` emet automatiquement `schemeID="0160"` (GTIN) car le schematron CII-SR-046 exige cet attribut (erreur fatale sinon).
+- Les champs libres (balise non reconnue du catalogue) sont stockes et affiches mais ne sont pas injectes dans le XML pour ne pas risquer de casser la conformite.

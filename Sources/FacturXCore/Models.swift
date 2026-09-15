@@ -162,6 +162,57 @@ public enum SireneValidator {
     }
 }
 
+public struct OptionalField: Codable, Hashable, Identifiable {
+    public var id: UUID
+    public var tagName: String
+    public var value: String
+
+    public init(id: UUID = UUID(), tagName: String, value: String) {
+        self.id = id
+        self.tagName = tagName
+        self.value = value
+    }
+}
+
+public enum OptionalFieldLocation: String, Codable, CaseIterable {
+    case header
+    case line
+}
+
+public struct OptionalFieldTemplate: Identifiable, Hashable {
+    public let id: String
+    public let bt: String
+    public let label: String
+    public let tagName: String
+    public let location: OptionalFieldLocation
+    public let help: String
+    public init(_ bt: String, _ label: String, _ tagName: String, _ location: OptionalFieldLocation, _ help: String) {
+        self.id = bt
+        self.bt = bt
+        self.label = label
+        self.tagName = tagName
+        self.location = location
+        self.help = help
+    }
+}
+
+public enum OptionalFieldCatalogue {
+    public static let header: [OptionalFieldTemplate] = [
+        OptionalFieldTemplate("BT-11", "Ref. projet", "ram:SpecifiedProcuringProject/ram:ID", .header, "BT-11 - Reference du projet d'achat (SpecifiedProcuringProject/ID)."),
+    ]
+    public static let line: [OptionalFieldTemplate] = [
+        OptionalFieldTemplate("BT-133", "Ref. contrat ligne", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .line, "BT-133 - Reference de contrat au niveau de la ligne."),
+        OptionalFieldTemplate("BT-134", "Ref. commande ligne", "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID", .line, "BT-134 - Reference de commande au niveau de la ligne."),
+        OptionalFieldTemplate("BT-155", "ID produit vendeur", "ram:GlobalID", .line, "BT-155 - Identifiant produit (GlobalID) attribue par le vendeur. schemeID GTIN 0160 ajoute automatiquement."),
+    ]
+    public static func templates(for location: OptionalFieldLocation) -> [OptionalFieldTemplate] {
+        location == .header ? header : line
+    }
+    public static func template(forTag tagName: String, location: OptionalFieldLocation) -> OptionalFieldTemplate? {
+        templates(for: location).first(where: { $0.tagName == tagName })
+    }
+}
+
 public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var id: UUID
     public var name: String
@@ -171,6 +222,7 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var unitPrice: Double
     public var vatRate: Double
     public var orderReference: String?
+    public var optionalFields: [OptionalField]
 
     public init(
         id: UUID = UUID(),
@@ -180,7 +232,8 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         unit: String = "C62",
         unitPrice: Double,
         vatRate: Double = 20.0,
-        orderReference: String? = nil
+        orderReference: String? = nil,
+        optionalFields: [OptionalField] = []
     ) {
         self.id = id
         self.name = name
@@ -190,6 +243,24 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         self.unitPrice = unitPrice
         self.vatRate = vatRate
         self.orderReference = orderReference
+        self.optionalFields = optionalFields
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, description, quantity, unit, unitPrice, vatRate, orderReference, optionalFields
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        quantity = try c.decodeIfPresent(Double.self, forKey: .quantity) ?? 0
+        unit = try c.decodeIfPresent(String.self, forKey: .unit) ?? "C62"
+        unitPrice = try c.decodeIfPresent(Double.self, forKey: .unitPrice) ?? 0
+        vatRate = try c.decodeIfPresent(Double.self, forKey: .vatRate) ?? 20.0
+        orderReference = try c.decodeIfPresent(String.self, forKey: .orderReference)
+        optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
     }
 
     public var lineTotal: Double {
@@ -393,6 +464,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var legalNoteAAB: String
     public var prepaidAmount: Double
     public var superPDPRemoteID: String?
+    public var optionalFields: [OptionalField]
 
     public init(
         id: UUID = UUID(),
@@ -425,7 +497,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNotePMD: String = "Taux d'intérêt des pénalités de retard : 3 fois le taux légal en vigueur",
         legalNoteAAB: String = "Escompte pour paiement anticipé : aucun",
         prepaidAmount: Double = 0,
-        superPDPRemoteID: String? = nil
+        superPDPRemoteID: String? = nil,
+        optionalFields: [OptionalField] = []
     ) {
         self.id = id
         self.number = number
@@ -458,12 +531,13 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.legalNoteAAB = legalNoteAAB
         self.prepaidAmount = prepaidAmount
         self.superPDPRemoteID = superPDPRemoteID
+        self.optionalFields = optionalFields
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
         case buyerReference, purchaseOrderRef, contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
-        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID
+        case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
     }
 
     public init(from decoder: Decoder) throws {
@@ -499,6 +573,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNoteAAB = try c.decodeIfPresent(String.self, forKey: .legalNoteAAB) ?? "Escompte pour paiement anticipé : aucun"
         prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
         superPDPRemoteID = try c.decodeIfPresent(String.self, forKey: .superPDPRemoteID)
+        optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
     }
 
     public var netToPay: Double {
