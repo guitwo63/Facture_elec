@@ -566,11 +566,15 @@ public struct Invoice: Codable, Hashable, Identifiable {
         case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
         case buyerReference, purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
+    }
+
+    private enum LegacyReferenceKeys: String, CodingKey {
         case contractRef, tenderRef, receivingAdviceRef, despatchAdviceRef
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let lc = try decoder.container(keyedBy: LegacyReferenceKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         number = try c.decodeIfPresent(String.self, forKey: .number) ?? ""
         type = try c.decodeIfPresent(InvoiceTypeCode.self, forKey: .type) ?? .commercialInvoice
@@ -599,10 +603,10 @@ public struct Invoice: Codable, Hashable, Identifiable {
         prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
         superPDPRemoteID = try c.decodeIfPresent(String.self, forKey: .superPDPRemoteID)
         optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
-        migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? c.decodeIfPresent(String.self, forKey: .contractRef))
-        migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? c.decodeIfPresent(String.self, forKey: .tenderRef))
-        migrateReference("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", try? c.decodeIfPresent(String.self, forKey: .receivingAdviceRef))
-        migrateReference("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", try? c.decodeIfPresent(String.self, forKey: .despatchAdviceRef))
+        migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
+        migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))
+        migrateReference("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .receivingAdviceRef))
+        migrateReference("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .despatchAdviceRef))
     }
 
     private mutating func migrateReference(_ tagName: String, _ value: String?) {
