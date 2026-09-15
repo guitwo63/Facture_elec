@@ -905,11 +905,11 @@ struct InvoicesTabView: View {
                         selectedID = draft.id
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
+                    Text("Factures").font(.title2.bold())
                     Button {
                         showOrderPicker = true
                     } label: { Label("Depuis une commande", systemImage: "cart") }
                         .buttonStyle(.bordered)
-                    Text("Factures").font(.title2.bold())
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
                             Text(f.rawValue).tag(f)
