@@ -1038,7 +1038,7 @@ struct InvoicesTabView: View {
                 }
 
                 if let id = selectedID,
-                   store.invoices.contains(where: { $0.id == id }) {
+                   filteredInvoices.contains(where: { $0.id == id }) {
                     InvoiceEditorView(invoice: binding(for: id))
                         .frame(minWidth: 380)
                 } else {
@@ -1063,6 +1063,16 @@ struct InvoicesTabView: View {
                 },
                 onCancel: { showOrderPicker = false }
             )
+        }
+        .onChange(of: filteredInvoices) { newList in
+            if let id = selectedID, !newList.contains(where: { $0.id == id }) {
+                selectedID = nil
+            }
+        }
+        .onChange(of: selectedID) { id in
+            if let id = id, !filteredInvoices.contains(where: { $0.id == id }) {
+                selectedID = nil
+            }
         }
         .sheet(isPresented: $showExport) {
             ExportSheet(
