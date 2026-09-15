@@ -664,7 +664,7 @@ public final class AuthStore: ObservableObject {
     // MARK: - Périmètre basé sur l'annuaire (DirectoryEntry)
 
     private func allSocietyEntries(in directory: PartyDirectory) -> [DirectoryEntry] {
-        directory.entries.filter { $0.kind == .societe || $0.kind == .both }
+        directory.entries.filter { $0.kind == .societe }
     }
 
     public func availableSocieties() -> [DirectoryEntry] {

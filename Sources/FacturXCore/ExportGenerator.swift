@@ -285,8 +285,9 @@ public struct ExportGenerator {
             let kindStr = value(typeIdx)?.lowercased() ?? "client"
             let kind: DirectoryEntryKind
             switch kindStr {
-            case "fournisseur", "societe", "société": kind = .societe
-            case "client / fournisseur", "client/fournisseur", "client / société", "client/société", "both", "les deux": kind = .both
+            case "societe", "société": kind = .societe
+            case "fournisseur": kind = .fournisseur
+            case "client / fournisseur", "client/fournisseur", "both", "les deux": kind = .both
             default: kind = .client
             }
             var contacts: [PartyContact] = []

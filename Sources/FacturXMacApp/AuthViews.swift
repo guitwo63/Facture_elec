@@ -547,7 +547,7 @@ struct UserEditorSheet: View {
     }
 
     private var availableSocieties: [DirectoryEntry] {
-        directory.entries.filter { !$0.isArchived && ($0.kind == .societe || $0.kind == .both) }
+        directory.entries.filter { !$0.isArchived && $0.kind == .societe }
     }
 
     private var validationError: String? {

@@ -2449,9 +2449,8 @@ struct PartyPickerSheet: View {
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        let roleKind = role.defaultKind
         var active = directory.entries.filter {
-            !$0.isArchived && ($0.kind == roleKind || $0.kind == .both)
+            !$0.isArchived && (role == .seller ? $0.kind == .societe : ($0.kind == .client || $0.kind == .both))
         }
         if role == .seller, let scope = auth.visibleDirectoryEntryIDs(for: auth.currentUser) {
             active = active.filter { scope.contains($0.id) }
@@ -2699,7 +2698,6 @@ struct DirectoryView: View {
         if let scope = scope {
             base = base.filter { entry in
                 if entry.kind == .societe { return scope.contains(entry.id) }
-                if entry.kind == .both { return scope.contains(entry.id) }
                 if let cid = entry.companyID { return scope.contains(cid) }
                 return false
             }
@@ -2882,7 +2880,7 @@ struct DirectoryView: View {
     }
 
     private func canEditEntry(_ entry: DirectoryEntry) -> Bool {
-        if entry.kind == .societe || entry.kind == .both { return canManageSocietes }
+        if entry.kind == .societe { return canManageSocietes }
         return true
     }
 
@@ -3328,7 +3326,7 @@ struct DirectoryEditorView: View {
             }.pickerStyle(.segmented)
             .disabled(!canManageSocietes && entry.kind == .societe)
 
-            if entry.kind == .client || entry.kind == .both {
+            if entry.kind == .client {
                 GroupBox("Société (périmètre)") {
                     HStack {
                         Text("Société").frame(width: 80, alignment: .leading)
@@ -3347,7 +3345,7 @@ struct DirectoryEditorView: View {
             }
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kind == .societe || entry.kind == .both)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kind == .societe)
             }
 
             if !tagStore.tags.isEmpty {
@@ -4116,7 +4114,7 @@ struct ApplicationSettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Associez un logo (PNG, JPEG ou TIFF) à chaque société émettrice. Le logo est affiché en en-tête du PDF lisible des factures émises par cette société.")
                             .font(.caption).foregroundStyle(.secondary)
-                        let societes = directory.entries.filter { ($0.kind == .societe || $0.kind == .both) && !$0.isArchived }
+                        let societes = directory.entries.filter { $0.kind == .societe && !$0.isArchived }
                         if societes.isEmpty {
                             Text("Aucune société dans l'annuaire.").font(.caption).foregroundStyle(.secondary)
                         } else {
