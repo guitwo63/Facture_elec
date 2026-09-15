@@ -144,6 +144,11 @@ public struct SuperPDPDirectoryEntry: Identifiable, Hashable {
     }
 }
 
+public enum SuperPDPDirection: String, Codable {
+    case received
+    case sent
+}
+
 public struct SuperPDPInvoiceSubmission: Identifiable, Codable, Hashable {
     public var id: String
     public var remoteID: String?
@@ -152,8 +157,9 @@ public struct SuperPDPInvoiceSubmission: Identifiable, Codable, Hashable {
     public var submittedAt: Date
     public var lastCheckedAt: Date
     public var message: String?
+    public var direction: SuperPDPDirection
 
-    public init(id: String = UUID().uuidString, remoteID: String?, status: String, enInvoiceRef: String? = nil, submittedAt: Date = Date(), lastCheckedAt: Date = Date(), message: String? = nil) {
+    public init(id: String = UUID().uuidString, remoteID: String?, status: String, enInvoiceRef: String? = nil, submittedAt: Date = Date(), lastCheckedAt: Date = Date(), message: String? = nil, direction: SuperPDPDirection = .received) {
         self.id = id
         self.remoteID = remoteID
         self.status = status
@@ -161,6 +167,7 @@ public struct SuperPDPInvoiceSubmission: Identifiable, Codable, Hashable {
         self.submittedAt = submittedAt
         self.lastCheckedAt = lastCheckedAt
         self.message = message
+        self.direction = direction
     }
 
     public var isProcessed: Bool {
@@ -504,6 +511,33 @@ public final class SuperPDPService {
             lastCheckedAt: Date(),
             message: obj["message"] as? String
         )
+    }
+
+    public func sendInvoiceEvent(remoteID: String, statusCode: String, credentials: SuperPDPCredentials, reportedData: [[String: Any]]? = nil) async throws {
+        let token = try await fetchToken(credentials: credentials)
+        let endpoint = trimmedBase(credentials) + "/v1.beta/invoice_events"
+        guard let url = URL(string: endpoint) else {
+            throw SuperPDPError.decoding("URL d'événement invalide : \(endpoint)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var payload: [String: Any] = [
+            "invoice_id": remoteID,
+            "status_code": statusCode
+        ]
+        if let reported = reportedData, !reported.isEmpty {
+            payload["details"] = [["reported_data": reported]]
+        }
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw SuperPDPError.decoding("Réponse non HTTP")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
     }
 
     private func buildMultipartBody(boundary: String, fieldName: String, fileName: String, content: Data) -> Data {

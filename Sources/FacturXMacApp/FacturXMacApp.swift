@@ -1377,6 +1377,7 @@ struct InvoiceEditorView: View {
                         .onChange(of: invoice.number) { _ in exportError = nil }
                         .onChange(of: invoice.seller.name) { _ in exportError = nil }
                         .onChange(of: invoice.buyer.name) { _ in exportError = nil }
+                        .onChange(of: invoice.status) { newStatus in notifyPDPStatusChange(to: newStatus) }
                 }
                 if let url = exportedURL {
                     Text("Fichier généré : \(url.lastPathComponent)").font(.caption).foregroundStyle(.green)
@@ -1396,6 +1397,9 @@ struct InvoiceEditorView: View {
                         } else if let sub = superPDPSubmission {
                             Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
                                 .foregroundStyle(sub.isProcessed ? .green : .orange)
+                            Image(systemName: sub.direction == .sent ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                                .foregroundStyle(sub.direction == .sent ? .blue : .teal)
+                                .help(sub.direction == .sent ? "Envoyé à Super PDP" : "Reçu de Super PDP")
                         } else {
                             Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
                         }
@@ -1406,7 +1410,10 @@ struct InvoiceEditorView: View {
                     HStack(spacing: 6) {
                         Image(systemName: sub.isProcessed ? "checkmark.seal.fill" : "hourglass")
                             .foregroundStyle(sub.isProcessed ? .green : .orange)
-                        Text("SUPER PDP — id \(sub.remoteID ?? "?") · statut \(sub.status)").font(.caption)
+                        Image(systemName: sub.direction == .sent ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                            .foregroundStyle(sub.direction == .sent ? .blue : .teal)
+                            .help(sub.direction == .sent ? "Envoyé à Super PDP" : "Reçu de Super PDP")
+                        Text("SUPER PDP — id \(sub.remoteID ?? "?") · statut \(sub.status) · \(sub.direction == .sent ? "envoyé" : "reçu")").font(.caption)
                     }
                     .onChange(of: invoice.number) { _ in superPDPSubmission = nil }
                 }
@@ -1881,19 +1888,23 @@ struct InvoiceEditorView: View {
                 let facturx = try FacturXGenerator().generate(invoice: invoice)
                 let service = SuperPDPService()
                 let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
-                superPDPSubmission = submission
+                superPDPSubmission = SuperPDPInvoiceSubmission(
+                    id: submission.id, remoteID: submission.remoteID, status: submission.status,
+                    enInvoiceRef: submission.enInvoiceRef, submittedAt: submission.submittedAt,
+                    lastCheckedAt: submission.lastCheckedAt, message: submission.message, direction: .sent
+                )
                 if let rid = submission.remoteID, !rid.isEmpty {
                     invoice.superPDPRemoteID = rid
                     store.upsert(invoice)
                 }
-                superPDPMessage = "Facture déposée sur SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
+                superPDPMessage = "↑ Envoyé à SUPER PDP — id distant \(submission.remoteID ?? "?") (statut : \(submission.status))."
                 store.audit?.recordStatusChange(
                     actor: store.actorName,
                     objectType: .invoice,
                     objectCode: invoice.number,
                     statusFrom: nil,
                     statusTo: submission.status,
-                    details: "Dépôt facture sur SUPER PDP (id distant : \(submission.remoteID ?? "?"))"
+                    details: "Dépôt facture sur SUPER PDP (envoyé) — id distant : \(submission.remoteID ?? "?")"
                 )
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec dépôt SUPER PDP : \(e.localizedDescription)"
@@ -1928,8 +1939,12 @@ struct InvoiceEditorView: View {
             do {
                 let service = SuperPDPService()
                 let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: superPDPSettings.credentials)
-                superPDPSubmission = updated
-                superPDPMessage = "Statut SUPER PDP mis à jour : \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
+                superPDPSubmission = SuperPDPInvoiceSubmission(
+                    id: updated.id, remoteID: updated.remoteID, status: updated.status,
+                    enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
+                    lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
+                )
+                superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
                 let actor = store.actorName
                 store.audit?.recordStatusChange(
                     actor: actor,
@@ -1937,7 +1952,7 @@ struct InvoiceEditorView: View {
                     objectCode: invoice.number,
                     statusFrom: priorStatus,
                     statusTo: updated.status,
-                    details: "Interrogation statut SUPER PDP (id distant : \(rid))"
+                    details: "Interrogation statut SUPER PDP (reçu) — id distant : \(rid)"
                 )
             } catch {
                 superPDPMessage = "Échec rafraîchissement : \(error.localizedDescription)"
@@ -1952,6 +1967,91 @@ struct InvoiceEditorView: View {
             }
             superPDPSubmitting = false
         }
+    }
+
+    private func notifyPDPStatusChange(to newStatus: InvoiceStatus) {
+        guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
+        guard superPDPSettings.credentials.isConfigured else { return }
+        let statusCode: String
+        var detailLabel: String
+        switch newStatus {
+        case .paid:
+            statusCode = "fr:212"
+            detailLabel = "Encaissée"
+        case .cancelled:
+            statusCode = "fr:320"
+            detailLabel = "Annulée"
+        case .accepted:
+            statusCode = "fr:310"
+            detailLabel = "Acceptée"
+        case .rejected:
+            statusCode = "fr:311"
+            detailLabel = "Rejetée"
+        default:
+            return
+        }
+        superPDPSubmitting = true
+        let invoiceRef = invoice
+        let priorStatus = superPDPSubmission?.status
+        Task {
+            do {
+                let service = SuperPDPService()
+                let reported: [[String: Any]] = newStatus == .paid ? invoiceRef.lines.compactMap { line -> [String: Any]? in
+                    let amount = (line.quantity * line.unitPrice) * (1 + line.vatRate / 100)
+                    return [
+                        "amount": String(format: "%.2f", amount),
+                        "currency_code": invoiceRef.currency,
+                        "type_code": "MEN",
+                        "value_percent": String(format: "%.1f", line.vatRate),
+                        "date": Self.pdpDateString(invoiceRef.issueDate)
+                    ]
+                } : nil
+                try await service.sendInvoiceEvent(remoteID: rid, statusCode: statusCode, credentials: superPDPSettings.credentials, reportedData: reported)
+                superPDPSubmission = SuperPDPInvoiceSubmission(
+                    id: UUID().uuidString, remoteID: rid, status: detailLabel,
+                    enInvoiceRef: superPDPSubmission?.enInvoiceRef,
+                    submittedAt: Date(), lastCheckedAt: Date(),
+                    message: "Statut \(detailLabel) envoyé", direction: .sent
+                )
+                superPDPMessage = "↑ Envoyé à SUPER PDP : statut \(detailLabel) — id distant \(rid)."
+                store.audit?.recordStatusChange(
+                    actor: store.actorName,
+                    objectType: .invoice,
+                    objectCode: invoiceRef.number,
+                    statusFrom: priorStatus,
+                    statusTo: detailLabel,
+                    details: "Envoi statut \(detailLabel) à SUPER PDP (envoyé) — id distant : \(rid)"
+                )
+            } catch let e as SuperPDPError {
+                superPDPMessage = "Échec envoi statut SUPER PDP : \(e.localizedDescription)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_send_error",
+                    target: invoiceRef.number,
+                    details: "Échec envoi statut \(detailLabel) à SUPER PDP : \(e.localizedDescription)",
+                    objectType: .invoice,
+                    objectCode: invoiceRef.number
+                )
+            } catch {
+                superPDPMessage = "Échec envoi statut SUPER PDP : \(error)"
+                store.audit?.record(
+                    actor: store.actorName,
+                    action: "pdp_status_send_error",
+                    target: invoiceRef.number,
+                    details: "Échec envoi statut \(detailLabel) à SUPER PDP : \(error)",
+                    objectType: .invoice,
+                    objectCode: invoiceRef.number
+                )
+            }
+            superPDPSubmitting = false
+        }
+    }
+
+    private static func pdpDateString(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt.string(from: date)
     }
 
     private func exportPlainPDF() {
