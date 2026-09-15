@@ -197,6 +197,26 @@ final class FacturXCoreTests: XCTestCase {
         XCTAssertTrue(s.contains("<ram:IssuerAssignedID>C-99</ram:IssuerAssignedID>"))
     }
 
+    func testXMLHeaderReferencesViaOptionalFields() throws {
+        var inv = sampleInvoice()
+        inv.optionalFields = [
+            OptionalField(tagName: "ram:ContractReferencedDocument/ram:IssuerAssignedID", value: "CT-2026-1"),
+            OptionalField(tagName: "ram:TendererReferencedDocument/ram:IssuerAssignedID", value: "AO-42"),
+            OptionalField(tagName: "ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", value: "BR-7"),
+            OptionalField(tagName: "ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", value: "BL-9"),
+        ]
+        let xml = try CIIXMLGenerator().generate(invoice: inv)
+        let s = String(data: xml, encoding: .utf8) ?? ""
+        XCTAssertTrue(s.contains("<ram:ContractReferencedDocument>"))
+        XCTAssertTrue(s.contains("<ram:IssuerAssignedID>CT-2026-1</ram:IssuerAssignedID>"))
+        XCTAssertTrue(s.contains("<ram:TendererReferencedDocument>"))
+        XCTAssertTrue(s.contains("<ram:IssuerAssignedID>AO-42</ram:IssuerAssignedID>"))
+        XCTAssertTrue(s.contains("<ram:ReceivingAdviceReferencedDocument>"))
+        XCTAssertTrue(s.contains("<ram:IssuerAssignedID>BR-7</ram:IssuerAssignedID>"))
+        XCTAssertTrue(s.contains("<ram:DespatchAdviceReferencedDocument>"))
+        XCTAssertTrue(s.contains("<ram:IssuerAssignedID>BL-9</ram:IssuerAssignedID>"))
+    }
+
     func testXMLNoEmptyPersonName() throws {
         var inv = sampleInvoice()
         inv.seller = InvoiceParty(

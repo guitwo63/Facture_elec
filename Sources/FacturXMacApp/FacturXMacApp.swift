@@ -1428,25 +1428,6 @@ struct InvoiceEditorView: View {
         )
     }
 
-    private var projectReferenceBinding: Binding<String> {
-        let bt11Tag = "ram:SpecifiedProcuringProject/ram:ID"
-        return Binding<String>(
-            get: { invoice.optionalFields.first(where: { $0.tagName == bt11Tag })?.value ?? "" },
-            set: { newValue in
-                let trimmed = newValue.trimmingCharacters(in: .whitespaces)
-                if let idx = invoice.optionalFields.firstIndex(where: { $0.tagName == bt11Tag }) {
-                    if trimmed.isEmpty {
-                        invoice.optionalFields.remove(at: idx)
-                    } else {
-                        invoice.optionalFields[idx].value = newValue
-                    }
-                } else if !trimmed.isEmpty {
-                    invoice.optionalFields.append(OptionalField(tagName: bt11Tag, value: newValue))
-                }
-            }
-        )
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -1718,30 +1699,6 @@ struct InvoiceEditorView: View {
                                     }
                                 }
                                 companyScopePicker
-                                DisclosureGroup("Autres références") {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. projet (BT-11)", text: projectReferenceBinding).frame(width: 220)
-                                            InfoBadge(text: "BT-11 — Référence du projet d'achat (SpecifiedProcuringProject/ID).")
-                                        }
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. contrat (BT-17)", text: Binding($invoice.contractRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-17 — Référence du contrat.")
-                                        }
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. appel d'offres (BT-18)", text: Binding($invoice.tenderRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-18 — Référence de l'appel d'offres.")
-                                        }
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. bon de réception (BT-19)", text: Binding($invoice.receivingAdviceRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-19 — Référence de l'avis de réception.")
-                                        }
-                                        HStack(spacing: 3) {
-                                            TextField("Réf. bon de livraison (BT-20)", text: Binding($invoice.despatchAdviceRef, replacingNilWith: "")).frame(width: 220)
-                                            InfoBadge(text: "BT-20 — Référence de l'avis d'expédition.")
-                                        }
-                                    }
-                                }
                                 OptionalFieldsSection(fields: $invoice.optionalFields, location: .header, locked: fieldLocked)
                                 .font(.caption)
                             }

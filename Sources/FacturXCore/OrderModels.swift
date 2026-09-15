@@ -236,7 +236,7 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
                 orderReference: line.orderReference ?? self.number
             )
         }
-        return Invoice(
+        let invoice = Invoice(
             number: number,
             type: .commercialInvoice,
             status: .draft,
@@ -249,7 +249,6 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
             companyID: companyID,
             buyerReference: buyerReference,
             purchaseOrderRef: quotationRef,
-            contractRef: contractRef,
             lines: mappedLines,
             paymentIBAN: buyer.iban,
             paymentBIC: buyer.bic,
@@ -257,6 +256,10 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
             notes: notes,
             billingMode: .m1
         )
+        if let contractRef, !contractRef.trimmingCharacters(in: .whitespaces).isEmpty {
+            invoice.contractRef = contractRef
+        }
+        return invoice
     }
 }
 
