@@ -317,6 +317,19 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         }
     }
 
+    /// Ordre du cycle de vie (pour empêcher tout rapatriement rétrograde depuis la PDP).
+    public var lifecycleRank: Int {
+        switch self {
+        case .draft: return 0
+        case .issued: return 1
+        case .sentToPDP: return 2
+        case .accepted: return 3
+        case .rejected: return 3
+        case .paid: return 4
+        case .cancelled: return 4
+        }
+    }
+
     /// Transitions autorisées pour un comptable (cycle de vie normé sans annulation).
     public func allowedTransitions() -> [InvoiceStatus] {
         switch self {

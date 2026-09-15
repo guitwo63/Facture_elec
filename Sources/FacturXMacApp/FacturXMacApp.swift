@@ -2009,12 +2009,22 @@ struct InvoiceEditorView: View {
                     enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
                     lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
                 )
-                if let mapped = Self.mapPDPStatusToLocal(updated.status), mapped != invoice.status {
-                    syncingFromPDP = true
-                    invoice.status = mapped
-                    store.upsert(invoice)
-                    syncingFromPDP = false
-                    superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status) — id distant \(rid). Statut facture mis à jour : \(mapped.label)."
+                if let mapped = Self.mapPDPStatusToLocal(updated.status) {
+                    // Ne jamais rétrograder le statut local : on n'applique le statut PDP
+                    // que s'il représente un avancement dans le cycle de vie (ou une annulation).
+                    let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
+                    let isCancellation = mapped == .cancelled && invoice.status != .cancelled && invoice.status != .paid
+                    if (isAdvance || isCancellation) && mapped != invoice.status {
+                        syncingFromPDP = true
+                        invoice.status = mapped
+                        store.upsert(invoice)
+                        syncingFromPDP = false
+                        superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status) — id distant \(rid). Statut facture mis à jour : \(mapped.label)."
+                    } else if mapped == invoice.status {
+                        superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
+                    } else {
+                        superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status). Statut local « \(invoice.status.label) » conservé (supérieur dans le cycle de vie, pas de rétrogradation)."
+                    }
                 } else {
                     superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
                 }
