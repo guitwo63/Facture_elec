@@ -204,6 +204,7 @@ public enum OptionalFieldCatalogue {
         OptionalFieldTemplate("BT-133", "Ref. contrat ligne", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .line, "BT-133 - Reference de contrat au niveau de la ligne."),
         OptionalFieldTemplate("BT-134", "Ref. commande ligne", "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID", .line, "BT-134 - Reference de commande au niveau de la ligne."),
         OptionalFieldTemplate("BT-155", "ID produit vendeur", "ram:GlobalID", .line, "BT-155 - Identifiant produit (GlobalID) attribue par le vendeur. schemeID GTIN 0160 ajoute automatiquement."),
+        OptionalFieldTemplate("BT-156", "ID produit acheteur", "ram:BuyerAssignedID", .line, "BT-156 - Identifiant produit attribue par l'acheteur (BuyerAssignedID)."),
     ]
     public static func templates(for location: OptionalFieldLocation) -> [OptionalFieldTemplate] {
         location == .header ? header : line

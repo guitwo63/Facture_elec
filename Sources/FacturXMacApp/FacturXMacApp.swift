@@ -1276,6 +1276,13 @@ struct OptionalFieldsSection: View {
         Set(templates.map { $0.tagName })
     }
 
+    private func labelFor(tagName: String) -> String {
+        if let tpl = OptionalFieldCatalogue.template(forTag: tagName, location: location) {
+            return "\(tpl.bt) - \(tpl.tagName)"
+        }
+        return tagName
+    }
+
     var body: some View {
         DisclosureGroup(title) {
             VStack(alignment: .leading, spacing: 6) {
@@ -1283,16 +1290,28 @@ struct OptionalFieldsSection: View {
                     curatedRow(for: tpl)
                 }
                 Divider()
-                Text("Champs libres").font(.caption.bold())
+                Text("Champs supplementaires").font(.caption.bold())
                 ForEach($fields) { $field in
                     if !curatedTagNames.contains(field.tagName) {
-                        freeRow(field: $field)
+                        additionalRow(field: $field)
                     }
                 }
-                Button {
-                    fields.append(OptionalField(tagName: "", value: ""))
+                Menu {
+                    ForEach(templates) { tpl in
+                        Button {
+                            fields.append(OptionalField(tagName: tpl.tagName, value: ""))
+                        } label: {
+                            Label("\(tpl.bt) - \(tpl.label)", systemImage: "tag")
+                        }
+                    }
+                    Divider()
+                    Button {
+                        fields.append(OptionalField(tagName: "", value: ""))
+                    } label: {
+                        Label("Balise personnalisee...", systemImage: "pencil")
+                    }
                 } label: {
-                    Label("Ajouter un champ libre", systemImage: "plus")
+                    Label("Ajouter un champ", systemImage: "plus")
                 }
                 .buttonStyle(.borderless)
                 .disabled(locked)
@@ -1328,9 +1347,35 @@ struct OptionalFieldsSection: View {
     }
 
     @ViewBuilder
-    private func freeRow(field: Binding<OptionalField>) -> some View {
+    private func additionalRow(field: Binding<OptionalField>) -> some View {
         HStack(spacing: 4) {
-            TextField("Balise (ex. ram:...)", text: field.tagName).frame(width: 240)
+            Menu {
+                ForEach(templates) { tpl in
+                    Button {
+                        field.tagName.wrappedValue = tpl.tagName
+                    } label: {
+                        Text("\(tpl.bt) - \(tpl.tagName)")
+                    }
+                }
+                Divider()
+                Button {
+                    field.tagName.wrappedValue = ""
+                } label: {
+                    Text("Personnalisee...")
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "tag")
+                    Text(field.tagName.wrappedValue.isEmpty ? "Choisir une balise..." : labelFor(tagName: field.tagName.wrappedValue))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
+                .frame(width: 320, alignment: .leading)
+            }
+            if field.tagName.wrappedValue.isEmpty || OptionalFieldCatalogue.template(forTag: field.tagName.wrappedValue, location: location) == nil {
+                let placeholder = OptionalFieldCatalogue.template(forTag: field.tagName.wrappedValue, location: location)?.label ?? "ram:..."
+                TextField(placeholder, text: field.tagName).frame(width: 200)
+            }
             TextField("Valeur", text: field.value).frame(maxWidth: .infinity)
             Button {
                 if let idx = fields.firstIndex(where: { $0.id == field.wrappedValue.id }) {
