@@ -6252,7 +6252,7 @@ struct PartyLogoEditor: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Logo \u00ab \(entry.displayName) \u00bb").font(.headline)
+            Text("Logo « \(entry.displayName) »").font(.headline)
             Text("Image (PNG, JPEG ou TIFF) affichée en en-tête du PDF lisible des factures émises par ce fournisseur. Le logo n'est pas embarqué dans le XML Factur-X.")
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
