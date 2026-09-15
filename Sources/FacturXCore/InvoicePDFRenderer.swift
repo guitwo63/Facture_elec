@@ -45,11 +45,12 @@ public final class InvoicePDFRenderer {
 
     private func drawLogo(context: CGContext, logo: Data?, y: CGFloat, maxWidth: CGFloat, maxHeight: CGFloat) -> CGRect? {
         guard let data = logo, !data.isEmpty,
-              let provider = CGDataProvider(data: data as CFData),
-              let image = CGImageCreateWithPNGDataProvider(provider, nil, false, .defaultIntent)
-                    ?? CGImageCreateWithJPEGDataProvider(provider, nil, false, .defaultIntent) else {
+              let provider = CGDataProvider(data: data as CFData) else {
             return nil
         }
+        let image = CGImage(pngDataProviderSource: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+            ?? CGImage(jpegDataProviderSource: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        guard let image = image else { return nil }
         let imgW = CGFloat(image.width)
         let imgH = CGFloat(image.height)
         guard imgW > 0, imgH > 0 else { return nil }
