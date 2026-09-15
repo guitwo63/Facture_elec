@@ -1805,6 +1805,18 @@ struct InvoiceEditorView: View {
                                     .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
                                               || !superPDPSettings.credentials.isConfigured)
                                     .help("Historique des événements de cycle de vie sur SUPER PDP")
+                                    if isAdmin {
+                                        Button {
+                                            notifyPDPStatusChange(to: invoice.status, force: true)
+                                        } label: {
+                                            Label("Forcer renvoi", systemImage: "arrow.clockwise.circle")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                                  || !superPDPSettings.credentials.isConfigured)
+                                        .help("Forcer le renvoi du statut actuel à SUPER PDP (admin)")
+                                    }
                                     }
                                 }
                                 VStack(alignment: .trailing) {
@@ -2296,7 +2308,7 @@ struct InvoiceEditorView: View {
         }
     }
 
-    private func notifyPDPStatusChange(to newStatus: InvoiceStatus) {
+    private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         guard superPDPSettings.credentials.isConfigured else { return }
         let statusCode: String
@@ -2317,7 +2329,7 @@ struct InvoiceEditorView: View {
         default:
             return
         }
-        if let last = lastSentPDPStatusCode, last == statusCode {
+        if !force, let last = lastSentPDPStatusCode, last == statusCode {
             superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
             return
         }
@@ -4254,11 +4266,13 @@ struct ApplicationSettingsView: View {
     @State private var superPDPTesting = false
     @State private var pdpSessionMessage: String?
     @State private var pdpSessionChecking = false
-    @State private var dinumExpanded = true
+    @State private var envExpanded = true
+    @State private var societiesExpanded = false
+    @State private var dinumExpanded = false
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = false
-    @State private var tagsExpanded = true
-    @State private var numberingExpanded = true
+    @State private var tagsExpanded = false
+    @State private var numberingExpanded = false
     @State private var editingSociety: DirectoryEntry?
     @State private var creatingSociety = false
     @State private var newTagName = ""
@@ -4267,16 +4281,7 @@ struct ApplicationSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                GroupBox {
-                    SocietiesAdminView(
-                        editingEntry: $editingSociety,
-                        creatingNew: $creatingSociety
-                    )
-                } label: {
-                    Label("Sociétés du périmètre", systemImage: "building.2.fill")
-                        .font(.headline)
-                }
-                GroupBox {
+                DisclosureGroup(isExpanded: $envExpanded) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
                             Image(systemName: appEnv.isTest ? "flask" : "checkmark.seal.fill")
@@ -4301,6 +4306,19 @@ struct ApplicationSettingsView: View {
                                 .font(.caption).foregroundStyle(.orange)
                         }
                     }.padding(8)
+                } label: {
+                    Label("Environnement", systemImage: appEnv.isTest ? "flask" : "checkmark.seal.fill")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $societiesExpanded) {
+                    SocietiesAdminView(
+                        editingEntry: $editingSociety,
+                        creatingNew: $creatingSociety
+                    )
+                } label: {
+                    Label("Sociétés du périmètre", systemImage: "building.2.fill")
+                        .font(.headline)
                 }
                 DisclosureGroup(isExpanded: $dinumExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -4419,10 +4437,14 @@ struct ApplicationSettingsView: View {
                             TextField("https://api.superpdp.tech", text: $superPDPSettings.credentials.apiBaseURL)
                         }
                         HStack {
-                            Text("Mode SUPER PDP").font(.caption)
+                            Text("Mode SUPER PDP").font(.caption.bold())
                             Spacer()
-                            Text(appEnv.isTest ? "Bac à sable (suivant l'environnement)" : "Production (suivant l'environnement)")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Text(appEnv.isTest ? "TEST (bac à sable)" : "PRODUCTION")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(appEnv.isTest ? Color.orange : Color.green))
+                                .help("Les identifiants SUPER PDP sont isolés par environnement (test/production).")
                         }
                         HStack {
                             Button {
