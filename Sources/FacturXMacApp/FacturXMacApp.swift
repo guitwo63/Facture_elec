@@ -1464,7 +1464,6 @@ struct InvoiceEditorView: View {
                     .help("Protéger la facture validée en lecture seule")
                 }
                 if superPDPSettings.credentials.usePDP {
-                    if isAdmin {
                         Button {
                             validatePDP()
                         } label: {
@@ -1480,7 +1479,6 @@ struct InvoiceEditorView: View {
                         .buttonStyle(.bordered)
                         .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
                         .help("Valider le Factur-X sur SUPER PDP avant dépôt")
-                    }
                 } else {
                     Button("Valider") { runValidation() }
                         .buttonStyle(.bordered)
