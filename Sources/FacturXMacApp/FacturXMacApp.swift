@@ -909,9 +909,7 @@ struct InvoicesTabView: View {
                             showOrderPicker = true
                         } label: { Label("Facture depuis une commande", systemImage: "cart") }
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .tint(.blue)
+                        .buttonStyle(.borderedProminent)
                     Text("Factures").font(.title2.bold())
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
@@ -995,9 +993,7 @@ struct InvoicesTabView: View {
                             store.upsert(draft)
                             selectedID = draft.id
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .tint(.blue)
+                        .buttonStyle(.borderedProminent)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
