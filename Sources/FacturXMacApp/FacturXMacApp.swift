@@ -123,6 +123,7 @@ struct LabeledInfoField<Content: View>: View {
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
     @StateObject private var orderStore = OrderStore.shared
+    @StateObject private var quoteStore = QuoteStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
@@ -140,6 +141,7 @@ struct FacturXMacApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(orderStore)
+                .environmentObject(quoteStore)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
@@ -156,9 +158,11 @@ struct FacturXMacApp: App {
                     auth.testBypassSecurity = true
                     store.audit = AuditStore.shared
                     orderStore.audit = AuditStore.shared
+                    quoteStore.audit = AuditStore.shared
                     directory.audit = AuditStore.shared
                     store.actorName = auth.currentUser?.username ?? "system"
                     orderStore.actorName = auth.currentUser?.username ?? "system"
+                    quoteStore.actorName = auth.currentUser?.username ?? "system"
                     directory.actorName = auth.currentUser?.username ?? "system"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
@@ -217,6 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum RootTab: String, CaseIterable, Identifiable {
     case directory = "Annuaire"
     case orders = "Commandes"
+    case quotes = "Devis"
     case invoices = "Factures"
     var id: String { rawValue }
 
@@ -234,6 +239,7 @@ struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
@@ -246,6 +252,7 @@ struct RootView: View {
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
+    @State private var selectedQuoteID: UUID?
     @State private var showSettings = false
     @State private var showUserManagement = false
     @State private var showEnvConfirm = false
@@ -271,6 +278,7 @@ struct RootView: View {
     private func reloadAllStores() {
         store.load()
         orderStore.load()
+        quoteStore.load()
         directory.load()
         tagStore.load()
         kindColors.load()
@@ -282,10 +290,12 @@ struct RootView: View {
         smtpSettings.credentials = reloadSMTPCredentials()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
+        quoteStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
         auth.reloadEnvironment()
         store.actorName = auth.currentUser?.username ?? "system"
         orderStore.actorName = auth.currentUser?.username ?? "system"
+        quoteStore.actorName = auth.currentUser?.username ?? "system"
         directory.actorName = auth.currentUser?.username ?? "system"
         selectedID = nil
         selectedOrderID = nil
@@ -336,7 +346,7 @@ struct RootView: View {
                     ForEach(RootTab.visible(for: auth.currentUser?.role)) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 300)
+                .frame(width: 380)
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {
@@ -382,6 +392,8 @@ struct RootView: View {
                 InvoicesTabView(selectedID: $selectedID)
             case .orders:
                 OrdersTabView(selectedID: $selectedOrderID)
+            case .quotes:
+                QuotesTabView(selectedID: $selectedQuoteID)
             case .directory:
                 DirectoryView()
             }
@@ -6685,6 +6697,300 @@ struct OrdersTabView: View {
                 }
             }
         )
+    }
+}
+
+struct QuotesTabView: View {
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var directory: PartyDirectory
+    @Binding var selectedID: UUID?
+    @State private var query = ""
+
+    var filteredQuotes: [Quote] {
+        var result = quoteStore.quotes
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { quote in
+                if let cid = quote.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            result = result.filter { quote in
+                quote.number.lowercased().contains(q) || quote.buyer.name.lowercased().contains(q)
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private func defaultCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
+    }
+
+    private func newQuote() {
+        let seller = store.resolveDefaultSeller(from: directory) ?? store.myCompany
+        let draft = quoteStore.newDraft(seller: seller, companyID: defaultCompanyID())
+        quoteStore.upsert(draft)
+        selectedID = draft.id
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                HStack {
+                    Button { newQuote() } label: { Label("Nouveau devis", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                    Text("Devis").font(.title2.bold())
+                    Spacer()
+                }
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Rechercher (numéro, client…)", text: $query)
+                        .textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+            }
+            .padding(12)
+
+            Divider()
+
+            HSplitView {
+                if filteredQuotes.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.below.ecg").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Aucun devis.")
+                            .foregroundStyle(.secondary)
+                        Button("Nouveau devis") { newQuote() }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(filteredQuotes) { quote in
+                                VStack(alignment: .leading) {
+                                    HStack {
+                                        Text(quote.number).font(.headline)
+                                        Spacer()
+                                        Text(quote.issueDate, format: .dateTime.day().month().year())
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    HStack(spacing: 6) {
+                                        Image(systemName: quote.status.systemImage)
+                                            .foregroundColor(Color(hex: quote.status.hexColor))
+                                            .font(.caption2)
+                                        Text(quote.status.label).font(.caption2)
+                                            .foregroundColor(Color(hex: quote.status.hexColor))
+                                        if quote.isExpiredByDate {
+                                            Label("Validité dépassée", systemImage: "exclamationmark.triangle.fill")
+                                                .font(.caption2).foregroundStyle(.orange)
+                                        }
+                                        Spacer()
+                                    }
+                                    Text("\(quote.buyer.name.isEmpty ? "Sans client" : quote.buyer.name)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Text(String(format: "%.2f %@ TTC", quote.grandTotal, quote.currency))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 6).padding(.horizontal, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .background(selectedID == quote.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                                .onTapGesture { selectedID = quote.id }
+                                .contextMenu {
+                                    Button {
+                                        let copy = quoteStore.duplicate(from: quote)
+                                        quoteStore.upsert(copy)
+                                        selectedID = copy.id
+                                    } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        quoteStore.delete(quote)
+                                        if selectedID == quote.id { selectedID = nil }
+                                    } label: { Label("Supprimer", systemImage: "trash") }
+                                }
+                            }
+                        }
+                    }
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
+                }
+
+                if let id = selectedID, quoteStore.quotes.contains(where: { $0.id == id }) {
+                    QuoteEditorView(quote: binding(for: id))
+                        .frame(minWidth: 380)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Sélectionnez ou créez un devis")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+
+    private func binding(for id: UUID) -> Binding<Quote> {
+        Binding(
+            get: { quoteStore.quotes.first(where: { $0.id == id }) ?? Quote(number: "", seller: InvoiceParty(name: "", street: "", postcode: "", city: ""), buyer: InvoiceParty(name: "", street: "", postcode: "", city: "")) },
+            set: { newValue in
+                if let idx = quoteStore.quotes.firstIndex(where: { $0.id == id }) {
+                    quoteStore.quotes[idx] = newValue
+                    quoteStore.save()
+                }
+            }
+        )
+    }
+}
+
+struct QuoteEditorView: View {
+    @Binding var quote: Quote
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var store: InvoiceStore
+
+    private var isLocked: Bool { quote.status.locksQuote }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(quote.number).font(.title2.bold())
+                Text(quote.issueDate, format: .dateTime.day().month().year())
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Image(systemName: quote.status.systemImage)
+                    Text(quote.status.label)
+                }
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color(hex: quote.status.hexColor)))
+                if quote.isExpiredByDate {
+                    Label("Validité dépassée", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange))
+                }
+                Spacer()
+                Text(String(format: "%.2f %@ HT", quote.lineTotal, quote.currency))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .padding(12)
+
+            Divider()
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(quote.status.allowedTransitions(), id: \.self) { s in
+                        Button {
+                            quote.status = s
+                            quoteStore.upsert(quote)
+                        } label: {
+                            Label(s.label, systemImage: s.systemImage)
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: s.hexColor)))
+                        .help("Passer au statut « \(s.label) »")
+                    }
+                    if quote.status == .accepted {
+                        Button {
+                            let number = store.nextNumber(companyID: quote.companyID)
+                            let invoice = quote.toInvoice(number: number)
+                            store.upsert(invoice)
+                            quote.convertedInvoiceNumber = invoice.number
+                            quoteStore.upsert(quote)
+                        } label: {
+                            Label("Convertir en facture", systemImage: "arrow.right.doc.on.clipboard")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
+                        .help("Recopie les lignes du devis dans une nouvelle facture brouillon")
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+            }
+
+            if let n = quote.convertedInvoiceNumber {
+                Text("Converti en facture : \(n) (disponible dans l'onglet Factures)")
+                    .font(.caption).foregroundStyle(.green)
+                    .padding(.horizontal, 12)
+            }
+
+            Divider()
+
+            Form {
+                Section("Client") {
+                    TextField("Nom", text: $quote.buyer.name).disabled(isLocked)
+                    TextField("Adresse", text: $quote.buyer.street).disabled(isLocked)
+                    HStack {
+                        TextField("Code postal", text: $quote.buyer.postcode).disabled(isLocked)
+                        TextField("Ville", text: $quote.buyer.city).disabled(isLocked)
+                    }
+                    TextField("Email de contact", text: Binding(
+                        get: { quote.buyer.contactEmail ?? "" },
+                        set: { quote.buyer.contactEmail = $0.isEmpty ? nil : $0 }
+                    )).disabled(isLocked)
+                }
+                Section("Validité") {
+                    DatePicker("Valable jusqu'au", selection: $quote.validUntil, displayedComponents: .date)
+                        .disabled(isLocked)
+                }
+                Section("Lignes") {
+                    ForEach($quote.lines) { $line in
+                        HStack {
+                            TextField("Désignation", text: $line.name).disabled(isLocked)
+                            TextField("Qté", value: $line.quantity, format: .number).frame(width: 50).disabled(isLocked)
+                            TextField("Prix U.", value: $line.unitPrice, format: .number).frame(width: 70).disabled(isLocked)
+                            TextField("TVA %", value: $line.vatRate, format: .number).frame(width: 50).disabled(isLocked)
+                            Text(String(format: "%.2f", line.lineTotal)).foregroundStyle(.secondary).frame(width: 70)
+                        }
+                    }
+                    .onDelete { idx in quote.lines.remove(atOffsets: idx) }
+                    if !isLocked {
+                        Button {
+                            quote.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20))
+                        } label: { Label("Ajouter une ligne", systemImage: "plus") }
+                    }
+                }
+                Section("Notes") {
+                    TextEditor(text: Binding(get: { quote.notes ?? "" }, set: { quote.notes = $0.isEmpty ? nil : $0 }))
+                        .frame(height: 60)
+                        .disabled(isLocked)
+                }
+                Section {
+                    HStack {
+                        Text("Total HT")
+                        Spacer()
+                        Text(String(format: "%.2f %@", quote.lineTotal, quote.currency))
+                    }
+                    HStack {
+                        Text("TVA")
+                        Spacer()
+                        Text(String(format: "%.2f %@", quote.taxTotal, quote.currency))
+                    }
+                    HStack {
+                        Text("Total TTC").bold()
+                        Spacer()
+                        Text(String(format: "%.2f %@", quote.grandTotal, quote.currency)).bold()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .onChange(of: quote) { newValue in
+            quoteStore.upsert(newValue)
+        }
     }
 }
 
