@@ -233,6 +233,24 @@ public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
         default: return "Événement \(statusCode)"
         }
     }
+
+    /// Couleur (hex) reflétant le sens métier de l'événement, pour un affichage
+    /// immédiatement compréhensible sans avoir à connaître les codes fr:xxx.
+    public var semanticHexColor: String {
+        switch statusCode {
+        case "fr:206", "fr:210", "fr:220", "fr:320": return "C0392B" // refus/litige/rejet/annulation
+        case "fr:207", "fr:209", "fr:212": return "2E8B57" // accepté/réglée/encaissée
+        default: return "2A6EBB" // informationnel (mis à disposition, lu, transférée, attente)
+        }
+    }
+
+    public var semanticSystemImage: String {
+        switch statusCode {
+        case "fr:206", "fr:210", "fr:220", "fr:320": return "xmark.circle.fill"
+        case "fr:207", "fr:209", "fr:212": return "checkmark.circle.fill"
+        default: return "info.circle.fill"
+        }
+    }
 }
 
 public struct SuperPDPSession: Hashable {

@@ -32,9 +32,20 @@ func hexString(from color: Color) -> String {
 }
 
 extension View {
+    /// Bloque l'édition d'une section sans en griser le contenu : un liseré en
+    /// pointillés signale la zone en lecture seule (le bandeau au-dessus indique
+    /// déjà l'état verrouillé), les données restent pleinement lisibles.
     @ViewBuilder
     func lockable(_ locked: Bool) -> some View {
-        self.allowsHitTesting(!locked)
+        self
+            .allowsHitTesting(!locked)
+            .overlay {
+                if locked {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+                        .foregroundStyle(.secondary.opacity(0.5))
+                }
+            }
     }
 }
 /// Style de bouton uniforme pour les barres d'action (taille et forme identiques,
@@ -5539,23 +5550,30 @@ struct SuperPDPEventsSheet: View {
             } else {
                 List {
                     ForEach(events) { ev in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Image(systemName: ev.direction == .sent ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                                    .foregroundStyle(ev.direction == .sent ? .blue : .teal)
-                                    .font(.caption)
-                                Text(ev.statusCode).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                Text(ev.detailLabel).font(.subheadline.bold())
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Image(systemName: ev.semanticSystemImage)
+                                    .foregroundStyle(Color(hex: ev.semanticHexColor))
+                                Text(ev.detailLabel).font(.body.bold())
                                 Spacer()
                                 if let d = ev.createdAt {
-                                    Text(d, style: .date).font(.caption2).foregroundStyle(.secondary)
+                                    Text(d, format: .dateTime.day().month().year().hour().minute())
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
+                            HStack(spacing: 6) {
+                                Image(systemName: ev.direction == .sent ? "arrow.up.circle" : "arrow.down.circle")
+                                Text(ev.direction == .sent ? "Envoyé" : "Reçu")
+                                Text("·")
+                                Text(ev.statusCode).font(.system(.caption2, design: .monospaced))
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                             if let n = ev.notes, !n.isEmpty {
-                                Text(n).font(.caption).foregroundStyle(.secondary)
+                                Text(n).font(.caption2).foregroundStyle(.secondary)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 3)
                     }
                 }
             }
