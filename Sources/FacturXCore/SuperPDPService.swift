@@ -219,6 +219,7 @@ public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
 
     public var detailLabel: String {
         switch statusCode {
+        case "fr:200": return "Facture déposée sur la plateforme"
         case "fr:204": return "Mis à disposition du destinataire"
         case "fr:205": return "Lu par le destinataire"
         case "fr:206": return "Refusé par le destinataire"
@@ -230,7 +231,44 @@ public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
         case "fr:212": return "Facture encaissée"
         case "fr:220": return "Facture rejetée par la PDP"
         case "fr:320": return "Facture annulée"
-        default: return "Événement \(statusCode)"
+        // Événements techniques de circulation avec le Portail Public de
+        // Facturation (PPF), distincts des statuts métier fr:xxx.
+        case "ppf:validated": return "Validée par le Portail Public de Facturation"
+        case "ppf:validated-ack": return "Accusé de réception — validée par le PPF"
+        case "ppf:payment-received": return "Paiement notifié au Portail Public de Facturation"
+        default:
+            // Espaces de codes non documentés publiquement (ppf:, api:, et
+            // d'éventuels futurs). Plutôt que de traduire au cas par cas une
+            // liste potentiellement sans fin, on humanise le slug générique
+            // ("api:uploaded" -> "API — uploaded") pour rester lisible même
+            // sur un code jamais vu.
+            if let colonIndex = statusCode.firstIndex(of: ":") {
+                let namespace = statusCode[statusCode.startIndex..<colonIndex]
+                let remainder = statusCode[statusCode.index(after: colonIndex)...]
+                if remainder.contains(where: { $0.isLetter }) {
+                    let readable = remainder.replacingOccurrences(of: "-", with: " ")
+                    return "\(namespace.uppercased()) — \(readable)"
+                }
+            }
+            return "Événement \(statusCode)"
+        }
+    }
+
+    /// Couleur (hex) reflétant le sens métier de l'événement, pour un affichage
+    /// immédiatement compréhensible sans avoir à connaître les codes fr:xxx.
+    public var semanticHexColor: String {
+        switch statusCode {
+        case "fr:206", "fr:210", "fr:220", "fr:320": return "C0392B" // refus/litige/rejet/annulation
+        case "fr:207", "fr:209", "fr:212", "ppf:validated", "ppf:payment-received": return "2E8B57" // accepté/réglée/encaissée/validée/paiement
+        default: return "2A6EBB" // informationnel (déposée, mis à disposition, lu, transférée, attente)
+        }
+    }
+
+    public var semanticSystemImage: String {
+        switch statusCode {
+        case "fr:206", "fr:210", "fr:220", "fr:320": return "xmark.circle.fill"
+        case "fr:207", "fr:209", "fr:212", "ppf:validated", "ppf:payment-received": return "checkmark.circle.fill"
+        default: return "info.circle.fill"
         }
     }
 }
@@ -443,18 +481,31 @@ public final class SuperPDPService {
         return []
     }
 
-    private func mapDirectoryEntry(_ dict: [String: Any]) -> SuperPDPDirectoryEntry {
+    /// Accessible en `@testable` pour couvrir le fallback objet imbriqué sans
+    /// dépendre d'un accès réseau réel à SUPER PDP.
+    func mapDirectoryEntry(_ dict: [String: Any]) -> SuperPDPDirectoryEntry {
+        // Certaines réponses imbriquent les informations de l'entreprise sous une
+        // clé "party"/"company" plutôt qu'à plat — on cherche dans les deux, sans
+        // quoi des champs comme le nom (dénomination) restent silencieusement nil.
+        let nestedParty = dict["party"] as? [String: Any] ?? dict["company"] as? [String: Any]
         func s(_ key: String) -> String? {
-            if let v = dict[key] as? String { return v.isEmpty ? nil : v }
+            if let v = dict[key] as? String, !v.isEmpty { return v }
             if let n = dict[key] as? NSNumber { return n.stringValue }
+            if let nested = nestedParty {
+                if let v = nested[key] as? String, !v.isEmpty { return v }
+                if let n = nested[key] as? NSNumber { return n.stringValue }
+            }
             return nil
         }
         func b(_ key: String) -> Bool? {
             if let v = dict[key] as? Bool { return v }
             if let v = dict[key] as? String { return v.lowercased() == "oui" || v.lowercased() == "true" || v == "1" }
+            if let nested = nestedParty {
+                if let v = nested[key] as? Bool { return v }
+                if let v = nested[key] as? String { return v.lowercased() == "oui" || v.lowercased() == "true" || v == "1" }
+            }
             return nil
         }
-        let nestedParty = dict["party"] as? [String: Any] ?? dict["company"] as? [String: Any]
         let nameVal = s("name") ?? s("formal_name") ?? s("denomination") ?? s("raison_sociale")
         let siret = s("siret")
         let siren = s("siren") ?? (siret.flatMap { SuperPDPService.extractSiren(from: $0) })
@@ -471,7 +522,13 @@ public final class SuperPDPService {
             else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
             else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
         }
-        _ = nestedParty
+        if let nested = nestedParty {
+            for (k, v) in nested where raw[k] == nil {
+                if let sv = v as? String { raw[k] = sv }
+                else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
+                else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
+            }
+        }
         return SuperPDPDirectoryEntry(
             name: nameVal,
             siren: siren,

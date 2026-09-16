@@ -248,11 +248,16 @@ struct UserManagementView: View {
     @State private var editingUser: User?
     @State private var creatingUser = false
     @State private var searchQuery = ""
+    @State private var roleFilter: UserRole? = nil
 
     private var filteredUsers: [User] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return auth.users }
-        return auth.users.filter {
+        var result = auth.users
+        if let rf = roleFilter {
+            result = result.filter { $0.hasRole(rf) }
+        }
+        guard !q.isEmpty else { return result }
+        return result.filter {
             $0.username.lowercased().contains(q) ||
             $0.effectiveDisplayName.lowercased().contains(q) ||
             $0.rolesLabel.lowercased().contains(q)
@@ -261,33 +266,33 @@ struct UserManagementView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                HStack {
-                    Text("Gestion utilisateurs").font(.headline)
-                    Spacer()
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Rechercher un utilisateur", text: $searchQuery)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 240)
-                    }
-                }
-                usersSection
+            HStack {
+                Text("Gestion utilisateurs").font(.title2.bold())
+                Spacer()
+                Text("\(auth.users.count) utilisateur(s)").font(.caption).foregroundStyle(.secondary)
             }
             .padding(12)
             Divider()
-            if let id = selectedUserID, let user = auth.users.first(where: { $0.id == id }) {
-                UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
-                               onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw, forceChange: true) })
-                    .padding(12)
-            } else {
-                VStack(spacing: 6) {
-                    Image(systemName: "person.badge.shield.checkmark").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("Sélectionnez un utilisateur.").foregroundStyle(.secondary)
+            HSplitView {
+                usersSection
+                    .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
+                Group {
+                    if let id = selectedUserID, let user = auth.users.first(where: { $0.id == id }) {
+                        ScrollView {
+                            UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
+                                           onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw, forceChange: true) })
+                                .padding(12)
+                        }
+                    } else {
+                        VStack(spacing: 6) {
+                            Image(systemName: "person.badge.shield.checkmark").font(.largeTitle).foregroundStyle(.secondary)
+                            Text("Sélectionnez un utilisateur.").foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 360)
             }
-            Spacer()
         }
         .sheet(isPresented: $creatingUser) {
             UserEditorSheet { username, displayName, password, roles, societyIDs, defaultSeller in
@@ -321,16 +326,28 @@ struct UserManagementView: View {
     private var usersSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Utilisateurs").font(.headline)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher un utilisateur", text: $searchQuery)
+                    .textFieldStyle(.plain)
                 Spacer()
                 Button { creatingUser = true } label: { Label("Nouveau", systemImage: "plus") }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent).controlSize(.small)
             }
+            .padding(.horizontal, 8).padding(.top, 8)
+            Picker("Rôle", selection: $roleFilter) {
+                Text("Tous").tag(UserRole?.none)
+                ForEach(UserRole.allCases, id: \.self) { r in Text(r.label).tag(UserRole?.some(r)) }
+            }
+            .labelsHidden().pickerStyle(.segmented)
+            .padding(.horizontal, 8)
             List(filteredUsers, selection: Binding(
                 get: { selectedUserID },
                 set: { selectedUserID = $0 }
             )) { user in
-                HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: user.role.systemImage)
+                        .foregroundStyle(roleColor(user.role))
+                        .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(user.effectiveDisplayName).font(.body.weight(.medium))
                         Text("@\(user.username)").font(.caption2).foregroundStyle(.secondary)
@@ -339,15 +356,20 @@ struct UserManagementView: View {
                                 .padding(.horizontal, 6).padding(.vertical, 1)
                                 .background(roleColor(user.role).opacity(0.18), in: Capsule())
                                 .foregroundStyle(roleColor(user.role))
-                            Text("\(user.societyIDs.count) société(s)").font(.caption2).foregroundStyle(.secondary)
+                            if !user.isAdmin {
+                                Text("\(user.societyIDs.count) société(s)").font(.caption2).foregroundStyle(.secondary)
+                            }
                             if !user.isActive {
-                                Text("Désactivé").font(.caption2).foregroundStyle(.red)
+                                Text("Désactivé").font(.caption2.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.red, in: Capsule())
                             }
                         }
                     }
                     Spacer()
-                    Image(systemName: user.role.systemImage).foregroundStyle(.secondary)
                 }
+                .opacity(user.isActive ? 1 : 0.6)
+                .padding(.vertical, 2)
                 .contextMenu {
                     Button { editingUser = user } label: { Label("Modifier", systemImage: "pencil") }
                     Divider()
@@ -364,7 +386,6 @@ struct UserManagementView: View {
                     }
                 }
             }
-            .frame(minHeight: 240)
         }
     }
 
@@ -383,6 +404,7 @@ struct UserDetailCard: View {
     let onResetPassword: (String) -> Void
     @EnvironmentObject var auth: AuthStore
     @State private var newPw = ""
+    @State private var newPwConfirm = ""
 
     var body: some View {
         GroupBox("Utilisateur : \(user.effectiveDisplayName)") {
@@ -442,15 +464,23 @@ struct UserDetailCard: View {
                 }
                 Divider()
                 Text("Réinitialiser le mot de passe").font(.headline)
-                HStack {
-                    SecureField("Nouveau mot de passe", text: $newPw)
-                        .textFieldStyle(.roundedBorder).frame(width: 240)
-                    Button {
-                        onResetPassword(newPw)
-                        newPw = ""
-                    } label: { Label("Appliquer", systemImage: "checkmark.circle") }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(newPw.isEmpty)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        SecureField("Nouveau mot de passe", text: $newPw)
+                            .textFieldStyle(.roundedBorder).frame(width: 240)
+                        SecureField("Confirmer", text: $newPwConfirm)
+                            .textFieldStyle(.roundedBorder).frame(width: 240)
+                        Button {
+                            onResetPassword(newPw)
+                            newPw = ""
+                            newPwConfirm = ""
+                        } label: { Label("Appliquer", systemImage: "checkmark.circle") }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(newPw.isEmpty || newPw != newPwConfirm)
+                    }
+                    if !newPw.isEmpty && !newPwConfirm.isEmpty && newPw != newPwConfirm {
+                        Text("Les mots de passe ne correspondent pas.").font(.caption).foregroundStyle(.red)
+                    }
                 }
             }
             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
@@ -769,7 +799,48 @@ struct ProfileSettingsView: View {
 
 struct DataAdminView: View {
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var auth: AuthStore
+    @State private var table: DataTable = .invoices
+
+    enum DataTable: String, CaseIterable, Identifiable {
+        case invoices = "Factures"
+        case orders = "Commandes"
+        case parties = "Tiers"
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Administration des données").font(.title2.bold())
+                Spacer()
+            }.padding(10)
+            Divider()
+            HSplitView {
+                List(DataTable.allCases, selection: Binding<DataTable?>(
+                    get: { table },
+                    set: { if let t = $0 { table = t } }
+                )) { t in
+                    Text(t.rawValue).tag(t)
+                }
+                .frame(minWidth: 160, idealWidth: 180, maxWidth: 220)
+                Group {
+                    switch table {
+                    case .invoices: DataInvoicesPanel()
+                    case .orders: DataOrdersPanel()
+                    case .parties: DataPartiesPanel()
+                    }
+                }
+                .frame(minWidth: 360)
+            }
+        }
+    }
+}
+
+struct DataInvoicesPanel: View {
+    @EnvironmentObject var store: InvoiceStore
     @State private var query = ""
     @State private var editingID: UUID?
     @State private var remoteIDDraft = ""
@@ -788,17 +859,12 @@ struct DataAdminView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Administration des données").font(.title2.bold())
-                Spacer()
-                Text("\(store.invoices.count) factures")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(10)
-            HStack {
                 TextField("Rechercher (n°, statut, remote ID)", text: $query)
                     .textFieldStyle(.roundedBorder)
+                Spacer()
+                Text("\(store.invoices.count) facture(s)").font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10).padding(.bottom, 8)
-            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Réparer le remote ID Super PDP d'une facture désynchronisée.")
@@ -862,6 +928,124 @@ struct DataAdminView: View {
         }
         .onChange(of: savedID) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedID = nil }
+        }
+    }
+}
+
+struct DataOrdersPanel: View {
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @State private var query = ""
+
+    private var filtered: [SalesOrder] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return orderStore.orders.sorted { $0.number < $1.number } }
+        return orderStore.orders.filter {
+            $0.number.lowercased().contains(q) || $0.status.label.lowercased().contains(q)
+        }.sorted { $0.number < $1.number }
+    }
+
+    /// Commandes dont le customStatusID pointe vers un statut personnalisé qui
+    /// n'existe plus (supprimé depuis Réglages > Statuts) — l'affichage retombe
+    /// silencieusement sur le statut standard, mais la référence reste orpheline.
+    private func isOrphanedCustomStatus(_ order: SalesOrder) -> Bool {
+        guard let cid = order.customStatusID else { return false }
+        return !statusStore.overrides.contains { $0.id == cid }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                TextField("Rechercher (n°, statut)", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Spacer()
+                Text("\(orderStore.orders.count) commande(s)").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Repère les commandes dont la référence de statut personnalisé n'existe plus.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(filtered) { order in
+                        HStack {
+                            Text(order.number).font(.headline)
+                            Text(order.type.label).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Image(systemName: order.status.systemImage)
+                                .foregroundColor(Color(hex: order.status.hexColor))
+                            Text(order.status.label).font(.caption)
+                            Text(order.issueDate, format: .dateTime.day().month().year())
+                                .font(.caption).foregroundStyle(.secondary)
+                            if isOrphanedCustomStatus(order) {
+                                Button {
+                                    if let i = orderStore.orders.firstIndex(where: { $0.id == order.id }) {
+                                        orderStore.orders[i].customStatusID = nil
+                                        orderStore.save()
+                                    }
+                                } label: {
+                                    Label("Statut orphelin — réinitialiser", systemImage: "exclamationmark.triangle.fill")
+                                }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .foregroundStyle(.orange)
+                                .help("customStatusID « \(order.customStatusID ?? "")» n'existe plus dans Réglages > Statuts des commandes")
+                            }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+                    }
+                }
+                .padding(10)
+            }
+        }
+    }
+}
+
+struct DataPartiesPanel: View {
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var query = ""
+
+    private var filtered: [DirectoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return directory.entries.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending } }
+        return directory.entries.filter {
+            $0.displayName.lowercased().contains(q)
+                || ($0.party.siren ?? "").lowercased().contains(q)
+                || ($0.party.siret ?? "").lowercased().contains(q)
+        }.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                TextField("Rechercher (nom, SIREN, SIRET)", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Spacer()
+                Text("\(directory.entries.count) tiers").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Vue d'ensemble de l'annuaire (sociétés, clients, archivés).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(filtered) { entry in
+                        HStack {
+                            Text(entry.displayName).font(.headline)
+                            Text(entry.kind.label).font(.caption).foregroundStyle(.secondary)
+                            if let siren = entry.party.siren, !siren.isEmpty {
+                                Text("SIREN \(siren)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if entry.isArchived {
+                                Text("Archivé").font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.gray.opacity(0.2), in: Capsule())
+                            }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+                    }
+                }
+                .padding(10)
+            }
         }
     }
 }

@@ -32,9 +32,20 @@ func hexString(from color: Color) -> String {
 }
 
 extension View {
+    /// Bloque l'édition d'une section sans en griser le contenu : un liseré en
+    /// pointillés signale la zone en lecture seule (le bandeau au-dessus indique
+    /// déjà l'état verrouillé), les données restent pleinement lisibles.
     @ViewBuilder
     func lockable(_ locked: Bool) -> some View {
-        self.allowsHitTesting(!locked)
+        self
+            .allowsHitTesting(!locked)
+            .overlay {
+                if locked {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+                        .foregroundStyle(.secondary.opacity(0.5))
+                }
+            }
     }
 }
 /// Style de bouton uniforme pour les barres d'action (taille et forme identiques,
@@ -115,6 +126,7 @@ struct FacturXMacApp: App {
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
+    @StateObject private var smtpSettings = SMTPSettings.shared
     @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
@@ -131,6 +143,7 @@ struct FacturXMacApp: App {
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
+                .environmentObject(smtpSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -229,6 +242,7 @@ struct RootView: View {
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var smtpSettings: SMTPSettings
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
@@ -265,6 +279,7 @@ struct RootView: View {
         AuditStore.shared.load()
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
+        smtpSettings.credentials = reloadSMTPCredentials()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
@@ -292,6 +307,15 @@ struct RootView: View {
             return decoded
         }
         return SuperPDPCredentials(clientID: "", clientSecret: "")
+    }
+
+    private func reloadSMTPCredentials() -> SMTPCredentials {
+        let k = appEnv.key("facturx.smtp.credentials.v1")
+        if let data = UserDefaults.standard.data(forKey: k),
+           let decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+            return decoded
+        }
+        return SMTPCredentials()
     }
 
     private var mainBody: some View {
@@ -471,178 +495,68 @@ enum InvoiceFilterField: String, CaseIterable, Hashable {
     case type = "Type"
 }
 
-struct ExportSheet: View {
-    let invoices: [Invoice]
-    let orders: [SalesOrder]
-    @Binding var isPresented: Bool
-
-    enum ExportKind: String, CaseIterable, Hashable {
-        case invoices = "Factures"
-        case orders = "Commandes"
-    }
-
-    enum ExportFormat: String, CaseIterable, Hashable {
+/// Export direct des documents déjà filtrés dans la liste d'origine : pas de
+/// fenêtre intermédiaire de sélection, juste le choix du format puis
+/// l'emplacement de sauvegarde.
+enum QuickExport {
+    enum Format: String, CaseIterable, Hashable {
         case csvList = "Liste (CSV/Excel)"
         case csvLines = "Détail des lignes (CSV/Excel)"
-        case electronic = "Fichiers électroniques (Factur-X / Order-X)"
+        case electronic = "Fichiers électroniques (Factur-X)"
     }
 
-    @State private var kind: ExportKind = .invoices
-    @State private var format: ExportFormat = .csvList
-    @State private var query = ""
-    @State private var selectedIDs: Set<UUID> = []
-    @State private var exportLog: String = ""
+    enum OrderFormat: String, CaseIterable, Hashable {
+        case csvList = "Liste (CSV/Excel)"
+        case csvLines = "Détail des lignes (CSV/Excel)"
+        case electronic = "Fichiers électroniques (Order-X)"
+    }
 
-    private var baseList: [(id: UUID, number: String, date: Date, label: String, amount: Double)] {
-        switch kind {
-        case .invoices:
-            return invoices.map { ($0.id, $0.number, $0.issueDate, $0.type.label, $0.grandTotal) }
-        case .orders:
-            return orders.map { ($0.id, $0.number, $0.issueDate, $0.type.label, $0.grandTotal) }
+    static func run(invoices: [Invoice], format: Format) -> String {
+        switch format {
+        case .csvList:
+            return saveCSV(ExportGenerator().invoiceCSV(invoices), filename: "factures")
+        case .csvLines:
+            return saveCSV(ExportGenerator().invoiceLinesCSV(invoices), filename: "factures-lignes")
+        case .electronic:
+            return exportElectronicInvoices(invoices)
         }
     }
 
-    private var filteredList: [(id: UUID, number: String, date: Date, label: String, amount: Double)] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return baseList }
-        return baseList.filter { $0.number.lowercased().contains(q) || $0.label.lowercased().contains(q) }
-    }
-
-    private var selectedInvoices: [Invoice] {
-        invoices.filter { selectedIDs.contains($0.id) }
-    }
-
-    private var selectedOrders: [SalesOrder] {
-        orders.filter { selectedIDs.contains($0.id) }
-    }
-
-    private let df: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "dd/MM/yyyy"
-        return f
-    }()
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Export des documents").font(.headline)
-                Spacer()
-            }
-            .padding(12)
-            Divider()
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Type").font(.caption.bold())
-                    Picker("Type", selection: $kind) {
-                        ForEach(ExportKind.allCases, id: \.self) { k in Text(k.rawValue).tag(k) }
-                    }.labelsHidden().pickerStyle(.segmented)
-                    Text("Format").font(.caption.bold())
-                    Picker("Format", selection: $format) {
-                        ForEach(ExportFormat.allCases, id: \.self) { f in Text(f.rawValue).tag(f) }
-                    }.labelsHidden()
-                    HStack {
-                        Button("Tout sélectionner") {
-                            selectedIDs = Set(filteredList.map { $0.id })
-                        }
-                        Button("Tout désélectionner") {
-                            selectedIDs = []
-                        }
-                    }.font(.caption)
-                }
-                Spacer()
-            }
-            .padding(12)
-            HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Rechercher (numéro, type…)", text: $query)
-                    .textFieldStyle(.plain)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            Divider()
-            List(Array(filteredList.enumerated()), id: \.element.id) { _, item in
-                HStack {
-                    Image(systemName: selectedIDs.contains(item.id) ? "checkmark.square.fill" : "square")
-                        .foregroundStyle(selectedIDs.contains(item.id) ? Color.accentColor : Color.secondary)
-                        .onTapGesture {
-                            if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
-                            else { selectedIDs.insert(item.id) }
-                        }
-                    VStack(alignment: .leading) {
-                        Text(item.number).font(.headline)
-                        Text(item.label).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(String(format: "%.2f", item.amount))
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    Text(df.string(from: item.date)).font(.caption).foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
-                    else { selectedIDs.insert(item.id) }
-                }
-            }
-            Divider()
-            HStack {
-                Button("Fermer") { isPresented = false }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                if !exportLog.isEmpty {
-                    Text(exportLog).font(.caption).foregroundStyle(.secondary)
-                }
-                Button("Exporter") { runExport() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(selectedIDs.isEmpty)
-            }
-            .padding(12)
-        }
-        .frame(width: 640, height: 480)
-    }
-
-    private func runExport() {
-        exportLog = ""
-        switch (kind, format) {
-        case (.invoices, .csvList):
-            saveCSV(ExportGenerator().invoiceCSV(selectedInvoices), filename: "factures")
-        case (.invoices, .csvLines):
-            saveCSV(ExportGenerator().invoiceLinesCSV(selectedInvoices), filename: "factures-lignes")
-        case (.invoices, .electronic):
-            exportElectronicInvoices()
-        case (.orders, .csvList):
-            saveCSV(ExportGenerator().orderCSV(selectedOrders), filename: "commandes")
-        case (.orders, .csvLines):
-            saveCSV(ExportGenerator().orderLinesCSV(selectedOrders), filename: "commandes-lignes")
-        case (.orders, .electronic):
-            exportElectronicOrders()
+    static func run(orders: [SalesOrder], format: OrderFormat) -> String {
+        switch format {
+        case .csvList:
+            return saveCSV(ExportGenerator().orderCSV(orders), filename: "commandes")
+        case .csvLines:
+            return saveCSV(ExportGenerator().orderLinesCSV(orders), filename: "commandes-lignes")
+        case .electronic:
+            return exportElectronicOrders(orders)
         }
     }
 
-    private func saveCSV(_ csv: String, filename: String) {
+    private static func saveCSV(_ csv: String, filename: String) -> String {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
         panel.nameFieldStringValue = "\(filename).csv"
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                try ExportGenerator().writeCSV(csv, to: url)
-                exportLog = "Exporté : \(url.lastPathComponent)"
-            } catch {
-                exportLog = "Erreur : \(error)"
-            }
+        guard panel.runModal() == .OK, let url = panel.url else { return "" }
+        do {
+            try ExportGenerator().writeCSV(csv, to: url)
+            return "Exporté : \(url.lastPathComponent)"
+        } catch {
+            return "Erreur : \(error)"
         }
     }
 
-    private func exportElectronicInvoices() {
+    private static func exportElectronicInvoices(_ invoices: [Invoice]) -> String {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Exporter ici"
-        if panel.runModal() != .OK, panel.url == nil { return }
-        guard let dir = panel.url else { return }
+        guard panel.runModal() == .OK, let dir = panel.url else { return "" }
         var ok = 0
         var failed = 0
         var skipped = 0
         let gen = FacturXGenerator()
-        for inv in selectedInvoices {
+        for inv in invoices {
             if inv.type.isInternalCreditNote {
                 skipped += 1
                 continue
@@ -656,20 +570,19 @@ struct ExportSheet: View {
                 failed += 1
             }
         }
-        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
+        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
     }
 
-    private func exportElectronicOrders() {
+    private static func exportElectronicOrders(_ orders: [SalesOrder]) -> String {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Exporter ici"
-        if panel.runModal() != .OK, panel.url == nil { return }
-        guard let dir = panel.url else { return }
+        guard panel.runModal() == .OK, let dir = panel.url else { return "" }
         var ok = 0
         var failed = 0
         let gen = OrderXGenerator()
-        for order in selectedOrders {
+        for order in orders {
             do {
                 let data = try gen.generate(order: order)
                 let name = "commande-\(order.number).pdf"
@@ -679,7 +592,7 @@ struct ExportSheet: View {
                 failed += 1
             }
         }
-        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
+        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
     }
 }
 
@@ -884,7 +797,7 @@ struct InvoicesTabView: View {
     @State private var typeFilter: InvoiceTypeFilter = .all
     @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
-    @State private var showExport = false
+    @State private var exportMessage: String?
     @State private var showAdvancedFilters = false
     @State private var advField1: InvoiceFilterField = .none
     @State private var advValue1 = ""
@@ -957,8 +870,17 @@ struct InvoicesTabView: View {
                     .labelsHidden()
                     .frame(width: 200)
                     Spacer()
-                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                    Menu {
+                        ForEach(QuickExport.Format.allCases, id: \.self) { f in
+                            Button(f.rawValue) { exportMessage = QuickExport.run(invoices: filteredInvoices, format: f) }
+                        }
+                    } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
                         .buttonStyle(.bordered)
+                        .help("Exporte les factures actuellement filtrées (\(filteredInvoices.count))")
+                }
+                if let m = exportMessage, !m.isEmpty {
+                    Text(m).font(.caption).foregroundStyle(.secondary)
+                        .onChange(of: query) { _ in exportMessage = nil }
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -1113,13 +1035,6 @@ struct InvoicesTabView: View {
                 selectedID = nil
             }
         }
-        .sheet(isPresented: $showExport) {
-            ExportSheet(
-                invoices: scopedInvoices,
-                orders: scopedOrders,
-                isPresented: $showExport
-            )
-        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -1127,17 +1042,6 @@ struct InvoicesTabView: View {
         if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
             result = result.filter { order in
                 if let cid = order.companyID { return scope.contains(cid) }
-                return false
-            }
-        }
-        return result.sorted { $0.issueDate > $1.issueDate }
-    }
-
-    private var scopedInvoices: [Invoice] {
-        var result = store.invoices
-        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
-            result = result.filter { inv in
-                if let cid = inv.companyID { return scope.contains(cid) }
                 return false
             }
         }
@@ -1400,6 +1304,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var smtpSettings: SMTPSettings
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var duplicatedNumber: String?
@@ -1521,6 +1426,8 @@ struct InvoiceEditorView: View {
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · utilitaires · admin
+            // Défile horizontalement plutôt que de recadrer les boutons si la fenêtre est étroite.
+            ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 let configuredTransitions = invoiceStatusStore.override(for: invoice.status).transitionCodes.compactMap { InvoiceStatus(rawValue: $0) }
                 HStack(spacing: 8) {
@@ -1668,6 +1575,7 @@ struct InvoiceEditorView: View {
                 Spacer()
             }
             .padding(12)
+            }
             Divider()
             if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1777,29 +1685,46 @@ struct InvoiceEditorView: View {
                                         }
                                     }
                                     .help("Créée le \(invoice.createdAt.formatted(.dateTime.day().month().year().hour().minute())) (non modifiable).")
-                                    HStack(spacing: 3) {
-                                        Picker("Type", selection: $invoice.type) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Type").font(.caption)
+                                            InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
+                                        }
+                                        Picker("", selection: $invoice.type) {
                                             ForEach(InvoiceTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
-                                        }.frame(width: 260)
-                                        InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
+                                        }.labelsHidden().frame(width: 260)
                                     }
-                                    fieldHighlight(NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160), forRuleIDs: ["BR-5"])
-                                    InfoBadge(text: "BT-5 — Code de la devise (ram:TaxCurrencyCode / ram:InvoiceCurrencyCode).")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Devise").font(.caption)
+                                            InfoBadge(text: "BT-5 — Code de la devise (ram:TaxCurrencyCode / ram:InvoiceCurrencyCode).")
+                                        }
+                                        fieldHighlight(NormRefPicker("", options: NormRefs.currencies, code: $invoice.currency).labelsHidden().frame(width: 160), forRuleIDs: ["BR-5"])
+                                    }
                                 }
-                                HStack {
-                                    HStack(spacing: 3) {
-                                        DatePicker("Date facture", selection: $invoice.issueDate, displayedComponents: .date)
-                                        InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Date facture").font(.caption)
+                                            InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                                        }
+                                        DatePicker("", selection: $invoice.issueDate, displayedComponents: .date).labelsHidden()
                                     }
-                                    HStack(spacing: 3) {
-                                        DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
-                                        InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Échéance").font(.caption)
+                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                        }
+                                        DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
                                     }
-                                    HStack(spacing: 3) {
-                                        Picker("Mode facturation (BT-23)", selection: $invoice.billingMode) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Mode facturation (BT-23)").font(.caption)
+                                            InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
+                                        }
+                                        Picker("", selection: $invoice.billingMode) {
                                             ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                                        }.frame(width: 320)
-                                        InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
+                                        }.labelsHidden().frame(width: 320)
                                     }
                                 }
                                 HStack(spacing: 3) {
@@ -1894,12 +1819,12 @@ struct InvoiceEditorView: View {
                             invoice.paymentIBAN = p.iban
                             invoice.paymentBIC = p.bic
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
-                        })
+                        }, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
-                        PartySection(party: $invoice.buyer, role: .buyer)
+                        PartySection(party: $invoice.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-25", "BR-26", "BR-46"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
@@ -2021,6 +1946,7 @@ struct InvoiceEditorView: View {
             .onChange(of: invoice.status) { newStatus in
                 guard !syncingFromPDP else { return }
                 notifyPDPStatusChange(to: newStatus)
+                sendInvoiceStatusAlertIfNeeded(newStatus)
             }
             .sheet(isPresented: $showInvoicePreview) {
                 InvoicePreviewSheet(pdfData: previewPDFData, title: "Facture \(invoice.number)")
@@ -2368,6 +2294,26 @@ struct InvoiceEditorView: View {
         }
     }
 
+    /// Alerte email best-effort (au connecté, potentiellement utile si le
+    /// changement vient d'une synchronisation SUPER PDP en arrière-plan plutôt
+    /// que d'un clic explicite) — n'échoue jamais la mise à jour du statut.
+    private func sendInvoiceStatusAlertIfNeeded(_ newStatus: InvoiceStatus) {
+        let smtp = smtpSettings.credentials
+        guard smtp.alertsEnabled, smtp.alertOnInvoiceStatusChange, smtp.isConfigured,
+              [.accepted, .rejected, .paid, .cancelled].contains(newStatus),
+              let recipient = auth.currentUser?.username else { return }
+        let invoiceNumber = invoice.number
+        let label = newStatus.label
+        Task {
+            try? await SMTPService().send(
+                to: recipient,
+                subject: "Facture \(invoiceNumber) — \(label)",
+                body: "La facture \(invoiceNumber) est passée au statut « \(label) ».",
+                credentials: smtp
+            )
+        }
+    }
+
     private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         guard superPDPSettings.credentials.isConfigured else { return }
@@ -2629,6 +2575,7 @@ struct PartySection: View {
     @Binding var party: InvoiceParty
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
+    var locked: Bool = false
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var showPicker = false
@@ -2638,47 +2585,51 @@ struct PartySection: View {
     @State private var saveName = ""
     @State private var pendingEntry: DirectoryEntry?
     @State private var duplicateMatches: [PartyDirectory.DuplicateMatch]?
+    @State private var lookingUpElectronicAddress = false
+    @State private var electronicAddressLookupNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button {
-                    showPicker = true
-                } label: {
-                    Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
-                }
-                .buttonStyle(.bordered)
+            if !locked {
+                HStack {
+                    Button {
+                        showPicker = true
+                    } label: {
+                        Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
 
-                Button {
-                    saveName = party.name
-                    showSaveSheet = true
-                } label: {
-                    Label("Enregistrer dans l'annuaire", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.bordered)
-                .disabled(party.name.trimmingCharacters(in: .whitespaces).isEmpty)
-                if role == .buyer {
                     Button {
-                        showSuperPDPSearch = true
+                        saveName = party.name
+                        showSaveSheet = true
                     } label: {
-                        Label("SUPER PDP", systemImage: "paperplane")
+                        Label("Enregistrer dans l'annuaire", systemImage: "square.and.arrow.down")
                     }
                     .buttonStyle(.bordered)
-                    .disabled(!superPDPSettings.credentials.isConfigured)
-                    .help("Rechercher un destinataire dans l'annuaire SUPER PDP")
-                    Button {
-                        showFrenchDirectorySearch = true
-                    } label: {
-                        Label("Annuaire FR", systemImage: "building.2")
+                    .disabled(party.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if role == .buyer {
+                        Button {
+                            showSuperPDPSearch = true
+                        } label: {
+                            Label("SUPER PDP", systemImage: "paperplane")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!superPDPSettings.credentials.isConfigured)
+                        .help("Rechercher un destinataire dans l'annuaire SUPER PDP")
+                        Button {
+                            showFrenchDirectorySearch = true
+                        } label: {
+                            Label("Annuaire FR", systemImage: "building.2")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!superPDPSettings.credentials.isConfigured)
+                        .help("Rechercher une entreprise dans l'annuaire français (SIREN, adresse Peppol)")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!superPDPSettings.credentials.isConfigured)
-                    .help("Rechercher une entreprise dans l'annuaire français (SIREN, adresse Peppol)")
+                    Spacer()
                 }
-                Spacer()
             }
 
-            PartyEditorView(party: $party, isSociete: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showSuperPDPSearch) {
@@ -2717,26 +2668,27 @@ struct PartySection: View {
             VStack(spacing: 12) {
                 Text("Enregistrer dans l'annuaire").font(.headline)
                 TextField("Nom affiché", text: $saveName).frame(width: 320)
+                if role == .buyer, superPDPSettings.credentials.isConfigured {
+                    if lookingUpElectronicAddress {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Recherche de l'adresse électronique sur SUPER PDP…")
+                        }.font(.caption).foregroundStyle(.secondary)
+                    } else if let note = electronicAddressLookupNote {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 HStack {
                     Button("Annuler") { showSaveSheet = false }
                         .keyboardShortcut(.cancelAction)
                     Button("Enregistrer") {
-                        var p = party
-                        p.name = saveName.trimmingCharacters(in: .whitespaces).isEmpty ? party.name : saveName
-                        let entry = DirectoryEntry(kind: role.defaultKind, party: p)
-                        let dup = directory.findDuplicates(of: entry)
-                        if dup.isEmpty {
-                            directory.upsert(entry)
-                            showSaveSheet = false
-                        } else {
-                            pendingEntry = entry
-                            duplicateMatches = dup
-                        }
+                        saveToDirectory()
                     }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .disabled(lookingUpElectronicAddress)
                 }
-            }.padding(20)
+            }.padding(20).frame(minWidth: 360)
         }
         .alert("Tiers potentiellement en doublon", isPresented: Binding(
             get: { duplicateMatches != nil },
@@ -2761,6 +2713,55 @@ struct PartySection: View {
                 }.joined(separator: "\n")
                 Text("Un ou plusieurs tiers existants semblent correspondre :\n\(lines)")
             }
+        }
+    }
+
+    private func saveToDirectory() {
+        var p = party
+        p.name = saveName.trimmingCharacters(in: .whitespaces).isEmpty ? party.name : saveName
+        let siren = (p.siren ?? "").filter { $0.isNumber }
+        let siret = (p.siret ?? "").filter { $0.isNumber }
+        let currentEndpoint = (p.endpointID ?? "").trimmingCharacters(in: .whitespaces)
+        // La recherche DINUM (SireneResult.merged) préremplit endpointID avec le
+        // SIREN brut comme repli quand rien n'est renseigné : ce n'est pas une
+        // vraie adresse électronique, donc on ne doit pas s'arrêter là.
+        let isPlaceholderSirenFallback = !siren.isEmpty && currentEndpoint == siren
+        let hasRealElectronicAddress = !currentEndpoint.isEmpty && !isPlaceholderSirenFallback
+        guard role == .buyer, superPDPSettings.credentials.isConfigured, !hasRealElectronicAddress,
+              (siren.count == 9 || siret.count == 14) else {
+            finishSaveToDirectory(p)
+            return
+        }
+        lookingUpElectronicAddress = true
+        electronicAddressLookupNote = nil
+        let query = siret.count == 14 ? siret : siren
+        Task {
+            do {
+                let results = try await SuperPDPService().searchRecipient(siretOrSiren: query, credentials: superPDPSettings.credentials)
+                if let match = results.first(where: { ($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty == false }) {
+                    p.endpointID = match.routingAddress
+                    p.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
+                    electronicAddressLookupNote = "Adresse électronique trouvée sur SUPER PDP."
+                } else {
+                    electronicAddressLookupNote = "Aucune adresse électronique trouvée sur SUPER PDP pour ce SIREN/SIRET."
+                }
+            } catch {
+                electronicAddressLookupNote = "Recherche SUPER PDP indisponible : \(error.localizedDescription)"
+            }
+            lookingUpElectronicAddress = false
+            finishSaveToDirectory(p)
+        }
+    }
+
+    private func finishSaveToDirectory(_ p: InvoiceParty) {
+        let entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        let dup = directory.findDuplicates(of: entry)
+        if dup.isEmpty {
+            directory.upsert(entry)
+            showSaveSheet = false
+        } else {
+            pendingEntry = entry
+            duplicateMatches = dup
         }
     }
 
@@ -4268,6 +4269,7 @@ struct SocietiesAdminView: View {
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var tagStore: TagStore
@@ -4285,6 +4287,9 @@ struct ApplicationSettingsView: View {
     @State private var dinumExpanded = false
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = false
+    @State private var smtpExpanded = false
+    @State private var smtpTestMessage: String?
+    @State private var smtpTesting = false
     @State private var tagsExpanded = false
     @State private var numberingExpanded = false
     @State private var editingSociety: DirectoryEntry?
@@ -4525,6 +4530,88 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("SUPER PDP (dépôt + annuaire)", systemImage: "paperplane.circle")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $smtpExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Envoie des alertes par email (nouvel utilisateur, changement de statut de facture) via votre propre serveur SMTP. Seul le TLS implicite (port 465) est supporté ; STARTTLS (587) ne l'est pas.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle(isOn: $smtpSettings.credentials.alertsEnabled) {
+                            Text("Activer les alertes email").font(.body.weight(.semibold))
+                        }
+                        .toggleStyle(.switch)
+                        .onChange(of: smtpSettings.credentials.alertsEnabled) { _ in smtpSettings.save() }
+                        if smtpSettings.credentials.alertsEnabled {
+                            HStack {
+                                Text("Serveur").frame(width: 100, alignment: .leading)
+                                TextField("smtp.exemple.fr", text: $smtpSettings.credentials.host)
+                                Text("Port").foregroundStyle(.secondary)
+                                TextField("465", value: $smtpSettings.credentials.port, format: .number)
+                                    .frame(width: 70)
+                            }
+                            Toggle("TLS implicite (recommandé, port 465)", isOn: $smtpSettings.credentials.useTLS)
+                                .toggleStyle(.checkbox)
+                            HStack {
+                                Text("Utilisateur").frame(width: 100, alignment: .leading)
+                                TextField("Identifiant SMTP", text: $smtpSettings.credentials.username)
+                            }
+                            HStack {
+                                Text("Mot de passe").frame(width: 100, alignment: .leading)
+                                SecureField("Mot de passe SMTP", text: $smtpSettings.credentials.password)
+                            }
+                            HStack {
+                                Text("Expéditeur").frame(width: 100, alignment: .leading)
+                                TextField("alertes@votre-domaine.fr", text: $smtpSettings.credentials.fromAddress)
+                                TextField("Nom affiché", text: $smtpSettings.credentials.fromName).frame(width: 160)
+                            }
+                            Divider()
+                            Text("Déclencheurs").font(.caption.bold())
+                            Toggle("Nouvel utilisateur créé", isOn: $smtpSettings.credentials.alertOnNewUser)
+                                .toggleStyle(.checkbox)
+                            Toggle("Changement de statut de facture (Acceptée/Rejetée/Payée/Annulée)", isOn: $smtpSettings.credentials.alertOnInvoiceStatusChange)
+                                .toggleStyle(.checkbox)
+                            HStack {
+                                Button {
+                                    smtpSettings.save()
+                                } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                                    .buttonStyle(.borderedProminent)
+                                Button {
+                                    smtpTesting = true
+                                    smtpTestMessage = nil
+                                    let recipient = auth.currentUser?.username ?? smtpSettings.credentials.fromAddress
+                                    Task {
+                                        do {
+                                            try await SMTPService().send(
+                                                to: recipient,
+                                                subject: "Test SMTP — Factur-X",
+                                                body: "Ceci est un email de test envoyé depuis les Réglages de Factur-X.",
+                                                credentials: smtpSettings.credentials
+                                            )
+                                            smtpTestMessage = "Email de test envoyé à \(recipient)."
+                                        } catch {
+                                            smtpTestMessage = "Échec : \(error.localizedDescription)"
+                                        }
+                                        smtpTesting = false
+                                    }
+                                } label: {
+                                    if smtpTesting {
+                                        HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Envoi…") }
+                                    } else {
+                                        Label("Envoyer un test", systemImage: "paperplane")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(smtpTesting || !smtpSettings.credentials.isConfigured)
+                                Spacer()
+                            }
+                            if let m = smtpTestMessage {
+                                Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                            }
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Alertes email (SMTP)", systemImage: "envelope.badge")
                         .font(.headline)
                 }
 
@@ -5536,23 +5623,30 @@ struct SuperPDPEventsSheet: View {
             } else {
                 List {
                     ForEach(events) { ev in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Image(systemName: ev.direction == .sent ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                                    .foregroundStyle(ev.direction == .sent ? .blue : .teal)
-                                    .font(.caption)
-                                Text(ev.statusCode).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                Text(ev.detailLabel).font(.subheadline.bold())
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Image(systemName: ev.semanticSystemImage)
+                                    .foregroundStyle(Color(hex: ev.semanticHexColor))
+                                Text(ev.detailLabel).font(.body.bold())
                                 Spacer()
                                 if let d = ev.createdAt {
-                                    Text(d, style: .date).font(.caption2).foregroundStyle(.secondary)
+                                    Text(d, format: .dateTime.day().month().year().hour().minute())
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
+                            HStack(spacing: 6) {
+                                Image(systemName: ev.direction == .sent ? "arrow.up.circle" : "arrow.down.circle")
+                                Text(ev.direction == .sent ? "Envoyé" : "Reçu")
+                                Text("·")
+                                Text(ev.statusCode).font(.system(.caption2, design: .monospaced))
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                             if let n = ev.notes, !n.isEmpty {
-                                Text(n).font(.caption).foregroundStyle(.secondary)
+                                Text(n).font(.caption2).foregroundStyle(.secondary)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 3)
                     }
                 }
             }
@@ -5759,7 +5853,7 @@ struct SuperPDPSearchSheet: View {
                     siretOrSiren: query,
                     credentials: superPDPSettings.credentials
                 )
-                results = r
+                results = Self.deduplicated(r)
                 if r.isEmpty { error = "Aucun résultat." }
             } catch let e as SuperPDPError {
                 self.error = e.errorDescription
@@ -5768,6 +5862,23 @@ struct SuperPDPSearchSheet: View {
             }
             searching = false
         }
+    }
+
+    /// SUPER PDP peut renvoyer plusieurs enregistrements techniques distincts
+    /// (facturation/e-reporting/commandes…) pour la même société, avec des
+    /// champs affichés strictement identiques — on ne garde qu'une occurrence
+    /// par combinaison nom/SIREN/SIRET/adresse pour éviter des lignes qui
+    /// semblent être de purs doublons.
+    private static func deduplicated(_ entries: [SuperPDPDirectoryEntry]) -> [SuperPDPDirectoryEntry] {
+        var seen = Set<String>()
+        var unique: [SuperPDPDirectoryEntry] = []
+        for e in entries {
+            let key = [e.name ?? "", e.siren ?? "", e.siret ?? "", e.addressLine ?? "", e.city ?? ""].joined(separator: "|")
+            if seen.insert(key).inserted {
+                unique.append(e)
+            }
+        }
+        return unique
     }
 }
 
@@ -5780,6 +5891,7 @@ struct PartyEditorView: View {
     var hideEmail: Bool = false
     var hideBankDetails: Bool = false
     var hideElectronicAddress: Bool = false
+    var locked: Bool = false
     var isMultiContact: Bool
     var directory: PartyDirectory?
     var onPickContact: ((PartyContact) -> Void)?
@@ -5796,13 +5908,14 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, locked: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
         self.isSociete = isSociete
         self.hideEmail = hideEmail
         self.hideBankDetails = hideBankDetails
         self.hideElectronicAddress = hideElectronicAddress
+        self.locked = locked
         self.isMultiContact = contacts != nil
         self.directory = directory
         self.onPickContact = onPickContact
@@ -5930,11 +6043,13 @@ struct PartyEditorView: View {
                         Text((party.endpointID ?? "").isEmpty ? "Aucune" : (party.endpointID ?? ""))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button {
-                            showRoutingPicker = true
-                        } label: { Image(systemName: "envelope.circle.fill").font(.title3) }
-                            .buttonStyle(.borderless)
-                            .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
+                        if !locked {
+                            Button {
+                                showRoutingPicker = true
+                            } label: { Image(systemName: "envelope.circle.fill").font(.title3) }
+                                .buttonStyle(.borderless)
+                                .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
+                        }
                     } else {
                         TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
                         NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
@@ -5945,12 +6060,14 @@ struct PartyEditorView: View {
                 HStack {
                     Text("Contacts").font(.caption)
                     Spacer()
-                    Button {
-                        editingContact = nil
-                        showContactEditor = true
-                    } label: { Image(systemName: "plus.circle.fill").font(.title3) }
-                        .buttonStyle(.borderless)
-                        .help("Ajouter un contact")
+                    if !locked {
+                        Button {
+                            editingContact = nil
+                            showContactEditor = true
+                        } label: { Image(systemName: "plus.circle.fill").font(.title3) }
+                            .buttonStyle(.borderless)
+                            .help("Ajouter un contact")
+                    }
                 }
                 if contacts.isEmpty {
                     Text("Aucun contact").font(.callout).foregroundStyle(.secondary)
@@ -5974,20 +6091,22 @@ struct PartyEditorView: View {
                                     .background(Color.gray.opacity(0.2), in: Capsule())
                             }
                             Spacer()
-                            Button {
-                                editingContact = ct
-                                showContactEditor = true
-                            } label: { Image(systemName: "pencil") }
-                                .buttonStyle(.borderless)
-                                .help("Modifier ce contact")
-                            Button(role: .destructive) {
-                                contacts.removeAll { $0.id == ct.id }
-                                if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
-                                    contacts[0].isDefault = true
-                                }
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Supprimer ce contact")
+                            if !locked {
+                                Button {
+                                    editingContact = ct
+                                    showContactEditor = true
+                                } label: { Image(systemName: "pencil") }
+                                    .buttonStyle(.borderless)
+                                    .help("Modifier ce contact")
+                                Button(role: .destructive) {
+                                    contacts.removeAll { $0.id == ct.id }
+                                    if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
+                                        contacts[0].isDefault = true
+                                    }
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Supprimer ce contact")
+                            }
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
@@ -5998,11 +6117,13 @@ struct PartyEditorView: View {
                     HStack {
                         Text("Contact").font(.caption)
                         Spacer()
-                        Button {
-                            showContactPicker = true
-                        } label: { Image(systemName: "person.crop.circle.fill.badge.checkmark").font(.title3) }
-                            .buttonStyle(.borderless)
-                            .help("Choisir ou créer un contact depuis la fiche tiers")
+                        if !locked {
+                            Button {
+                                showContactPicker = true
+                            } label: { Image(systemName: "person.crop.circle.fill.badge.checkmark").font(.title3) }
+                                .buttonStyle(.borderless)
+                                .help("Choisir ou créer un contact depuis la fiche tiers")
+                        }
                     }
                     let name = party.contactName?.trimmingCharacters(in: .whitespaces) ?? ""
                     let email = hideEmail ? "" : (party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? "")
@@ -6029,7 +6150,7 @@ struct PartyEditorView: View {
                     TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
                 }
             }
-            if !hideElectronicAddress, linkedEntry == nil {
+            if !hideElectronicAddress, linkedEntry == nil, !locked {
                 Button {
                     showRoutingEditor = true
                 } label: {
@@ -6068,19 +6189,21 @@ struct PartyEditorView: View {
                                 .background(Color.accentColor.opacity(0.2), in: Capsule())
                         }
                         Spacer()
-                        Button {
-                            editingAddress = addr
-                        } label: { Image(systemName: "pencil") }
-                            .buttonStyle(.borderless)
-                            .help("Modifier cette adresse")
-                        Button(role: .destructive) {
-                            routingAddresses.removeAll { $0.id == addr.id }
-                            if routingAddresses.allSatisfy({ !$0.isDefault }), !routingAddresses.isEmpty {
-                                routingAddresses[0].isDefault = true
-                            }
-                        } label: { Image(systemName: "trash") }
-                            .buttonStyle(.borderless)
-                            .help("Supprimer cette adresse")
+                        if !locked {
+                            Button {
+                                editingAddress = addr
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier cette adresse")
+                            Button(role: .destructive) {
+                                routingAddresses.removeAll { $0.id == addr.id }
+                                if routingAddresses.allSatisfy({ !$0.isDefault }), !routingAddresses.isEmpty {
+                                    routingAddresses[0].isDefault = true
+                                }
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer cette adresse")
+                        }
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
@@ -6324,22 +6447,25 @@ struct OrderPartySection: View {
     @Binding var party: InvoiceParty
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
+    var locked: Bool = false
     @EnvironmentObject var directory: PartyDirectory
     @State private var showPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button {
-                    showPicker = true
-                } label: {
-                    Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+            if !locked {
+                HStack {
+                    Button {
+                        showPicker = true
+                    } label: {
+                        Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
                 }
-                .buttonStyle(.bordered)
-                Spacer()
             }
 
-            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -6392,7 +6518,7 @@ struct OrdersTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @Binding var selectedID: UUID?
     @State private var query = ""
-    @State private var showExport = false
+    @State private var exportMessage: String?
 
     var filteredOrders: [SalesOrder] {
         var result = orderStore.orders
@@ -6424,8 +6550,17 @@ struct OrdersTabView: View {
                         .buttonStyle(.borderedProminent)
                     Text("Commandes").font(.title2.bold())
                     Spacer()
-                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                    Menu {
+                        ForEach(QuickExport.OrderFormat.allCases, id: \.self) { f in
+                            Button(f.rawValue) { exportMessage = QuickExport.run(orders: filteredOrders, format: f) }
+                        }
+                    } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
                         .buttonStyle(.bordered)
+                        .help("Exporte les commandes actuellement filtrées (\(filteredOrders.count))")
+                }
+                if let m = exportMessage, !m.isEmpty {
+                    Text(m).font(.caption).foregroundStyle(.secondary)
+                        .onChange(of: query) { _ in exportMessage = nil }
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -6517,13 +6652,6 @@ struct OrdersTabView: View {
                 }
             }
         }
-        .sheet(isPresented: $showExport) {
-            ExportSheet(
-                invoices: scopedInvoices,
-                orders: scopedOrders,
-                isPresented: $showExport
-            )
-        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -6531,17 +6659,6 @@ struct OrdersTabView: View {
         if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
             result = result.filter { order in
                 if let cid = order.companyID { return scope.contains(cid) }
-                return false
-            }
-        }
-        return result.sorted { $0.issueDate > $1.issueDate }
-    }
-
-    private var scopedInvoices: [Invoice] {
-        var result = store.invoices
-        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
-            result = result.filter { inv in
-                if let cid = inv.companyID { return scope.contains(cid) }
                 return false
             }
         }
@@ -6653,6 +6770,7 @@ struct OrderEditorView: View {
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · admin
+            ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 let currentStatus = statusStore.override(for: order)
                 let configuredTransitions = statusStore.override(for: order.status).transitionCodes.compactMap { OrderStatus(rawValue: $0) }
@@ -6717,6 +6835,7 @@ struct OrderEditorView: View {
                 Spacer()
             }
             .padding(12)
+            }
             Divider()
             if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || createdInvoiceNumber != nil {
                 VStack(alignment: .leading, spacing: 8) {
@@ -6844,10 +6963,10 @@ struct OrderEditorView: View {
 
                 HStack(alignment: .top, spacing: 12) {
                     GroupBox("Acheteur (vous)") {
-                        OrderPartySection(party: $order.buyer, role: .buyer)
+                        OrderPartySection(party: $order.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     GroupBox("Client") {
-                        OrderPartySection(party: $order.seller, role: .buyer)
+                        OrderPartySection(party: $order.seller, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                 }
 

@@ -82,17 +82,13 @@ public final class SireneService {
     public func lookup(query: String) async throws -> [SireneResult] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { throw SireneError.emptyQuery }
+        // L'API recherche-entreprises.api.gouv.fr n'accepte pas de préfixe de champ
+        // (ex. "siren:123456789") dans le paramètre q : elle attend le numéro brut,
+        // exactement comme une recherche par nom. Un préfixe fait échouer la requête
+        // (0 résultat) — vérifié empiriquement.
         let digits = trimmed.filter { $0.isNumber }
-        let isSiret = digits.count >= 14
-        let isSiren = digits.count == 9
-        let qParam: String
-        if isSiret {
-            qParam = "siret:" + digits
-        } else if isSiren {
-            qParam = "siren:" + digits
-        } else {
-            qParam = trimmed
-        }
+        let isSiretOrSiren = digits.count == 9 || digits.count >= 14
+        let qParam = isSiretOrSiren ? digits : trimmed
         let endpoint = "https://recherche-entreprises.api.gouv.fr/search?q=" + urlEncode(qParam)
         guard let url = URL(string: endpoint) else {
             throw SireneError.decoding("URL invalide : \(endpoint)")
