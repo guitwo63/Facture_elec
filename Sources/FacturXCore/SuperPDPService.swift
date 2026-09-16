@@ -461,18 +461,31 @@ public final class SuperPDPService {
         return []
     }
 
-    private func mapDirectoryEntry(_ dict: [String: Any]) -> SuperPDPDirectoryEntry {
+    /// Accessible en `@testable` pour couvrir le fallback objet imbriqué sans
+    /// dépendre d'un accès réseau réel à SUPER PDP.
+    func mapDirectoryEntry(_ dict: [String: Any]) -> SuperPDPDirectoryEntry {
+        // Certaines réponses imbriquent les informations de l'entreprise sous une
+        // clé "party"/"company" plutôt qu'à plat — on cherche dans les deux, sans
+        // quoi des champs comme le nom (dénomination) restent silencieusement nil.
+        let nestedParty = dict["party"] as? [String: Any] ?? dict["company"] as? [String: Any]
         func s(_ key: String) -> String? {
-            if let v = dict[key] as? String { return v.isEmpty ? nil : v }
+            if let v = dict[key] as? String, !v.isEmpty { return v }
             if let n = dict[key] as? NSNumber { return n.stringValue }
+            if let nested = nestedParty {
+                if let v = nested[key] as? String, !v.isEmpty { return v }
+                if let n = nested[key] as? NSNumber { return n.stringValue }
+            }
             return nil
         }
         func b(_ key: String) -> Bool? {
             if let v = dict[key] as? Bool { return v }
             if let v = dict[key] as? String { return v.lowercased() == "oui" || v.lowercased() == "true" || v == "1" }
+            if let nested = nestedParty {
+                if let v = nested[key] as? Bool { return v }
+                if let v = nested[key] as? String { return v.lowercased() == "oui" || v.lowercased() == "true" || v == "1" }
+            }
             return nil
         }
-        let nestedParty = dict["party"] as? [String: Any] ?? dict["company"] as? [String: Any]
         let nameVal = s("name") ?? s("formal_name") ?? s("denomination") ?? s("raison_sociale")
         let siret = s("siret")
         let siren = s("siren") ?? (siret.flatMap { SuperPDPService.extractSiren(from: $0) })
@@ -489,7 +502,13 @@ public final class SuperPDPService {
             else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
             else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
         }
-        _ = nestedParty
+        if let nested = nestedParty {
+            for (k, v) in nested where raw[k] == nil {
+                if let sv = v as? String { raw[k] = sv }
+                else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
+                else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
+            }
+        }
         return SuperPDPDirectoryEntry(
             name: nameVal,
             siren: siren,
