@@ -1894,12 +1894,12 @@ struct InvoiceEditorView: View {
                             invoice.paymentIBAN = p.iban
                             invoice.paymentBIC = p.bic
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
-                        })
+                        }, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
-                        PartySection(party: $invoice.buyer, role: .buyer)
+                        PartySection(party: $invoice.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-25", "BR-26", "BR-46"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
@@ -2629,6 +2629,7 @@ struct PartySection: View {
     @Binding var party: InvoiceParty
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
+    var locked: Bool = false
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var showPicker = false
@@ -2641,44 +2642,46 @@ struct PartySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button {
-                    showPicker = true
-                } label: {
-                    Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
-                }
-                .buttonStyle(.bordered)
+            if !locked {
+                HStack {
+                    Button {
+                        showPicker = true
+                    } label: {
+                        Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
 
-                Button {
-                    saveName = party.name
-                    showSaveSheet = true
-                } label: {
-                    Label("Enregistrer dans l'annuaire", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.bordered)
-                .disabled(party.name.trimmingCharacters(in: .whitespaces).isEmpty)
-                if role == .buyer {
                     Button {
-                        showSuperPDPSearch = true
+                        saveName = party.name
+                        showSaveSheet = true
                     } label: {
-                        Label("SUPER PDP", systemImage: "paperplane")
+                        Label("Enregistrer dans l'annuaire", systemImage: "square.and.arrow.down")
                     }
                     .buttonStyle(.bordered)
-                    .disabled(!superPDPSettings.credentials.isConfigured)
-                    .help("Rechercher un destinataire dans l'annuaire SUPER PDP")
-                    Button {
-                        showFrenchDirectorySearch = true
-                    } label: {
-                        Label("Annuaire FR", systemImage: "building.2")
+                    .disabled(party.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if role == .buyer {
+                        Button {
+                            showSuperPDPSearch = true
+                        } label: {
+                            Label("SUPER PDP", systemImage: "paperplane")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!superPDPSettings.credentials.isConfigured)
+                        .help("Rechercher un destinataire dans l'annuaire SUPER PDP")
+                        Button {
+                            showFrenchDirectorySearch = true
+                        } label: {
+                            Label("Annuaire FR", systemImage: "building.2")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!superPDPSettings.credentials.isConfigured)
+                        .help("Rechercher une entreprise dans l'annuaire français (SIREN, adresse Peppol)")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!superPDPSettings.credentials.isConfigured)
-                    .help("Rechercher une entreprise dans l'annuaire français (SIREN, adresse Peppol)")
+                    Spacer()
                 }
-                Spacer()
             }
 
-            PartyEditorView(party: $party, isSociete: role == .seller, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showSuperPDPSearch) {
@@ -5780,6 +5783,7 @@ struct PartyEditorView: View {
     var hideEmail: Bool = false
     var hideBankDetails: Bool = false
     var hideElectronicAddress: Bool = false
+    var locked: Bool = false
     var isMultiContact: Bool
     var directory: PartyDirectory?
     var onPickContact: ((PartyContact) -> Void)?
@@ -5796,13 +5800,14 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, locked: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
         self.isSociete = isSociete
         self.hideEmail = hideEmail
         self.hideBankDetails = hideBankDetails
         self.hideElectronicAddress = hideElectronicAddress
+        self.locked = locked
         self.isMultiContact = contacts != nil
         self.directory = directory
         self.onPickContact = onPickContact
@@ -5930,11 +5935,13 @@ struct PartyEditorView: View {
                         Text((party.endpointID ?? "").isEmpty ? "Aucune" : (party.endpointID ?? ""))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button {
-                            showRoutingPicker = true
-                        } label: { Image(systemName: "envelope.circle.fill").font(.title3) }
-                            .buttonStyle(.borderless)
-                            .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
+                        if !locked {
+                            Button {
+                                showRoutingPicker = true
+                            } label: { Image(systemName: "envelope.circle.fill").font(.title3) }
+                                .buttonStyle(.borderless)
+                                .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
+                        }
                     } else {
                         TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
                         NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
@@ -5945,12 +5952,14 @@ struct PartyEditorView: View {
                 HStack {
                     Text("Contacts").font(.caption)
                     Spacer()
-                    Button {
-                        editingContact = nil
-                        showContactEditor = true
-                    } label: { Image(systemName: "plus.circle.fill").font(.title3) }
-                        .buttonStyle(.borderless)
-                        .help("Ajouter un contact")
+                    if !locked {
+                        Button {
+                            editingContact = nil
+                            showContactEditor = true
+                        } label: { Image(systemName: "plus.circle.fill").font(.title3) }
+                            .buttonStyle(.borderless)
+                            .help("Ajouter un contact")
+                    }
                 }
                 if contacts.isEmpty {
                     Text("Aucun contact").font(.callout).foregroundStyle(.secondary)
@@ -5974,20 +5983,22 @@ struct PartyEditorView: View {
                                     .background(Color.gray.opacity(0.2), in: Capsule())
                             }
                             Spacer()
-                            Button {
-                                editingContact = ct
-                                showContactEditor = true
-                            } label: { Image(systemName: "pencil") }
-                                .buttonStyle(.borderless)
-                                .help("Modifier ce contact")
-                            Button(role: .destructive) {
-                                contacts.removeAll { $0.id == ct.id }
-                                if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
-                                    contacts[0].isDefault = true
-                                }
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Supprimer ce contact")
+                            if !locked {
+                                Button {
+                                    editingContact = ct
+                                    showContactEditor = true
+                                } label: { Image(systemName: "pencil") }
+                                    .buttonStyle(.borderless)
+                                    .help("Modifier ce contact")
+                                Button(role: .destructive) {
+                                    contacts.removeAll { $0.id == ct.id }
+                                    if contacts.allSatisfy({ !$0.isDefault }), !contacts.isEmpty {
+                                        contacts[0].isDefault = true
+                                    }
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Supprimer ce contact")
+                            }
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
@@ -5998,11 +6009,13 @@ struct PartyEditorView: View {
                     HStack {
                         Text("Contact").font(.caption)
                         Spacer()
-                        Button {
-                            showContactPicker = true
-                        } label: { Image(systemName: "person.crop.circle.fill.badge.checkmark").font(.title3) }
-                            .buttonStyle(.borderless)
-                            .help("Choisir ou créer un contact depuis la fiche tiers")
+                        if !locked {
+                            Button {
+                                showContactPicker = true
+                            } label: { Image(systemName: "person.crop.circle.fill.badge.checkmark").font(.title3) }
+                                .buttonStyle(.borderless)
+                                .help("Choisir ou créer un contact depuis la fiche tiers")
+                        }
                     }
                     let name = party.contactName?.trimmingCharacters(in: .whitespaces) ?? ""
                     let email = hideEmail ? "" : (party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? "")
@@ -6029,7 +6042,7 @@ struct PartyEditorView: View {
                     TextField("Téléphone", text: Binding($party.contactPhone, replacingNilWith: ""))
                 }
             }
-            if !hideElectronicAddress, linkedEntry == nil {
+            if !hideElectronicAddress, linkedEntry == nil, !locked {
                 Button {
                     showRoutingEditor = true
                 } label: {
@@ -6068,19 +6081,21 @@ struct PartyEditorView: View {
                                 .background(Color.accentColor.opacity(0.2), in: Capsule())
                         }
                         Spacer()
-                        Button {
-                            editingAddress = addr
-                        } label: { Image(systemName: "pencil") }
-                            .buttonStyle(.borderless)
-                            .help("Modifier cette adresse")
-                        Button(role: .destructive) {
-                            routingAddresses.removeAll { $0.id == addr.id }
-                            if routingAddresses.allSatisfy({ !$0.isDefault }), !routingAddresses.isEmpty {
-                                routingAddresses[0].isDefault = true
-                            }
-                        } label: { Image(systemName: "trash") }
-                            .buttonStyle(.borderless)
-                            .help("Supprimer cette adresse")
+                        if !locked {
+                            Button {
+                                editingAddress = addr
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier cette adresse")
+                            Button(role: .destructive) {
+                                routingAddresses.removeAll { $0.id == addr.id }
+                                if routingAddresses.allSatisfy({ !$0.isDefault }), !routingAddresses.isEmpty {
+                                    routingAddresses[0].isDefault = true
+                                }
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer cette adresse")
+                        }
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
@@ -6324,22 +6339,25 @@ struct OrderPartySection: View {
     @Binding var party: InvoiceParty
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
+    var locked: Bool = false
     @EnvironmentObject var directory: PartyDirectory
     @State private var showPicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button {
-                    showPicker = true
-                } label: {
-                    Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+            if !locked {
+                HStack {
+                    Button {
+                        showPicker = true
+                    } label: {
+                        Label("Choisir dans l'annuaire", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
                 }
-                .buttonStyle(.bordered)
-                Spacer()
             }
 
-            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -6844,10 +6862,10 @@ struct OrderEditorView: View {
 
                 HStack(alignment: .top, spacing: 12) {
                     GroupBox("Acheteur (vous)") {
-                        OrderPartySection(party: $order.buyer, role: .buyer)
+                        OrderPartySection(party: $order.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     GroupBox("Client") {
-                        OrderPartySection(party: $order.seller, role: .buyer)
+                        OrderPartySection(party: $order.seller, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                 }
 
