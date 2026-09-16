@@ -2839,8 +2839,13 @@ struct PartySection: View {
         p.name = saveName.trimmingCharacters(in: .whitespaces).isEmpty ? party.name : saveName
         let siren = (p.siren ?? "").filter { $0.isNumber }
         let siret = (p.siret ?? "").filter { $0.isNumber }
-        let hasElectronicAddress = !(p.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-        guard role == .buyer, superPDPSettings.credentials.isConfigured, !hasElectronicAddress,
+        let currentEndpoint = (p.endpointID ?? "").trimmingCharacters(in: .whitespaces)
+        // La recherche DINUM (SireneResult.merged) préremplit endpointID avec le
+        // SIREN brut comme repli quand rien n'est renseigné : ce n'est pas une
+        // vraie adresse électronique, donc on ne doit pas s'arrêter là.
+        let isPlaceholderSirenFallback = !siren.isEmpty && currentEndpoint == siren
+        let hasRealElectronicAddress = !currentEndpoint.isEmpty && !isPlaceholderSirenFallback
+        guard role == .buyer, superPDPSettings.credentials.isConfigured, !hasRealElectronicAddress,
               (siren.count == 9 || siret.count == 14) else {
             finishSaveToDirectory(p)
             return

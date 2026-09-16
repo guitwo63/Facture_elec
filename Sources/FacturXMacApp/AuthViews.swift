@@ -817,17 +817,23 @@ struct DataAdminView: View {
                 Text("Administration des données").font(.title2.bold())
                 Spacer()
             }.padding(10)
-            Picker("Table", selection: $table) {
-                ForEach(DataTable.allCases) { t in Text(t.rawValue).tag(t) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 10).padding(.bottom, 8)
             Divider()
-            switch table {
-            case .invoices: DataInvoicesPanel()
-            case .orders: DataOrdersPanel()
-            case .parties: DataPartiesPanel()
+            HSplitView {
+                List(DataTable.allCases, selection: Binding<DataTable?>(
+                    get: { table },
+                    set: { if let t = $0 { table = t } }
+                )) { t in
+                    Text(t.rawValue).tag(t)
+                }
+                .frame(minWidth: 160, idealWidth: 180, maxWidth: 220)
+                Group {
+                    switch table {
+                    case .invoices: DataInvoicesPanel()
+                    case .orders: DataOrdersPanel()
+                    case .parties: DataPartiesPanel()
+                    }
+                }
+                .frame(minWidth: 360)
             }
         }
     }

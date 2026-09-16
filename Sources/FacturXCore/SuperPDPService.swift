@@ -219,6 +219,7 @@ public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
 
     public var detailLabel: String {
         switch statusCode {
+        case "fr:200": return "Facture déposée sur la plateforme"
         case "fr:204": return "Mis à disposition du destinataire"
         case "fr:205": return "Lu par le destinataire"
         case "fr:206": return "Refusé par le destinataire"
@@ -230,7 +231,16 @@ public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
         case "fr:212": return "Facture encaissée"
         case "fr:220": return "Facture rejetée par la PDP"
         case "fr:320": return "Facture annulée"
-        default: return "Événement \(statusCode)"
+        // Événements techniques de circulation avec le Portail Public de
+        // Facturation (PPF), distincts des statuts métier fr:xxx.
+        case "ppf:validated": return "Validée par le Portail Public de Facturation"
+        case "ppf:payment-received": return "Paiement notifié au Portail Public de Facturation"
+        default:
+            if statusCode.hasPrefix("ppf:") {
+                let readable = statusCode.dropFirst(4).replacingOccurrences(of: "-", with: " ")
+                return "PPF — \(readable)"
+            }
+            return "Événement \(statusCode)"
         }
     }
 
@@ -239,15 +249,15 @@ public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
     public var semanticHexColor: String {
         switch statusCode {
         case "fr:206", "fr:210", "fr:220", "fr:320": return "C0392B" // refus/litige/rejet/annulation
-        case "fr:207", "fr:209", "fr:212": return "2E8B57" // accepté/réglée/encaissée
-        default: return "2A6EBB" // informationnel (mis à disposition, lu, transférée, attente)
+        case "fr:207", "fr:209", "fr:212", "ppf:validated", "ppf:payment-received": return "2E8B57" // accepté/réglée/encaissée/validée/paiement
+        default: return "2A6EBB" // informationnel (déposée, mis à disposition, lu, transférée, attente)
         }
     }
 
     public var semanticSystemImage: String {
         switch statusCode {
         case "fr:206", "fr:210", "fr:220", "fr:320": return "xmark.circle.fill"
-        case "fr:207", "fr:209", "fr:212": return "checkmark.circle.fill"
+        case "fr:207", "fr:209", "fr:212", "ppf:validated", "ppf:payment-received": return "checkmark.circle.fill"
         default: return "info.circle.fill"
         }
     }
