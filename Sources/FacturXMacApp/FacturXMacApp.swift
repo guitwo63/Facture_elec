@@ -6519,6 +6519,7 @@ struct OrdersTabView: View {
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
+    @State private var showScanImport = false
 
     var filteredOrders: [SalesOrder] {
         var result = orderStore.orders
@@ -6548,6 +6549,11 @@ struct OrdersTabView: View {
                         selectedID = draft.id
                     } label: { Label("Nouvelle commande", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
+                    Button {
+                        showScanImport = true
+                    } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
+                        .buttonStyle(.bordered)
+                        .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
                     Text("Commandes").font(.title2.bold())
                     Spacer()
                     Menu {
@@ -6651,6 +6657,15 @@ struct OrdersTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+        }
+        .sheet(isPresented: $showScanImport) {
+            DocumentScanImportView(
+                onCreated: { orderID in
+                    selectedID = orderID
+                    showScanImport = false
+                },
+                onCancel: { showScanImport = false }
+            )
         }
     }
 
