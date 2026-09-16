@@ -128,6 +128,7 @@ struct FacturXMacApp: App {
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
     @StateObject private var smtpSettings = SMTPSettings.shared
     @StateObject private var pcloudSettings = PCloudSettings.shared
+    @StateObject private var backupStrategyStore = BackupStrategyStore.shared
     @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
@@ -146,6 +147,7 @@ struct FacturXMacApp: App {
                 .environmentObject(superPDPSettings)
                 .environmentObject(smtpSettings)
                 .environmentObject(pcloudSettings)
+                .environmentObject(backupStrategyStore)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -246,7 +248,9 @@ struct RootView: View {
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var pcloudSettings: PCloudSettings
+    @EnvironmentObject var backupStrategyStore: BackupStrategyStore
     @State private var tab: RootTab = .invoices
+    @State private var didAttemptAutoBackup = false
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
     @State private var showSettings = false
@@ -284,6 +288,7 @@ struct RootView: View {
         superPDPSettings.credentials = reloadSuperPDPCredentials()
         smtpSettings.credentials = reloadSMTPCredentials()
         pcloudSettings.load()
+        backupStrategyStore.load()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
@@ -451,8 +456,30 @@ struct RootView: View {
                 tab = .orders
             }
             syncAuditActor()
+            runAutoBackupIfNeeded()
         }
         .onChange(of: auth.currentUser) { _ in syncAuditActor() }
+    }
+
+    /// Stratégie de lancement (chantier « sauvegardes ») : au premier affichage
+    /// post-connexion, si l'utilisateur l'a activé, lance une sauvegarde en
+    /// tâche de fond — silencieuse pour ne pas interrompre l'ouverture de
+    /// l'app, mais tracée dans le journal d'audit dans les deux cas.
+    private func runAutoBackupIfNeeded() {
+        guard !didAttemptAutoBackup else { return }
+        didAttemptAutoBackup = true
+        guard backupStrategyStore.settings.autoBackupOnLaunch, pcloudSettings.credentials.isConfigured else { return }
+        let credentials = pcloudSettings.credentials
+        let strategy = backupStrategyStore.settings
+        let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, directory: directory)
+        Task {
+            do {
+                let summary = try await BackupRunner.run(bundle: bundle, pcloudCredentials: credentials, strategy: strategy)
+                store.audit?.record(actor: "system", action: "backup_auto_launch_success", target: "", details: summary)
+            } catch {
+                store.audit?.record(actor: "system", action: "backup_auto_launch_failed", target: "", details: error.localizedDescription)
+            }
+        }
     }
 
     private func syncAuditActor() {
