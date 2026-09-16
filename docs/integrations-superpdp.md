@@ -125,3 +125,14 @@ Les Priorités 3-4 (e-reporting, conversion UBL, mandats, CRUD annuaire) restent
   - `validateInvoice` déjà présent → exposer dans l'éditeur.
 - Modèles : `SuperPDPInvoiceEvent` (status_code, created_at, details/notes).
 - UI : boutons dans la fiche facture + feuille d'historique + diagnostic de session dans les réglages.
+
+## 6. Mise à jour — chantier A (étude, sans implémentation dans cette PR)
+
+Vérification faite directement dans `Sources/FacturXCore/SuperPDPService.swift` : P1 (`downloadInvoice`, `listInvoiceEvents`, `validateInvoice`) et P2 (`searchFrenchDirectory`, `getSession`) sont bien implémentés et exposés dans l'UI. Ce qui reste **non utilisé** aujourd'hui, sans changement depuis l'analyse initiale :
+
+- **E-Reporting (P3)** — `b2bint_invoices/payments`, `b2c_transactions/payments`, `ereportings` : c'est le bloc le plus significatif encore non couvert, car c'est une **obligation réglementaire** (transmission à la DGFiP des opérations hors du champ facture électronique B2B domestique), pas juste une fonctionnalité de confort. À prioriser dès que l'app doit couvrir des flux B2C ou B2B intracommunautaires — sinon l'utilisateur doit déclarer ces flux par un autre moyen, ce qui est un vrai manque fonctionnel, pas une simple limitation technique.
+- **Conversion de formats (P4.1)** — `POST /invoices/convert` (CII ↔ UBL ↔ vue lisible) : utile seulement si un client/partenaire exige un format non-CII ; pas de demande identifiée à ce jour côté utilisateur.
+- **Mandats de facturation (P4.2)** — `company_mandates` : cas d'usage self-billing/cabinet comptable pour compte de tiers ; nécessite une validation métier (qui mandate qui, quelles responsabilités) avant tout développement, pas seulement du code.
+- **Gestion fine de l'annuaire SUPER PDP (P4.3)** — CRUD `directory_entries/{id}` : l'app consomme déjà l'annuaire en lecture (recherche) ; créer/gérer ses propres entrées d'annuaire depuis l'app n'apporte de valeur que si l'utilisateur gère l'inscription de plusieurs sociétés lui-même plutôt que via le portail SUPER PDP.
+
+**Recommandation inchangée** : rien dans ce lot ne justifie un développement immédiat sans un besoin utilisateur explicite, à l'exception de l'e-reporting si des flux B2C/B2B-int existent réellement dans l'activité facturée par l'app — dans ce cas, ce serait la seule priorité réglementaire (par opposition à fonctionnelle) de cette liste.
