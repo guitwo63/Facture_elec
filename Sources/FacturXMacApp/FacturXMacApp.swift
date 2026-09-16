@@ -495,192 +495,68 @@ enum InvoiceFilterField: String, CaseIterable, Hashable {
     case type = "Type"
 }
 
-struct ExportSheet: View {
-    let invoices: [Invoice]
-    let orders: [SalesOrder]
-    var initialKind: ExportKind = .invoices
-    @Binding var isPresented: Bool
-
-    enum ExportKind: String, CaseIterable, Hashable {
-        case invoices = "Factures"
-        case orders = "Commandes"
-    }
-
-    enum ExportFormat: String, CaseIterable, Hashable {
+/// Export direct des documents déjà filtrés dans la liste d'origine : pas de
+/// fenêtre intermédiaire de sélection, juste le choix du format puis
+/// l'emplacement de sauvegarde.
+enum QuickExport {
+    enum Format: String, CaseIterable, Hashable {
         case csvList = "Liste (CSV/Excel)"
         case csvLines = "Détail des lignes (CSV/Excel)"
-        case electronic = "Fichiers électroniques (Factur-X / Order-X)"
+        case electronic = "Fichiers électroniques (Factur-X)"
     }
 
-    @State private var kind: ExportKind = .invoices
-    @State private var format: ExportFormat = .csvList
-    @State private var query = ""
-    @State private var selectedIDs: Set<UUID> = []
-    @State private var exportLog: String = ""
-    @State private var didInitSelection = false
+    enum OrderFormat: String, CaseIterable, Hashable {
+        case csvList = "Liste (CSV/Excel)"
+        case csvLines = "Détail des lignes (CSV/Excel)"
+        case electronic = "Fichiers électroniques (Order-X)"
+    }
 
-    private var baseList: [(id: UUID, number: String, date: Date, label: String, amount: Double)] {
-        switch kind {
-        case .invoices:
-            return invoices.map { ($0.id, $0.number, $0.issueDate, $0.type.label, $0.grandTotal) }
-        case .orders:
-            return orders.map { ($0.id, $0.number, $0.issueDate, $0.type.label, $0.grandTotal) }
+    static func run(invoices: [Invoice], format: Format) -> String {
+        switch format {
+        case .csvList:
+            return saveCSV(ExportGenerator().invoiceCSV(invoices), filename: "factures")
+        case .csvLines:
+            return saveCSV(ExportGenerator().invoiceLinesCSV(invoices), filename: "factures-lignes")
+        case .electronic:
+            return exportElectronicInvoices(invoices)
         }
     }
 
-    private var filteredList: [(id: UUID, number: String, date: Date, label: String, amount: Double)] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return baseList }
-        return baseList.filter { $0.number.lowercased().contains(q) || $0.label.lowercased().contains(q) }
-    }
-
-    private var selectedInvoices: [Invoice] {
-        invoices.filter { selectedIDs.contains($0.id) }
-    }
-
-    private var selectedOrders: [SalesOrder] {
-        orders.filter { selectedIDs.contains($0.id) }
-    }
-
-    private let df: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "dd/MM/yyyy"
-        return f
-    }()
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Export des documents").font(.headline)
-                Spacer()
-            }
-            .padding(12)
-            Text("Pré-sélection basée sur les filtres actifs de la liste (recherche, statut, type…). Décochez ou affinez ci-dessous si besoin.")
-                .font(.caption).foregroundStyle(.secondary)
-                .padding(.horizontal, 12).padding(.bottom, 8)
-            Divider()
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Type").font(.caption.bold())
-                    Picker("Type", selection: $kind) {
-                        ForEach(ExportKind.allCases, id: \.self) { k in Text(k.rawValue).tag(k) }
-                    }.labelsHidden().pickerStyle(.segmented)
-                    Text("Format").font(.caption.bold())
-                    Picker("Format", selection: $format) {
-                        ForEach(ExportFormat.allCases, id: \.self) { f in Text(f.rawValue).tag(f) }
-                    }.labelsHidden()
-                    HStack {
-                        Button("Tout sélectionner") {
-                            selectedIDs = Set(filteredList.map { $0.id })
-                        }
-                        Button("Tout désélectionner") {
-                            selectedIDs = []
-                        }
-                    }.font(.caption)
-                }
-                Spacer()
-            }
-            .padding(12)
-            HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Rechercher (numéro, type…)", text: $query)
-                    .textFieldStyle(.plain)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            Divider()
-            List(Array(filteredList.enumerated()), id: \.element.id) { _, item in
-                HStack {
-                    Image(systemName: selectedIDs.contains(item.id) ? "checkmark.square.fill" : "square")
-                        .foregroundStyle(selectedIDs.contains(item.id) ? Color.accentColor : Color.secondary)
-                        .onTapGesture {
-                            if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
-                            else { selectedIDs.insert(item.id) }
-                        }
-                    VStack(alignment: .leading) {
-                        Text(item.number).font(.headline)
-                        Text(item.label).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(String(format: "%.2f", item.amount))
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    Text(df.string(from: item.date)).font(.caption).foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if selectedIDs.contains(item.id) { selectedIDs.remove(item.id) }
-                    else { selectedIDs.insert(item.id) }
-                }
-            }
-            Divider()
-            HStack {
-                Button("Fermer") { isPresented = false }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                if !exportLog.isEmpty {
-                    Text(exportLog).font(.caption).foregroundStyle(.secondary)
-                }
-                Button("Exporter") { runExport() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(selectedIDs.isEmpty)
-            }
-            .padding(12)
-        }
-        .frame(width: 640, height: 480)
-        .onAppear {
-            guard !didInitSelection else { return }
-            didInitSelection = true
-            kind = initialKind
-            selectedIDs = Set(baseList.map { $0.id })
-        }
-        .onChange(of: kind) { _ in
-            selectedIDs = Set(baseList.map { $0.id })
+    static func run(orders: [SalesOrder], format: OrderFormat) -> String {
+        switch format {
+        case .csvList:
+            return saveCSV(ExportGenerator().orderCSV(orders), filename: "commandes")
+        case .csvLines:
+            return saveCSV(ExportGenerator().orderLinesCSV(orders), filename: "commandes-lignes")
+        case .electronic:
+            return exportElectronicOrders(orders)
         }
     }
 
-    private func runExport() {
-        exportLog = ""
-        switch (kind, format) {
-        case (.invoices, .csvList):
-            saveCSV(ExportGenerator().invoiceCSV(selectedInvoices), filename: "factures")
-        case (.invoices, .csvLines):
-            saveCSV(ExportGenerator().invoiceLinesCSV(selectedInvoices), filename: "factures-lignes")
-        case (.invoices, .electronic):
-            exportElectronicInvoices()
-        case (.orders, .csvList):
-            saveCSV(ExportGenerator().orderCSV(selectedOrders), filename: "commandes")
-        case (.orders, .csvLines):
-            saveCSV(ExportGenerator().orderLinesCSV(selectedOrders), filename: "commandes-lignes")
-        case (.orders, .electronic):
-            exportElectronicOrders()
-        }
-    }
-
-    private func saveCSV(_ csv: String, filename: String) {
+    private static func saveCSV(_ csv: String, filename: String) -> String {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
         panel.nameFieldStringValue = "\(filename).csv"
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                try ExportGenerator().writeCSV(csv, to: url)
-                exportLog = "Exporté : \(url.lastPathComponent)"
-            } catch {
-                exportLog = "Erreur : \(error)"
-            }
+        guard panel.runModal() == .OK, let url = panel.url else { return "" }
+        do {
+            try ExportGenerator().writeCSV(csv, to: url)
+            return "Exporté : \(url.lastPathComponent)"
+        } catch {
+            return "Erreur : \(error)"
         }
     }
 
-    private func exportElectronicInvoices() {
+    private static func exportElectronicInvoices(_ invoices: [Invoice]) -> String {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Exporter ici"
-        if panel.runModal() != .OK, panel.url == nil { return }
-        guard let dir = panel.url else { return }
+        guard panel.runModal() == .OK, let dir = panel.url else { return "" }
         var ok = 0
         var failed = 0
         var skipped = 0
         let gen = FacturXGenerator()
-        for inv in selectedInvoices {
+        for inv in invoices {
             if inv.type.isInternalCreditNote {
                 skipped += 1
                 continue
@@ -694,20 +570,19 @@ struct ExportSheet: View {
                 failed += 1
             }
         }
-        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
+        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
     }
 
-    private func exportElectronicOrders() {
+    private static func exportElectronicOrders(_ orders: [SalesOrder]) -> String {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Exporter ici"
-        if panel.runModal() != .OK, panel.url == nil { return }
-        guard let dir = panel.url else { return }
+        guard panel.runModal() == .OK, let dir = panel.url else { return "" }
         var ok = 0
         var failed = 0
         let gen = OrderXGenerator()
-        for order in selectedOrders {
+        for order in orders {
             do {
                 let data = try gen.generate(order: order)
                 let name = "commande-\(order.number).pdf"
@@ -717,7 +592,7 @@ struct ExportSheet: View {
                 failed += 1
             }
         }
-        exportLog = "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
+        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
     }
 }
 
@@ -922,7 +797,7 @@ struct InvoicesTabView: View {
     @State private var typeFilter: InvoiceTypeFilter = .all
     @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
-    @State private var showExport = false
+    @State private var exportMessage: String?
     @State private var showAdvancedFilters = false
     @State private var advField1: InvoiceFilterField = .none
     @State private var advValue1 = ""
@@ -995,8 +870,17 @@ struct InvoicesTabView: View {
                     .labelsHidden()
                     .frame(width: 200)
                     Spacer()
-                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                    Menu {
+                        ForEach(QuickExport.Format.allCases, id: \.self) { f in
+                            Button(f.rawValue) { exportMessage = QuickExport.run(invoices: filteredInvoices, format: f) }
+                        }
+                    } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
                         .buttonStyle(.bordered)
+                        .help("Exporte les factures actuellement filtrées (\(filteredInvoices.count))")
+                }
+                if let m = exportMessage, !m.isEmpty {
+                    Text(m).font(.caption).foregroundStyle(.secondary)
+                        .onChange(of: query) { _ in exportMessage = nil }
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -1151,14 +1035,6 @@ struct InvoicesTabView: View {
                 selectedID = nil
             }
         }
-        .sheet(isPresented: $showExport) {
-            ExportSheet(
-                invoices: filteredInvoices,
-                orders: scopedOrders,
-                initialKind: .invoices,
-                isPresented: $showExport
-            )
-        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -1166,17 +1042,6 @@ struct InvoicesTabView: View {
         if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
             result = result.filter { order in
                 if let cid = order.companyID { return scope.contains(cid) }
-                return false
-            }
-        }
-        return result.sorted { $0.issueDate > $1.issueDate }
-    }
-
-    private var scopedInvoices: [Invoice] {
-        var result = store.invoices
-        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
-            result = result.filter { inv in
-                if let cid = inv.companyID { return scope.contains(cid) }
                 return false
             }
         }
@@ -6636,7 +6501,7 @@ struct OrdersTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @Binding var selectedID: UUID?
     @State private var query = ""
-    @State private var showExport = false
+    @State private var exportMessage: String?
 
     var filteredOrders: [SalesOrder] {
         var result = orderStore.orders
@@ -6668,8 +6533,17 @@ struct OrdersTabView: View {
                         .buttonStyle(.borderedProminent)
                     Text("Commandes").font(.title2.bold())
                     Spacer()
-                    Button { showExport = true } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                    Menu {
+                        ForEach(QuickExport.OrderFormat.allCases, id: \.self) { f in
+                            Button(f.rawValue) { exportMessage = QuickExport.run(orders: filteredOrders, format: f) }
+                        }
+                    } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
                         .buttonStyle(.bordered)
+                        .help("Exporte les commandes actuellement filtrées (\(filteredOrders.count))")
+                }
+                if let m = exportMessage, !m.isEmpty {
+                    Text(m).font(.caption).foregroundStyle(.secondary)
+                        .onChange(of: query) { _ in exportMessage = nil }
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -6761,14 +6635,6 @@ struct OrdersTabView: View {
                 }
             }
         }
-        .sheet(isPresented: $showExport) {
-            ExportSheet(
-                invoices: scopedInvoices,
-                orders: filteredOrders,
-                initialKind: .orders,
-                isPresented: $showExport
-            )
-        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -6776,17 +6642,6 @@ struct OrdersTabView: View {
         if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
             result = result.filter { order in
                 if let cid = order.companyID { return scope.contains(cid) }
-                return false
-            }
-        }
-        return result.sorted { $0.issueDate > $1.issueDate }
-    }
-
-    private var scopedInvoices: [Invoice] {
-        var result = store.invoices
-        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
-            result = result.filter { inv in
-                if let cid = inv.companyID { return scope.contains(cid) }
                 return false
             }
         }
