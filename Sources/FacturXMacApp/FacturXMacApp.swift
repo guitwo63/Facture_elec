@@ -126,6 +126,7 @@ struct FacturXMacApp: App {
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
+    @StateObject private var smtpSettings = SMTPSettings.shared
     @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
@@ -142,6 +143,7 @@ struct FacturXMacApp: App {
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
+                .environmentObject(smtpSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -240,6 +242,7 @@ struct RootView: View {
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var smtpSettings: SMTPSettings
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
@@ -276,6 +279,7 @@ struct RootView: View {
         AuditStore.shared.load()
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
+        smtpSettings.credentials = reloadSMTPCredentials()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
@@ -303,6 +307,15 @@ struct RootView: View {
             return decoded
         }
         return SuperPDPCredentials(clientID: "", clientSecret: "")
+    }
+
+    private func reloadSMTPCredentials() -> SMTPCredentials {
+        let k = appEnv.key("facturx.smtp.credentials.v1")
+        if let data = UserDefaults.standard.data(forKey: k),
+           let decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+            return decoded
+        }
+        return SMTPCredentials()
     }
 
     private var mainBody: some View {
@@ -1426,6 +1439,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var smtpSettings: SMTPSettings
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var duplicatedNumber: String?
@@ -2050,6 +2064,7 @@ struct InvoiceEditorView: View {
             .onChange(of: invoice.status) { newStatus in
                 guard !syncingFromPDP else { return }
                 notifyPDPStatusChange(to: newStatus)
+                sendInvoiceStatusAlertIfNeeded(newStatus)
             }
             .sheet(isPresented: $showInvoicePreview) {
                 InvoicePreviewSheet(pdfData: previewPDFData, title: "Facture \(invoice.number)")
@@ -2394,6 +2409,26 @@ struct InvoiceEditorView: View {
                 superPDPMessage = "Échec validation SUPER PDP : \(error)"
             }
             pdpValidating = false
+        }
+    }
+
+    /// Alerte email best-effort (au connecté, potentiellement utile si le
+    /// changement vient d'une synchronisation SUPER PDP en arrière-plan plutôt
+    /// que d'un clic explicite) — n'échoue jamais la mise à jour du statut.
+    private func sendInvoiceStatusAlertIfNeeded(_ newStatus: InvoiceStatus) {
+        let smtp = smtpSettings.credentials
+        guard smtp.alertsEnabled, smtp.alertOnInvoiceStatusChange, smtp.isConfigured,
+              [.accepted, .rejected, .paid, .cancelled].contains(newStatus),
+              let recipient = auth.currentUser?.username else { return }
+        let invoiceNumber = invoice.number
+        let label = newStatus.label
+        Task {
+            try? await SMTPService().send(
+                to: recipient,
+                subject: "Facture \(invoiceNumber) — \(label)",
+                body: "La facture \(invoiceNumber) est passée au statut « \(label) ».",
+                credentials: smtp
+            )
         }
     }
 
@@ -4347,6 +4382,7 @@ struct SocietiesAdminView: View {
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var tagStore: TagStore
@@ -4364,6 +4400,9 @@ struct ApplicationSettingsView: View {
     @State private var dinumExpanded = false
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = false
+    @State private var smtpExpanded = false
+    @State private var smtpTestMessage: String?
+    @State private var smtpTesting = false
     @State private var tagsExpanded = false
     @State private var numberingExpanded = false
     @State private var editingSociety: DirectoryEntry?
@@ -4604,6 +4643,88 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("SUPER PDP (dépôt + annuaire)", systemImage: "paperplane.circle")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $smtpExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Envoie des alertes par email (nouvel utilisateur, changement de statut de facture) via votre propre serveur SMTP. Seul le TLS implicite (port 465) est supporté ; STARTTLS (587) ne l'est pas.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle(isOn: $smtpSettings.credentials.alertsEnabled) {
+                            Text("Activer les alertes email").font(.body.weight(.semibold))
+                        }
+                        .toggleStyle(.switch)
+                        .onChange(of: smtpSettings.credentials.alertsEnabled) { _ in smtpSettings.save() }
+                        if smtpSettings.credentials.alertsEnabled {
+                            HStack {
+                                Text("Serveur").frame(width: 100, alignment: .leading)
+                                TextField("smtp.exemple.fr", text: $smtpSettings.credentials.host)
+                                Text("Port").foregroundStyle(.secondary)
+                                TextField("465", value: $smtpSettings.credentials.port, format: .number)
+                                    .frame(width: 70)
+                            }
+                            Toggle("TLS implicite (recommandé, port 465)", isOn: $smtpSettings.credentials.useTLS)
+                                .toggleStyle(.checkbox)
+                            HStack {
+                                Text("Utilisateur").frame(width: 100, alignment: .leading)
+                                TextField("Identifiant SMTP", text: $smtpSettings.credentials.username)
+                            }
+                            HStack {
+                                Text("Mot de passe").frame(width: 100, alignment: .leading)
+                                SecureField("Mot de passe SMTP", text: $smtpSettings.credentials.password)
+                            }
+                            HStack {
+                                Text("Expéditeur").frame(width: 100, alignment: .leading)
+                                TextField("alertes@votre-domaine.fr", text: $smtpSettings.credentials.fromAddress)
+                                TextField("Nom affiché", text: $smtpSettings.credentials.fromName).frame(width: 160)
+                            }
+                            Divider()
+                            Text("Déclencheurs").font(.caption.bold())
+                            Toggle("Nouvel utilisateur créé", isOn: $smtpSettings.credentials.alertOnNewUser)
+                                .toggleStyle(.checkbox)
+                            Toggle("Changement de statut de facture (Acceptée/Rejetée/Payée/Annulée)", isOn: $smtpSettings.credentials.alertOnInvoiceStatusChange)
+                                .toggleStyle(.checkbox)
+                            HStack {
+                                Button {
+                                    smtpSettings.save()
+                                } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                                    .buttonStyle(.borderedProminent)
+                                Button {
+                                    smtpTesting = true
+                                    smtpTestMessage = nil
+                                    let recipient = auth.currentUser?.username ?? smtpSettings.credentials.fromAddress
+                                    Task {
+                                        do {
+                                            try await SMTPService().send(
+                                                to: recipient,
+                                                subject: "Test SMTP — Factur-X",
+                                                body: "Ceci est un email de test envoyé depuis les Réglages de Factur-X.",
+                                                credentials: smtpSettings.credentials
+                                            )
+                                            smtpTestMessage = "Email de test envoyé à \(recipient)."
+                                        } catch {
+                                            smtpTestMessage = "Échec : \(error.localizedDescription)"
+                                        }
+                                        smtpTesting = false
+                                    }
+                                } label: {
+                                    if smtpTesting {
+                                        HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Envoi…") }
+                                    } else {
+                                        Label("Envoyer un test", systemImage: "paperplane")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(smtpTesting || !smtpSettings.credentials.isConfigured)
+                                Spacer()
+                            }
+                            if let m = smtpTestMessage {
+                                Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                            }
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Alertes email (SMTP)", systemImage: "envelope.badge")
                         .font(.headline)
                 }
 

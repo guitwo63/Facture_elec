@@ -608,7 +608,35 @@ public final class AuthStore: ObservableObject {
         users.append(user)
         save()
         audit.record(actor: currentUser?.username ?? "system", action: "user_created", target: trimmedName, details: user.rolesLabel)
+        sendNewUserAlertIfNeeded(user)
         return user
+    }
+
+    /// Alerte email best-effort : ne bloque jamais la création si l'envoi échoue
+    /// (SMTP non configuré, serveur inaccessible…) — seulement journalisé.
+    private func sendNewUserAlertIfNeeded(_ user: User) {
+        let smtp = SMTPSettings.shared.credentials
+        guard smtp.alertsEnabled, smtp.alertOnNewUser, smtp.isConfigured else { return }
+        let username = user.username
+        Task {
+            do {
+                try await SMTPService().send(
+                    to: username,
+                    subject: "Votre compte Factur-X a été créé",
+                    body: """
+                    Bonjour,
+
+                    Un compte Factur-X a été créé pour vous, avec l'identifiant \(username).
+                    Demandez votre mot de passe à votre administrateur.
+
+                    — Factur-X
+                    """,
+                    credentials: smtp
+                )
+            } catch {
+                audit.record(actor: "system", action: "smtp_alert_error", target: username, details: "Alerte nouvel utilisateur : \(error.localizedDescription)")
+            }
+        }
     }
 
     public func updatePassword(_ user: User, newPassword: String, forceChange: Bool = false) throws {
