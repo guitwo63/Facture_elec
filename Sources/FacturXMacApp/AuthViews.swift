@@ -769,7 +769,42 @@ struct ProfileSettingsView: View {
 
 struct DataAdminView: View {
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var auth: AuthStore
+    @State private var table: DataTable = .invoices
+
+    enum DataTable: String, CaseIterable, Identifiable {
+        case invoices = "Factures"
+        case orders = "Commandes"
+        case parties = "Tiers"
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Administration des données").font(.title2.bold())
+                Spacer()
+            }.padding(10)
+            Picker("Table", selection: $table) {
+                ForEach(DataTable.allCases) { t in Text(t.rawValue).tag(t) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            Divider()
+            switch table {
+            case .invoices: DataInvoicesPanel()
+            case .orders: DataOrdersPanel()
+            case .parties: DataPartiesPanel()
+            }
+        }
+    }
+}
+
+struct DataInvoicesPanel: View {
+    @EnvironmentObject var store: InvoiceStore
     @State private var query = ""
     @State private var editingID: UUID?
     @State private var remoteIDDraft = ""
@@ -788,17 +823,12 @@ struct DataAdminView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Administration des données").font(.title2.bold())
-                Spacer()
-                Text("\(store.invoices.count) factures")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(10)
-            HStack {
                 TextField("Rechercher (n°, statut, remote ID)", text: $query)
                     .textFieldStyle(.roundedBorder)
+                Spacer()
+                Text("\(store.invoices.count) facture(s)").font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10).padding(.bottom, 8)
-            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Réparer le remote ID Super PDP d'une facture désynchronisée.")
@@ -862,6 +892,124 @@ struct DataAdminView: View {
         }
         .onChange(of: savedID) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedID = nil }
+        }
+    }
+}
+
+struct DataOrdersPanel: View {
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var statusStore: OrderStatusStore
+    @State private var query = ""
+
+    private var filtered: [SalesOrder] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return orderStore.orders.sorted { $0.number < $1.number } }
+        return orderStore.orders.filter {
+            $0.number.lowercased().contains(q) || $0.status.label.lowercased().contains(q)
+        }.sorted { $0.number < $1.number }
+    }
+
+    /// Commandes dont le customStatusID pointe vers un statut personnalisé qui
+    /// n'existe plus (supprimé depuis Réglages > Statuts) — l'affichage retombe
+    /// silencieusement sur le statut standard, mais la référence reste orpheline.
+    private func isOrphanedCustomStatus(_ order: SalesOrder) -> Bool {
+        guard let cid = order.customStatusID else { return false }
+        return !statusStore.overrides.contains { $0.id == cid }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                TextField("Rechercher (n°, statut)", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Spacer()
+                Text("\(orderStore.orders.count) commande(s)").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Repère les commandes dont la référence de statut personnalisé n'existe plus.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(filtered) { order in
+                        HStack {
+                            Text(order.number).font(.headline)
+                            Text(order.type.label).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Image(systemName: order.status.systemImage)
+                                .foregroundColor(Color(hex: order.status.hexColor))
+                            Text(order.status.label).font(.caption)
+                            Text(order.issueDate, format: .dateTime.day().month().year())
+                                .font(.caption).foregroundStyle(.secondary)
+                            if isOrphanedCustomStatus(order) {
+                                Button {
+                                    if let i = orderStore.orders.firstIndex(where: { $0.id == order.id }) {
+                                        orderStore.orders[i].customStatusID = nil
+                                        orderStore.save()
+                                    }
+                                } label: {
+                                    Label("Statut orphelin — réinitialiser", systemImage: "exclamationmark.triangle.fill")
+                                }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .foregroundStyle(.orange)
+                                .help("customStatusID « \(order.customStatusID ?? "")» n'existe plus dans Réglages > Statuts des commandes")
+                            }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+                    }
+                }
+                .padding(10)
+            }
+        }
+    }
+}
+
+struct DataPartiesPanel: View {
+    @EnvironmentObject var directory: PartyDirectory
+    @State private var query = ""
+
+    private var filtered: [DirectoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return directory.entries.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending } }
+        return directory.entries.filter {
+            $0.displayName.lowercased().contains(q)
+                || ($0.party.siren ?? "").lowercased().contains(q)
+                || ($0.party.siret ?? "").lowercased().contains(q)
+        }.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                TextField("Rechercher (nom, SIREN, SIRET)", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Spacer()
+                Text("\(directory.entries.count) tiers").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Vue d'ensemble de l'annuaire (sociétés, clients, archivés).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(filtered) { entry in
+                        HStack {
+                            Text(entry.displayName).font(.headline)
+                            Text(entry.kind.label).font(.caption).foregroundStyle(.secondary)
+                            if let siren = entry.party.siren, !siren.isEmpty {
+                                Text("SIREN \(siren)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if entry.isArchived {
+                                Text("Archivé").font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.gray.opacity(0.2), in: Capsule())
+                            }
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+                    }
+                }
+                .padding(10)
+            }
         }
     }
 }
