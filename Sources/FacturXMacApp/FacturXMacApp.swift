@@ -224,11 +224,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum RootTab: String, CaseIterable, Identifiable {
     case directory = "Annuaire"
-    case orders = "Commandes"
     case quotes = "Devis"
+    case orders = "Ventes"
     case invoices = "Factures"
-    case dashboard = "Trésorerie"
+    case dashboard = "Tableau de bord"
     var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .directory: return "person.crop.rectangle.stack"
+        case .quotes: return "doc.text.below.ecg"
+        case .orders: return "cart.fill"
+        case .invoices: return "doc.text.fill"
+        case .dashboard: return "gauge"
+        }
+    }
 
     static func visible(for role: UserRole?) -> [RootTab] {
         switch role {
@@ -269,12 +279,19 @@ struct TreasuryDashboardView: View {
         scopedInvoices.filter { $0.status != .cancelled }
     }
 
+    /// Sous-ensemble réellement envoyé au client : un brouillon ou une facture
+    /// validée mais non envoyée (statut « Validée (non envoyée) ») n'engage
+    /// rien et ne doit pas gonfler artificiellement les indicateurs.
+    private var sentInvoices: [Invoice] {
+        activeInvoices.filter { $0.status != .draft && $0.status != .issued }
+    }
+
     private func signedAmount(_ inv: Invoice) -> Double {
         inv.type.isCreditNote ? -inv.grandTotal : inv.grandTotal
     }
 
     private var currentMonthInvoices: [Invoice] {
-        scopedInvoices.filter { Calendar.current.isDate($0.issueDate, equalTo: Date(), toGranularity: .month) }
+        sentInvoices.filter { Calendar.current.isDate($0.issueDate, equalTo: Date(), toGranularity: .month) }
     }
 
     private var caFactureMois: Double {
@@ -282,20 +299,20 @@ struct TreasuryDashboardView: View {
     }
 
     private var encaisse: Double {
-        activeInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
+        sentInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
     }
 
     private var enRetard: Double {
-        activeInvoices.filter(\.isOverdue).reduce(0) { $0 + signedAmount($1) }
+        sentInvoices.filter(\.isOverdue).reduce(0) { $0 + signedAmount($1) }
     }
 
     private var enAttente: Double {
-        activeInvoices.filter { $0.status != .paid && !$0.isOverdue }.reduce(0) { $0 + signedAmount($1) }
+        sentInvoices.filter { $0.status != .paid && !$0.isOverdue }.reduce(0) { $0 + signedAmount($1) }
     }
 
     private var byClient: [ClientBalance] {
         var byName: [String: (outstanding: Double, overdue: Double)] = [:]
-        for inv in activeInvoices where inv.status != .paid {
+        for inv in sentInvoices where inv.status != .paid {
             let name = inv.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client sans nom" : inv.buyer.name
             var entry = byName[name] ?? (outstanding: 0, overdue: 0)
             entry.outstanding += signedAmount(inv)
@@ -311,7 +328,7 @@ struct TreasuryDashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Trésorerie").font(.title2.bold())
+                Text("Tableau de bord").font(.title2.bold())
                 HStack(spacing: 16) {
                     kpiCard("CA facturé (mois)", caFactureMois, color: .blue, icon: "chart.line.uptrend.xyaxis")
                     kpiCard("Encaissé", encaisse, color: .green, icon: "checkmark.circle.fill")
@@ -475,7 +492,9 @@ struct RootView: View {
             .background(appEnv.isTest ? Color.orange.opacity(0.12) : Color.green.opacity(0.12))
             HStack {
                 Picker("", selection: $tab) {
-                    ForEach(RootTab.visible(for: auth.currentUser?.role)) { Text($0.rawValue).tag($0) }
+                    ForEach(RootTab.visible(for: auth.currentUser?.role)) {
+                        Label($0.rawValue, systemImage: $0.systemImage).tag($0)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 460)
@@ -6829,7 +6848,7 @@ struct OrdersTabView: View {
                     } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
                         .buttonStyle(.bordered)
                         .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
-                    Text("Commandes").font(.title2.bold())
+                    Text("Ventes").font(.title2.bold())
                     Spacer()
                     Menu {
                         ForEach(QuickExport.OrderFormat.allCases, id: \.self) { f in
