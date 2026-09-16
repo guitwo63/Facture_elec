@@ -2150,8 +2150,8 @@ struct InvoiceEditorView: View {
     private static func mapPDPStatusToLocal(_ pdpStatus: String) -> InvoiceStatus? {
         let s = pdpStatus.lowercased()
         switch s {
-        case "accepted", "processed", "received": return .accepted
-        case "rejected": return .rejected
+        case "accepted", "processed", "received", "fr:207": return .accepted
+        case "rejected", "fr:206": return .rejected
         case "fr:212", "encaissée", "encaissee", "paid": return .paid
         case "fr:320", "annulée", "annulee", "cancelled": return .cancelled
         default: return nil
@@ -2318,11 +2318,11 @@ struct InvoiceEditorView: View {
             statusCode = "fr:320"
             detailLabel = "Annulée"
         case .accepted:
-            statusCode = "fr:310"
-            detailLabel = "Acceptée"
+            statusCode = "fr:207"
+            detailLabel = "Accepté par le destinataire"
         case .rejected:
-            statusCode = "fr:311"
-            detailLabel = "Rejetée"
+            statusCode = "fr:206"
+            detailLabel = "Refusé par le destinataire"
         default:
             return
         }
