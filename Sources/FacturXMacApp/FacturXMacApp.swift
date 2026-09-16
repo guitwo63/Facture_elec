@@ -1473,6 +1473,8 @@ struct InvoiceEditorView: View {
                 Text(invoice.number).font(.title2.bold())
                 Text(invoice.issueDate, format: .dateTime.day().month().year())
                     .font(.callout).foregroundStyle(.secondary)
+                Text(String(format: "%.2f %@ HT", invoice.lineTotal, invoice.currency))
+                    .font(.callout).foregroundStyle(.secondary)
                 HStack(spacing: 4) {
                     Image(systemName: invoice.status.systemImage)
                     Text(invoice.status.label)
@@ -1737,6 +1739,7 @@ struct InvoiceEditorView: View {
 
                 if showValidation, let v = validation {
                     validationPanel(v)
+                        .onChange(of: invoice.number) { _ in showValidation = false; validation = nil }
                 }
                 if showPDPValidationPanel, let report = pdpValidationReport {
                     pdpValidationPanel(report)
@@ -4129,84 +4132,6 @@ struct SettingsTabView: View {
     }
 }
 
-struct OrderStatusSettingsView: View {
-    @EnvironmentObject var statusStore: OrderStatusStore
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Statuts des commandes").font(.title2.bold())
-                Spacer()
-                Button {
-                    let id = "custom-\(UUID().uuidString.prefix(8))"
-                    statusStore.append(OrderStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
-                } label: { Label("Nouvelle valeur", systemImage: "plus") }
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding(12)
-            Divider()
-            Text("Personnalisez le libellé, l'icône SF Symbol et la couleur de chaque statut de commande.")
-                .font(.caption).foregroundStyle(.secondary).padding(12)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(statusStore.overrides) { override in
-                        statusRow(override)
-                    }
-                }
-                .padding(12)
-            }
-        }
-        .frame(minWidth: 480, minHeight: 420)
-    }
-
-    private func statusRow(_ override: OrderStatusOverride) -> some View {
-        let idx = statusStore.overrides.firstIndex(where: { $0.id == override.id }) ?? 0
-        let binding = Binding<OrderStatusOverride>(
-            get: { statusStore.overrides[idx] },
-            set: { statusStore.overrides[idx] = $0 }
-        )
-        return HStack(spacing: 12) {
-            Image(systemName: binding.wrappedValue.systemImage)
-                .frame(width: 22)
-                .foregroundStyle(Color(hex: binding.wrappedValue.hexColor))
-            TextField("Libellé", text: binding.label)
-                .frame(minWidth: 180)
-            if override.isPDPStatus {
-                HStack(spacing: 4) {
-                    Image(systemName: "lock.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(override.id)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 6).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.clear))
-                .help("Clé technique non modifiable (statut lié à la PDP)")
-            }
-            ColorPicker(selection: Binding(
-                get: { Color(hex: binding.wrappedValue.hexColor) },
-                set: { newColor in
-                    statusStore.overrides[idx].hexColor = hexString(from: newColor)
-                }
-            )) {
-                Text("Couleur")
-            }
-            .labelsHidden()
-            Spacer()
-            Button(role: .destructive) {
-                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
-                    statusStore.remove(at: i)
-                }
-            } label: {
-                Image(systemName: "minus.circle.fill")
-            }
-            .buttonStyle(.borderless)
-            .help("Supprimer ce statut")
-        }
-    }
-}
-
 struct SocietiesAdminView: View {
     @Binding var editingEntry: DirectoryEntry?
     @Binding var creatingNew: Bool
@@ -5013,46 +4938,72 @@ struct ValueTablesView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(filteredStatuses) { override in
-                        HStack(spacing: 10) {
-                            Image(systemName: override.systemImage)
-                                .frame(width: 22)
-                                .foregroundStyle(Color(hex: override.hexColor))
-                            Text(override.label).font(.body)
-                            if override.isPDPStatus {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "lock.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    Text(override.id)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.clear))
-                                .help("Clé technique non modifiable (statut lié à la PDP)")
-                            }
-                            Spacer()
-                            Button {
-                                editingStatus = override
-                            } label: { Image(systemName: "pencil") }
-                                .buttonStyle(.borderless)
-                                .help("Modifier ce statut")
-                            Button(role: .destructive) {
-                                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
-                                    statusStore.remove(at: i)
-                                }
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Supprimer ce statut")
-                        }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+                        orderStatusRow(override)
                     }
                 }
                 .padding(12)
             }
         }
+    }
+
+    private func orderStatusRow(_ override: OrderStatusOverride) -> some View {
+        let transitionLabels: [String] = override.transitionCodes.compactMap { code in
+            statusStore.overrides.first { $0.id == code }?.label
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: override.systemImage)
+                    .frame(width: 22)
+                    .foregroundStyle(Color(hex: override.hexColor))
+                Text(override.label).font(.body)
+                if override.isPDPStatus {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(override.id)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.clear))
+                    .help("Clé technique non modifiable (statut lié au cycle standard)")
+                } else {
+                    Text("hors cycle standard")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button {
+                    editingStatus = override
+                } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Modifier ce statut")
+                if !override.isPDPStatus {
+                    Button(role: .destructive) {
+                        if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                            statusStore.remove(at: i)
+                        }
+                    } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                        .help("Supprimer ce statut")
+                }
+            }
+            if !transitionLabels.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Transitions : " + transitionLabels.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
     }
 
     private var filteredStatuses: [OrderStatusOverride] {
@@ -5192,10 +5143,16 @@ struct ValueTablesView: View {
 struct OrderStatusEditorSheet: View {
     var override: OrderStatusOverride
     let onSave: (OrderStatusOverride) -> Void
+    @EnvironmentObject var statusStore: OrderStatusStore
     @Environment(\.dismiss) private var dismiss
     @State private var label: String
     @State private var systemImage: String
     @State private var hexColor: String
+    @State private var transitionCodes: Set<String>
+
+    private var possibleTargets: [OrderStatusOverride] {
+        statusStore.overrides.filter { $0.id != override.id }
+    }
 
     init(override: OrderStatusOverride, onSave: @escaping (OrderStatusOverride) -> Void) {
         self.override = override
@@ -5203,6 +5160,7 @@ struct OrderStatusEditorSheet: View {
         _label = State(initialValue: override.label)
         _systemImage = State(initialValue: override.systemImage)
         _hexColor = State(initialValue: override.hexColor)
+        _transitionCodes = State(initialValue: Set(override.transitionCodes))
     }
 
     var body: some View {
@@ -5229,19 +5187,43 @@ struct OrderStatusEditorSheet: View {
                     )) { Text("Couleur") }
                 }
             }
+            if !possibleTargets.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transitions autorisées vers…").font(.subheadline.bold())
+                    Text("Statuts accessibles depuis « \(label) » via les boutons d'action de la commande (un administrateur peut toujours forcer les autres).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(possibleTargets) { target in
+                                Toggle(isOn: Binding(
+                                    get: { transitionCodes.contains(target.id) },
+                                    set: { isOn in
+                                        if isOn { transitionCodes.insert(target.id) }
+                                        else { transitionCodes.remove(target.id) }
+                                    }
+                                )) {
+                                    Label(target.label, systemImage: target.systemImage)
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 140)
+                }
+            }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(OrderStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor))
+                    let ordered = statusStore.overrides.map { $0.id }.filter { transitionCodes.contains($0) }
+                    onSave(OrderStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, transitionCodes: ordered))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            Spacer()
         }
         .padding()
-        .frame(width: 420, height: 300)
+        .frame(width: 460, height: 460)
     }
 }
 
@@ -6589,10 +6571,15 @@ struct OrderEditorView: View {
     @State private var exportedURL: URL?
     @State private var validation: FacturXValidationResult?
     @State private var showValidation = false
-    @State private var isLocked = false
+    @State private var isManuallyLocked = false
     @State private var showUnlockAlert = false
     @State private var createdInvoiceNumber: String?
     @State private var showMandatoryDetails = false
+
+    private var statusLocked: Bool { order.status.locksOrder }
+    private var isLocked: Bool { statusLocked || isManuallyLocked }
+    private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
+    private var fieldLocked: Bool { isLocked && !isAdmin }
 
     private var hasMandatoryWarnings: Bool {
         let b = order.buyer
@@ -6615,38 +6602,109 @@ struct OrderEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Édition : \(order.number)").font(.title2.bold())
+            // MARK: Bandeau d'informations (fixe, lecture seule)
+            HStack(spacing: 10) {
+                Text(order.number).font(.title2.bold())
+                Text(order.issueDate, format: .dateTime.day().month().year())
+                    .font(.callout).foregroundStyle(.secondary)
+                Text(String(format: "%.2f %@ HT", order.lineTotal, order.currency))
+                    .font(.callout).foregroundStyle(.secondary)
+                let currentStatus = statusStore.override(for: order)
+                HStack(spacing: 4) {
+                    Image(systemName: currentStatus.systemImage)
+                    Text(currentStatus.label)
+                }
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color(hex: currentStatus.hexColor)))
                 if isLocked {
                     Label("Lecture seule", systemImage: "lock.fill")
                         .font(.caption.bold())
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                         .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
+                    if isAdmin {
+                        Text("(admin : modification autorisée)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                if isLocked {
-                    Button { showUnlockAlert = true } label: {
-                        Label("Modifier", systemImage: "lock.open")
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Repasser en édition (la commande n'est plus protégée)")
-                } else if validation?.isValid == true {
-                    Button { isLocked = true } label: {
-                        Label("Verrouiller", systemImage: "lock")
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Protéger la commande validée en lecture seule")
+                HStack(spacing: 4) {
+                    Text(order.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Acheteur non renseigné" : order.buyer.name)
+                    Image(systemName: "arrow.right").font(.caption2)
+                    Text(order.seller.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client non renseigné" : order.seller.name)
                 }
-                Button("Valider") { runValidation() }
-                    .buttonStyle(.bordered)
-                    .disabled(isLocked)
-                Button("Exporter XML") { exportXML() }
-                    .buttonStyle(.bordered)
-                Button("Générer l'Order-X") { export() }
-                    .buttonStyle(.borderedProminent)
-                Button("Créer la facture") { createInvoice() }
-                    .buttonStyle(.bordered)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            .padding(12)
+            Divider()
+
+            // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · admin
+            HStack(spacing: 14) {
+                let currentStatus = statusStore.override(for: order)
+                let configuredTransitions = statusStore.override(for: order.status).transitionCodes.compactMap { OrderStatus(rawValue: $0) }
+                HStack(spacing: 8) {
+                    if isManuallyLocked && !statusLocked && !isAdmin {
+                        Button { showUnlockAlert = true } label: {
+                            Label("Modifier", systemImage: "lock.open")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                        .help("Repasser en édition (la commande n'est plus protégée)")
+                    } else if !isLocked && validation?.isValid == true {
+                        Button { isManuallyLocked = true } label: {
+                            Label("Verrouiller", systemImage: "lock")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                        .help("Protéger la commande validée en lecture seule")
+                    }
+                    Button("Valider") { runValidation() }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
+                        .disabled(fieldLocked)
+                    ForEach(configuredTransitions, id: \.self) { s in
+                        Button {
+                            order.status = s
+                            order.customStatusID = nil
+                        } label: {
+                            Label(s.label, systemImage: s.systemImage)
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: s.hexColor)))
+                        .help("Passer au statut « \(s.label) »")
+                    }
+                    Button("Exporter XML") { exportXML() }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                    Button("Générer l'Order-X") { export() }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
+                    Button("Créer la facture") { createInvoice() }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                }
+                if isAdmin {
+                    let forceable = statusStore.overrides.filter { $0.id != currentStatus.id && !configuredTransitions.map(\.rawValue).contains($0.id) }
+                    if !forceable.isEmpty {
+                        Divider().frame(height: 20)
+                        Menu {
+                            ForEach(forceable) { target in
+                                Button {
+                                    if let s = OrderStatus(rawValue: target.id) {
+                                        order.status = s
+                                        order.customStatusID = nil
+                                    } else {
+                                        order.customStatusID = target.id
+                                    }
+                                } label: {
+                                    Label(target.label, systemImage: target.systemImage)
+                                }
+                            }
+                        } label: {
+                            Label("Forcer", systemImage: "bolt.fill")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                        .help("Administrateur : forcer un statut hors des transitions configurées")
+                    }
+                }
+                Spacer()
             }
             .padding(12)
             Divider()
@@ -6686,6 +6744,7 @@ struct OrderEditorView: View {
 
                 if showValidation, let v = validation {
                     orderValidationPanel(v)
+                        .onChange(of: order.number) { _ in showValidation = false; validation = nil }
                 }
                 }.padding(12)
                 Divider()
@@ -6772,15 +6831,15 @@ struct OrderEditorView: View {
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
                         }
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 HStack(alignment: .top, spacing: 12) {
                     GroupBox("Acheteur (vous)") {
                         OrderPartySection(party: $order.buyer, role: .buyer)
-                    }.lockable(isLocked)
+                    }.lockable(fieldLocked)
                     GroupBox("Client") {
                         OrderPartySection(party: $order.seller, role: .buyer)
-                    }.lockable(isLocked)
+                    }.lockable(fieldLocked)
                 }
 
                 GroupBox("Lignes") {
@@ -6822,13 +6881,13 @@ struct OrderEditorView: View {
                             order.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: order.lines.last?.vatRate ?? 20))
                         } label: { Label("Ajouter une ligne", systemImage: "plus") }
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 GroupBox("Notes") {
                     VStack(alignment: .leading, spacing: 8) {
                         TextField("Notes libres", text: Binding($order.notes, replacingNilWith: ""))
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
 
                 GroupBox("Factures et avoirs liés") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -6853,12 +6912,12 @@ struct OrderEditorView: View {
                             }
                         }
                     }.padding(8)
-                }.lockable(isLocked)
+                }.lockable(fieldLocked)
             }.padding()
         }
             .alert("Repasser en modification ?", isPresented: $showUnlockAlert) {
                 Button("Annuler", role: .cancel) { }
-                Button("Modifier", role: .destructive) { isLocked = false }
+                Button("Modifier", role: .destructive) { isManuallyLocked = false }
             } message: {
                 Text("La commande était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout envoi au client.")
             }
@@ -6971,30 +7030,6 @@ struct OrderEditorView: View {
                             .foregroundStyle(.red)
                     }
                     Spacer()
-                    HStack(spacing: 4) {
-                        let current = statusStore.override(for: order)
-                        Image(systemName: current.systemImage)
-                            .foregroundColor(Color(hex: current.hexColor))
-                            .font(.caption2)
-                        Picker("Statut", selection: Binding<String>(
-                            get: { order.customStatusID ?? order.status.rawValue },
-                            set: { selectedID in
-                                if let s = OrderStatus(rawValue: selectedID) {
-                                    order.status = s
-                                    order.customStatusID = nil
-                                } else {
-                                    order.customStatusID = selectedID
-                                }
-                            }
-                        )) {
-                            ForEach(statusStore.overrides) { o in
-                                Label(o.label, systemImage: o.systemImage).tag(o.id)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                        .help("Statut de la commande (modifiable à tout moment)")
-                    }
                     Button { showValidation = false } label: {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
