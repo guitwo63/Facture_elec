@@ -37,6 +37,25 @@ extension View {
         self.allowsHitTesting(!locked)
     }
 }
+/// Style de bouton uniforme pour les barres d'action (taille et forme identiques,
+/// seule la couleur varie) : rempli pour l'action principale, liseré + fond très
+/// légèrement teinté sinon.
+struct ToolbarActionButtonStyle: ButtonStyle {
+    var tint: Color
+    var filled: Bool = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .foregroundStyle(filled ? Color.white : tint)
+            .background(filled ? tint : tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(tint, lineWidth: filled ? 0 : 1.5))
+            .opacity(!isEnabled ? 0.35 : (configuration.isPressed ? 0.7 : 1))
+    }
+}
+
 struct InfoBadge: View {
     let text: String
     @State private var isHovering = false
@@ -272,7 +291,7 @@ struct RootView: View {
            let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
             return decoded
         }
-        return SuperPDPCredentials(clientID: "", clientSecret: "", useSandbox: appEnv.isTest)
+        return SuperPDPCredentials(clientID: "", clientSecret: "")
     }
 
     private var mainBody: some View {
@@ -1380,6 +1399,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var duplicatedNumber: String?
@@ -1448,8 +1468,32 @@ struct InvoiceEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Édition : \(invoice.number)").font(.title2.bold())
+            // MARK: Bandeau d'informations (fixe, lecture seule)
+            HStack(spacing: 10) {
+                Text(invoice.number).font(.title2.bold())
+                Text(invoice.issueDate, format: .dateTime.day().month().year())
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Image(systemName: invoice.status.systemImage)
+                    Text(invoice.status.label)
+                }
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color(hex: invoice.status.hexColor)))
+                if superPDPSettings.credentials.usePDP {
+                    Button {
+                        fetchPDPEvents()
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.callout)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                              || !superPDPSettings.credentials.isConfigured)
+                    .help("Historique des événements de cycle de vie sur SUPER PDP")
+                }
                 if isLocked {
                     Label(statusLocked ? "Verrouillée (statut)" : "Lecture seule", systemImage: "lock.fill")
                         .font(.caption.bold())
@@ -1462,81 +1506,164 @@ struct InvoiceEditorView: View {
                     }
                 }
                 Spacer()
-                if isManuallyLocked && !statusLocked && !isAdmin {
-                    Button { showUnlockAlert = true } label: {
-                        Label("Modifier", systemImage: "lock.open")
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Repasser en édition (la facture n'est plus protégée)")
-                } else if !isLocked && validation?.isValid == true {
-                    Button { isManuallyLocked = true } label: {
-                        Label("Verrouiller", systemImage: "lock")
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Protéger la facture validée en lecture seule")
+                HStack(spacing: 4) {
+                    Text(invoice.seller.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Émetteur non renseigné" : invoice.seller.name)
+                    Image(systemName: "arrow.right").font(.caption2)
+                    Text(invoice.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client non renseigné" : invoice.buyer.name)
                 }
-                if superPDPSettings.credentials.usePDP {
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            .padding(12)
+            Divider()
+
+            // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · utilitaires · admin
+            HStack(spacing: 14) {
+                let configuredTransitions = invoiceStatusStore.override(for: invoice.status).transitionCodes.compactMap { InvoiceStatus(rawValue: $0) }
+                HStack(spacing: 8) {
+                    if isManuallyLocked && !statusLocked && !isAdmin {
+                        Button { showUnlockAlert = true } label: {
+                            Label("Modifier", systemImage: "lock.open")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                        .help("Repasser en édition (la facture n'est plus protégée)")
+                    } else if !isLocked && validation?.isValid == true {
+                        Button { isManuallyLocked = true } label: {
+                            Label("Verrouiller", systemImage: "lock")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                        .help("Protéger la facture validée en lecture seule")
+                    }
+                    if superPDPSettings.credentials.usePDP {
+                            Button {
+                                validatePDP()
+                            } label: {
+                                if pdpValidating {
+                                    HStack(spacing: 4) {
+                                        ProgressView().controlSize(.small)
+                                        Text("Valider…")
+                                    }
+                                } else {
+                                    Label("Valider PDP", systemImage: "checkmark.shield")
+                                }
+                            }
+                            .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
+                            .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
+                            .help("Valider le Factur-X sur SUPER PDP avant dépôt")
+                    } else {
+                        Button("Valider") { runValidation() }
+                            .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
+                            .disabled(fieldLocked)
+                    }
+                    ForEach(configuredTransitions, id: \.self) { s in
                         Button {
-                            validatePDP()
+                            invoice.status = s
                         } label: {
-                            if pdpValidating {
+                            Label(s.label, systemImage: s.systemImage)
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: s.hexColor)))
+                        .help("Passer au statut « \(s.label) »")
+                    }
+                    if invoice.type.isInternalCreditNote {
+                        Button("Exporter PDF") { exportPlainPDF() }
+                            .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
+                    } else if superPDPSettings.credentials.usePDP {
+                        Button {
+                            depositToSuperPDP()
+                        } label: { Label("Super PDP", systemImage: "paperplane.fill") }
+                            .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
+                            .disabled(fieldLocked || statusLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
+                            .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
+                    }
+                }
+
+                Divider().frame(height: 20)
+
+                HStack(spacing: 8) {
+                    Menu {
+                        Button {
+                            previewPDFData = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: sellerLogo)
+                            showInvoicePreview = true
+                        } label: { Label("Visualiser", systemImage: "eye") }
+                        Button { exportXML() } label: { Label("Exporter XML", systemImage: "chevron.left.forwardslash.chevron.right") }
+                        Button { export() } label: { Label("Générer le Factur-X", systemImage: "doc.text.fill") }
+                        Button {
+                            let copy = store.duplicate(from: invoice)
+                            store.upsert(copy)
+                            duplicatedNumber = copy.number
+                        } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                        if superPDPSettings.credentials.usePDP {
+                            Divider()
+                            Button {
+                                downloadPDPInvoice()
+                            } label: { Label("Copie PDP", systemImage: "square.and.arrow.down") }
+                                .disabled(pdpDownloading
+                                          || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                          || !superPDPSettings.credentials.isConfigured)
+                                .help("Télécharger la copie de la facture déposée sur SUPER PDP")
+                        }
+                    } label: {
+                        Label("Autre action", systemImage: "ellipsis.circle")
+                    }
+                    .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                    .help("Visualiser, exporter XML, générer le Factur-X, dupliquer, copie PDP…")
+                    if superPDPSettings.credentials.usePDP {
+                        Button {
+                            refreshSuperPDPStatus()
+                        } label: {
+                            if superPDPSubmitting {
                                 HStack(spacing: 4) {
                                     ProgressView().controlSize(.small)
-                                    Text("Valider…")
+                                    Text("Statut PDP…")
                                 }
                             } else {
-                                Label("Valider PDP", systemImage: "checkmark.shield")
+                                Label("Statut PDP", systemImage: "antenna.radar")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
-                        .help("Valider le Factur-X sur SUPER PDP avant dépôt")
-                } else {
-                    Button("Valider") { runValidation() }
-                        .buttonStyle(.bordered)
-                        .disabled(fieldLocked)
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
+                        .disabled(superPDPSubmitting
+                                  || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                  || !superPDPSettings.credentials.isConfigured)
+                        .help("Interroger le statut de la facture sur SUPER PDP")
+                    }
+                }
+
+                if isAdmin {
+                    let forceable = InvoiceStatus.allCases.filter { $0 != invoice.status && !configuredTransitions.contains($0) }
+                    if !forceable.isEmpty || superPDPSettings.credentials.usePDP {
+                        Divider().frame(height: 20)
+                        HStack(spacing: 8) {
+                            if !forceable.isEmpty {
+                                Menu {
+                                    ForEach(forceable, id: \.self) { s in
+                                        Button {
+                                            invoice.status = s
+                                        } label: {
+                                            Label(s.label, systemImage: s.systemImage)
+                                        }
+                                    }
+                                } label: {
+                                    Label("Forcer", systemImage: "bolt.fill")
+                                }
+                                .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                                .help("Administrateur : forcer un statut hors des transitions configurées")
+                            }
+                            if superPDPSettings.credentials.usePDP {
+                                Button {
+                                    notifyPDPStatusChange(to: invoice.status, force: true)
+                                } label: {
+                                    Label("Forcer renvoi", systemImage: "arrow.clockwise.circle")
+                                }
+                                .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                                .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                                          || !superPDPSettings.credentials.isConfigured)
+                                .help("Forcer le renvoi du statut actuel à SUPER PDP (admin)")
+                            }
+                        }
+                    }
                 }
                 Spacer()
-                Menu {
-                    Button {
-                        previewPDFData = FacturXGenerator().generateVisiblePDF(invoice: invoice, logo: sellerLogo)
-                        showInvoicePreview = true
-                    } label: { Label("Visualiser", systemImage: "eye") }
-                    Button { exportXML() } label: { Label("Exporter XML", systemImage: "chevron.left.forwardslash.chevron.right") }
-                    Button { export() } label: { Label("Générer le Factur-X", systemImage: "doc.text.fill") }
-                    Button {
-                        let copy = store.duplicate(from: invoice)
-                        store.upsert(copy)
-                        duplicatedNumber = copy.number
-                    } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
-                    if superPDPSettings.credentials.usePDP {
-                        Divider()
-                        Button {
-                            downloadPDPInvoice()
-                        } label: { Label("Copie PDP", systemImage: "square.and.arrow.down") }
-                            .disabled(pdpDownloading
-                                      || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                      || !superPDPSettings.credentials.isConfigured)
-                            .help("Télécharger la copie de la facture déposée sur SUPER PDP")
-                    }
-                } label: {
-                    Label("Autre action", systemImage: "ellipsis.circle")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.blue)
-                .help("Visualiser, exporter XML, générer le Factur-X, dupliquer, copie PDP…")
-                if invoice.type.isInternalCreditNote {
-                    Button("Exporter PDF") { exportPlainPDF() }
-                        .buttonStyle(.borderedProminent)
-                } else if superPDPSettings.credentials.usePDP {
-                    Button {
-                        depositToSuperPDP()
-                    } label: { Label("Super PDP", systemImage: "paperplane.fill") }
-                        .buttonStyle(.bordered)
-                        .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
-                        .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
-                }
             }
             .padding(12)
             Divider()
@@ -1753,81 +1880,6 @@ struct InvoiceEditorView: View {
                                 .font(.caption)
                             }
                             VStack(alignment: .trailing, spacing: 4) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: invoice.status.systemImage)
-                                        .foregroundColor(Color(hex: invoice.status.hexColor))
-                                        .font(.caption2)
-                                    let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
-                                    if transitions.isEmpty {
-                                        Text(invoice.status.label)
-                                            .foregroundStyle(.secondary)
-                                            .help("Statut terminal — aucune transition possible.")
-                                    } else {
-                                        Menu {
-                                            Button {
-                                            } label: {
-                                                Label(invoice.status.label, systemImage: invoice.status.systemImage)
-                                            }.disabled(true)
-                                            Divider()
-                                            ForEach(transitions, id: \.self) { s in
-                                                Button {
-                                                    invoice.status = s
-                                                } label: {
-                                                    Label(s.label, systemImage: s.systemImage)
-                                                }
-                                            }
-                                        } label: {
-                                            HStack(spacing: 4) {
-                                                Text(invoice.status.label).lineLimit(1)
-                                                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        .fixedSize()
-                                        .help("Statut actuel : \(invoice.status.label). Transitions autorisées affichées dans le menu.")
-                                    }
-                                    if superPDPSettings.credentials.usePDP {
-                                    Button {
-                                        refreshSuperPDPStatus()
-                                    } label: {
-                                        if superPDPSubmitting {
-                                            HStack(spacing: 4) {
-                                                ProgressView().controlSize(.small)
-                                                Text("Statut PDP…")
-                                            }
-                                        } else {
-                                            Label("Statut PDP", systemImage: "antenna.radar")
-                                        }
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                    .disabled(superPDPSubmitting
-                                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                              || !superPDPSettings.credentials.isConfigured)
-                                    .help("Interroger le statut de la facture sur SUPER PDP")
-                                    Button {
-                                        fetchPDPEvents()
-                                    } label: {
-                                        Label("Historique PDP", systemImage: "clock.arrow.circlepath")
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                    .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                              || !superPDPSettings.credentials.isConfigured)
-                                    .help("Historique des événements de cycle de vie sur SUPER PDP")
-                                    if isAdmin {
-                                        Button {
-                                            notifyPDPStatusChange(to: invoice.status, force: true)
-                                        } label: {
-                                            Label("Forcer renvoi", systemImage: "arrow.clockwise.circle")
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                        .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                                  || !superPDPSettings.credentials.isConfigured)
-                                        .help("Forcer le renvoi du statut actuel à SUPER PDP (admin)")
-                                    }
-                                    }
-                                }
                                 VStack(alignment: .trailing) {
                                 row("Total HT", invoice.lineTotal)
                                 ForEach(invoice.vatBreakdown, id: \.rate) { item in
@@ -1894,7 +1946,14 @@ struct InvoiceEditorView: View {
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
-                                Button { invoice.lines.removeAll { $0.id == line.id } } label: {
+                                Button {
+                                    // Différé au tick suivant : laisse le champ en cours d'édition
+                                    // se valider (commit AppKit) avant que la ligne ne disparaisse,
+                                    // sinon crash (Binding sur un index qui n'existe plus).
+                                    DispatchQueue.main.async {
+                                        invoice.lines.removeAll { $0.id == line.id }
+                                    }
+                                } label: {
                                     Image(systemName: "minus.circle")
                                 }
                             }
@@ -2292,6 +2351,8 @@ struct InvoiceEditorView: View {
         }
         pdpValidating = true
         superPDPMessage = nil
+        showValidation = false
+        validation = nil
         let preCheck = FacturXValidator().validate(invoice: invoice)
         if !preCheck.isValid {
             validation = preCheck
@@ -2320,24 +2381,8 @@ struct InvoiceEditorView: View {
     private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         guard superPDPSettings.credentials.isConfigured else { return }
-        let statusCode: String
-        var detailLabel: String
-        switch newStatus {
-        case .paid:
-            statusCode = "fr:212"
-            detailLabel = "Encaissée"
-        case .cancelled:
-            statusCode = "fr:320"
-            detailLabel = "Annulée"
-        case .accepted:
-            statusCode = "fr:310"
-            detailLabel = "Acceptée"
-        case .rejected:
-            statusCode = "fr:311"
-            detailLabel = "Rejetée"
-        default:
-            return
-        }
+        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode, statusCode != "200" else { return }
+        let detailLabel = newStatus.label
         if !force, let last = lastSentPDPStatusCode, last == statusCode {
             superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
             return
@@ -5207,6 +5252,10 @@ struct InvoiceStatusEditorSheet: View {
     @State private var label: String
     @State private var systemImage: String
     @State private var hexColor: String
+    @State private var transitionCodes: Set<String>
+
+    private var currentStatus: InvoiceStatus? { InvoiceStatus(rawValue: override.id) }
+    private var possibleTargets: [InvoiceStatus] { InvoiceStatus.allCases.filter { $0.rawValue != override.id } }
 
     init(override: InvoiceStatusOverride, onSave: @escaping (InvoiceStatusOverride) -> Void) {
         self.override = override
@@ -5214,6 +5263,7 @@ struct InvoiceStatusEditorSheet: View {
         _label = State(initialValue: override.label)
         _systemImage = State(initialValue: override.systemImage)
         _hexColor = State(initialValue: override.hexColor)
+        _transitionCodes = State(initialValue: Set(override.transitionCodes))
     }
 
     var body: some View {
@@ -5251,10 +5301,30 @@ struct InvoiceStatusEditorSheet: View {
                     .disabled(override.isReformStatus)
                 }
             }
+            if currentStatus != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transitions autorisées vers…").font(.subheadline.bold())
+                    Text("Statuts accessibles depuis « \(label) » via les boutons d'action de la facture (un administrateur peut toujours forcer les autres).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(possibleTargets, id: \.self) { target in
+                        Toggle(isOn: Binding(
+                            get: { transitionCodes.contains(target.rawValue) },
+                            set: { isOn in
+                                if isOn { transitionCodes.insert(target.rawValue) }
+                                else { transitionCodes.remove(target.rawValue) }
+                            }
+                        )) {
+                            Label(target.label, systemImage: target.systemImage)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(InvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: override.transitionCodes))
+                    let ordered = InvoiceStatus.allCases.map { $0.rawValue }.filter { transitionCodes.contains($0) }
+                    onSave(InvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: ordered))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -5263,7 +5333,7 @@ struct InvoiceStatusEditorSheet: View {
             Spacer()
         }
         .padding()
-        .frame(width: 420, height: 320)
+        .frame(width: 460, height: 460)
     }
 }
 
@@ -6739,7 +6809,11 @@ struct OrderEditorView: View {
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
-                                Button { order.lines.removeAll { $0.id == line.id } } label: {
+                                Button {
+                                    DispatchQueue.main.async {
+                                        order.lines.removeAll { $0.id == line.id }
+                                    }
+                                } label: {
                                     Image(systemName: "minus.circle")
                                 }
                             }

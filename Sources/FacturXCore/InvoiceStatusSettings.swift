@@ -42,12 +42,16 @@ public final class InvoiceStatusStore: ObservableObject {
         }
     }
 
-    private static func reformCode(for status: InvoiceStatus) -> String? {
+    /// Code d'événement SUPER PDP associé à chaque statut standard (table officielle
+    /// de l'API SUPER PDP — cf. docs/integrations-superpdp.md). Non modifiable par
+    /// l'utilisateur : c'est cette table, et non la donnée persistée, qui fait foi
+    /// (voir `load()`), pour éviter qu'une valeur erronée reste bloquée en local.
+    static func reformCode(for status: InvoiceStatus) -> String? {
         switch status {
-        case .paid: return "fr:212"
-        case .cancelled: return "fr:320"
-        case .accepted: return "fr:310"
-        case .rejected: return "fr:311"
+        case .paid: return "fr:212"       // Facture encaissée
+        case .cancelled: return "fr:320"  // Facture annulée
+        case .accepted: return "fr:207"   // Accepté par le destinataire
+        case .rejected: return "fr:206"   // Refusé par le destinataire
         case .sentToPDP: return "200"
         default: return nil
         }
@@ -66,10 +70,34 @@ public final class InvoiceStatusStore: ObservableObject {
             for d in InvoiceStatusStore.defaults where byID[d.id] == nil {
                 byID[d.id] = d
             }
+            // Le code réforme n'est pas éditable : on le réaligne toujours sur la table
+            // officielle, y compris pour une donnée déjà persistée (corrige d'anciennes
+            // valeurs erronées comme fr:310/fr:311, qui n'existent pas côté SUPER PDP).
+            for s in InvoiceStatus.allCases {
+                byID[s.rawValue]?.reformCode = InvoiceStatusStore.reformCode(for: s)
+            }
             overrides = InvoiceStatus.allCases.compactMap { byID[$0.rawValue] }
             let standard = Set(InvoiceStatus.allCases.map { $0.rawValue })
             overrides.append(contentsOf: decoded.filter { !standard.contains($0.id) })
         }
+    }
+
+    public func override(for status: InvoiceStatus) -> InvoiceStatusOverride {
+        overrides.first { $0.id == status.rawValue }
+            ?? InvoiceStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
+    }
+
+    /// Transitions autorisées pour un statut donné, lues depuis la configuration
+    /// (paramétrable dans Réglages > Statuts). Un administrateur peut en plus forcer
+    /// n'importe quel autre statut standard, indépendamment du graphe configuré.
+    public func allowedTransitions(from status: InvoiceStatus, isAdmin: Bool) -> [InvoiceStatus] {
+        let configured = override(for: status).transitionCodes.compactMap { InvoiceStatus(rawValue: $0) }
+        guard isAdmin else { return configured }
+        var extended = configured
+        for s in InvoiceStatus.allCases where s != status && !extended.contains(s) {
+            extended.append(s)
+        }
+        return extended
     }
 
     public func save() {

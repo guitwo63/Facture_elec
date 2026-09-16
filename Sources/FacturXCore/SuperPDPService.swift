@@ -6,25 +6,25 @@ public struct SuperPDPCredentials: Codable, Equatable {
     public var clientID: String
     public var clientSecret: String
     public var apiBaseURL: String
-    public var useSandbox: Bool
     public var usePDP: Bool
 
     public init(
         clientID: String,
         clientSecret: String,
         apiBaseURL: String = SuperPDPCredentials.defaultProductionBase,
-        useSandbox: Bool = true,
         usePDP: Bool = true
     ) {
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.apiBaseURL = apiBaseURL.isEmpty ? SuperPDPCredentials.defaultProductionBase : apiBaseURL
-        self.useSandbox = useSandbox
         self.usePDP = usePDP
     }
 
+    /// SUPER PDP utilise une seule et même adresse d'API pour le bac à sable et la
+    /// production : l'environnement est déterminé par les identifiants (client_id/
+    /// secret) utilisés, pas par l'URL. C'est pourquoi les credentials sont stockées
+    /// séparément par environnement (test/production) au niveau de SuperPDPSettings.
     public static let defaultProductionBase = "https://api.superpdp.tech"
-    public static let defaultSandboxBase = "https://api.superpdp.tech"
 
     public var resolvedBaseURL: String {
         let trimmed = apiBaseURL.trimmingCharacters(in: .whitespaces)
@@ -37,7 +37,7 @@ public struct SuperPDPCredentials: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case clientID, clientSecret, apiBaseURL, useSandbox, usePDP
+        case clientID, clientSecret, apiBaseURL, usePDP
     }
 
     public init(from decoder: Decoder) throws {
@@ -45,7 +45,6 @@ public struct SuperPDPCredentials: Codable, Equatable {
         clientID = try c.decodeIfPresent(String.self, forKey: .clientID) ?? ""
         clientSecret = try c.decodeIfPresent(String.self, forKey: .clientSecret) ?? ""
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? SuperPDPCredentials.defaultProductionBase
-        useSandbox = try c.decodeIfPresent(Bool.self, forKey: .useSandbox) ?? true
         usePDP = try c.decodeIfPresent(Bool.self, forKey: .usePDP) ?? true
     }
 }
@@ -922,7 +921,7 @@ public final class SuperPDPSettings: ObservableObject {
            let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
             credentials = decoded
         } else {
-            credentials = SuperPDPCredentials(clientID: "", clientSecret: "", useSandbox: env.isTest)
+            credentials = SuperPDPCredentials(clientID: "", clientSecret: "")
         }
     }
 
