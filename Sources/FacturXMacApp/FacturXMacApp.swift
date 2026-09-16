@@ -964,6 +964,7 @@ struct InvoicesTabView: View {
     @State private var typeFilter: InvoiceTypeFilter = .all
     @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
+    @State private var showQuickInvoiceWizard = false
     @State private var exportMessage: String?
     @State private var showAdvancedFilters = false
     @State private var advField1: InvoiceFilterField = .none
@@ -1021,6 +1022,11 @@ struct InvoicesTabView: View {
                         showOrderPicker = true
                     } label: { Label("Depuis une commande", systemImage: "cart") }
                         .buttonStyle(.bordered)
+                    Button {
+                        showQuickInvoiceWizard = true
+                    } label: { Label("Facture guidée", systemImage: "wand.and.stars") }
+                        .buttonStyle(.bordered)
+                        .help("Créer une facture en quelques étapes avec le minimum d'informations")
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
                             Text(f.rawValue).tag(f)
@@ -1194,6 +1200,15 @@ struct InvoicesTabView: View {
                     showOrderPicker = false
                 },
                 onCancel: { showOrderPicker = false }
+            )
+        }
+        .sheet(isPresented: $showQuickInvoiceWizard) {
+            SalesInvoiceWizardView(
+                onCreated: { invoiceID in
+                    selectedID = invoiceID
+                    showQuickInvoiceWizard = false
+                },
+                onCancel: { showQuickInvoiceWizard = false }
             )
         }
         .onChange(of: filteredInvoices) { newList in
