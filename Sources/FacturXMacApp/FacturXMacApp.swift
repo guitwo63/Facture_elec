@@ -127,6 +127,7 @@ struct FacturXMacApp: App {
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
     @StateObject private var smtpSettings = SMTPSettings.shared
+    @StateObject private var pcloudSettings = PCloudSettings.shared
     @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
@@ -144,6 +145,7 @@ struct FacturXMacApp: App {
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
                 .environmentObject(smtpSettings)
+                .environmentObject(pcloudSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -243,6 +245,7 @@ struct RootView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var pcloudSettings: PCloudSettings
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
@@ -280,6 +283,7 @@ struct RootView: View {
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
         smtpSettings.credentials = reloadSMTPCredentials()
+        pcloudSettings.load()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
@@ -4288,6 +4292,7 @@ struct ApplicationSettingsView: View {
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = false
     @State private var smtpExpanded = false
+    @State private var pcloudExpanded = false
     @State private var smtpTestMessage: String?
     @State private var smtpTesting = false
     @State private var tagsExpanded = false
@@ -4612,6 +4617,14 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("Alertes email (SMTP)", systemImage: "envelope.badge")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $pcloudExpanded) {
+                    CloudBackupSettingsView()
+                        .padding(8)
+                } label: {
+                    Label("Sauvegarde cloud (pCloud)", systemImage: "icloud.and.arrow.up")
                         .font(.headline)
                 }
 
