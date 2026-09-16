@@ -2665,6 +2665,8 @@ struct PartySection: View {
     @State private var saveName = ""
     @State private var pendingEntry: DirectoryEntry?
     @State private var duplicateMatches: [PartyDirectory.DuplicateMatch]?
+    @State private var lookingUpElectronicAddress = false
+    @State private var electronicAddressLookupNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -2746,26 +2748,27 @@ struct PartySection: View {
             VStack(spacing: 12) {
                 Text("Enregistrer dans l'annuaire").font(.headline)
                 TextField("Nom affiché", text: $saveName).frame(width: 320)
+                if role == .buyer, superPDPSettings.credentials.isConfigured {
+                    if lookingUpElectronicAddress {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Recherche de l'adresse électronique sur SUPER PDP…")
+                        }.font(.caption).foregroundStyle(.secondary)
+                    } else if let note = electronicAddressLookupNote {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 HStack {
                     Button("Annuler") { showSaveSheet = false }
                         .keyboardShortcut(.cancelAction)
                     Button("Enregistrer") {
-                        var p = party
-                        p.name = saveName.trimmingCharacters(in: .whitespaces).isEmpty ? party.name : saveName
-                        let entry = DirectoryEntry(kind: role.defaultKind, party: p)
-                        let dup = directory.findDuplicates(of: entry)
-                        if dup.isEmpty {
-                            directory.upsert(entry)
-                            showSaveSheet = false
-                        } else {
-                            pendingEntry = entry
-                            duplicateMatches = dup
-                        }
+                        saveToDirectory()
                     }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .disabled(lookingUpElectronicAddress)
                 }
-            }.padding(20)
+            }.padding(20).frame(minWidth: 360)
         }
         .alert("Tiers potentiellement en doublon", isPresented: Binding(
             get: { duplicateMatches != nil },
@@ -2790,6 +2793,50 @@ struct PartySection: View {
                 }.joined(separator: "\n")
                 Text("Un ou plusieurs tiers existants semblent correspondre :\n\(lines)")
             }
+        }
+    }
+
+    private func saveToDirectory() {
+        var p = party
+        p.name = saveName.trimmingCharacters(in: .whitespaces).isEmpty ? party.name : saveName
+        let siren = (p.siren ?? "").filter { $0.isNumber }
+        let siret = (p.siret ?? "").filter { $0.isNumber }
+        let hasElectronicAddress = !(p.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        guard role == .buyer, superPDPSettings.credentials.isConfigured, !hasElectronicAddress,
+              (siren.count == 9 || siret.count == 14) else {
+            finishSaveToDirectory(p)
+            return
+        }
+        lookingUpElectronicAddress = true
+        electronicAddressLookupNote = nil
+        let query = siret.count == 14 ? siret : siren
+        Task {
+            do {
+                let results = try await SuperPDPService().searchRecipient(siretOrSiren: query, credentials: superPDPSettings.credentials)
+                if let match = results.first(where: { ($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty == false }) {
+                    p.endpointID = match.routingAddress
+                    p.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
+                    electronicAddressLookupNote = "Adresse électronique trouvée sur SUPER PDP."
+                } else {
+                    electronicAddressLookupNote = "Aucune adresse électronique trouvée sur SUPER PDP pour ce SIREN/SIRET."
+                }
+            } catch {
+                electronicAddressLookupNote = "Recherche SUPER PDP indisponible : \(error.localizedDescription)"
+            }
+            lookingUpElectronicAddress = false
+            finishSaveToDirectory(p)
+        }
+    }
+
+    private func finishSaveToDirectory(_ p: InvoiceParty) {
+        let entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        let dup = directory.findDuplicates(of: entry)
+        if dup.isEmpty {
+            directory.upsert(entry)
+            showSaveSheet = false
+        } else {
+            pendingEntry = entry
+            duplicateMatches = dup
         }
     }
 
