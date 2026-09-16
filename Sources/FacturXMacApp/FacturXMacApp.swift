@@ -485,6 +485,7 @@ enum InvoiceFilterField: String, CaseIterable, Hashable {
 struct ExportSheet: View {
     let invoices: [Invoice]
     let orders: [SalesOrder]
+    var initialKind: ExportKind = .invoices
     @Binding var isPresented: Bool
 
     enum ExportKind: String, CaseIterable, Hashable {
@@ -503,6 +504,7 @@ struct ExportSheet: View {
     @State private var query = ""
     @State private var selectedIDs: Set<UUID> = []
     @State private var exportLog: String = ""
+    @State private var didInitSelection = false
 
     private var baseList: [(id: UUID, number: String, date: Date, label: String, amount: Double)] {
         switch kind {
@@ -540,6 +542,9 @@ struct ExportSheet: View {
                 Spacer()
             }
             .padding(12)
+            Text("Pré-sélection basée sur les filtres actifs de la liste (recherche, statut, type…). Décochez ou affinez ci-dessous si besoin.")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).padding(.bottom, 8)
             Divider()
             HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -608,6 +613,15 @@ struct ExportSheet: View {
             .padding(12)
         }
         .frame(width: 640, height: 480)
+        .onAppear {
+            guard !didInitSelection else { return }
+            didInitSelection = true
+            kind = initialKind
+            selectedIDs = Set(baseList.map { $0.id })
+        }
+        .onChange(of: kind) { _ in
+            selectedIDs = Set(baseList.map { $0.id })
+        }
     }
 
     private func runExport() {
@@ -1126,8 +1140,9 @@ struct InvoicesTabView: View {
         }
         .sheet(isPresented: $showExport) {
             ExportSheet(
-                invoices: scopedInvoices,
+                invoices: filteredInvoices,
                 orders: scopedOrders,
+                initialKind: .invoices,
                 isPresented: $showExport
             )
         }
@@ -6556,7 +6571,8 @@ struct OrdersTabView: View {
         .sheet(isPresented: $showExport) {
             ExportSheet(
                 invoices: scopedInvoices,
-                orders: scopedOrders,
+                orders: filteredOrders,
+                initialKind: .orders,
                 isPresented: $showExport
             )
         }
