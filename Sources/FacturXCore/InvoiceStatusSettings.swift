@@ -46,9 +46,9 @@ public final class InvoiceStatusStore: ObservableObject {
         switch status {
         case .paid: return "fr:212"
         case .cancelled: return "fr:320"
-        case .accepted: return "fr:310"
-        case .rejected: return "fr:311"
-        case .sentToPDP: return "200"
+        case .accepted: return "fr:207"
+        case .rejected: return "fr:206"
+        case .sentToPDP: return "fr:200"
         default: return nil
         }
     }
