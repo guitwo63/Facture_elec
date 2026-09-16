@@ -525,7 +525,7 @@ struct RootView: View {
             case .orders:
                 OrdersTabView(selectedID: $selectedOrderID)
             case .quotes:
-                QuotesTabView(selectedID: $selectedQuoteID)
+                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID)
             case .directory:
                 DirectoryView()
             case .dashboard:
@@ -6984,6 +6984,8 @@ struct QuotesTabView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @Binding var selectedID: UUID?
+    @Binding var rootTab: RootTab
+    @Binding var invoiceSelectedID: UUID?
     @State private var query = ""
 
     var filteredQuotes: [Quote] {
@@ -7107,7 +7109,7 @@ struct QuotesTabView: View {
                 }
 
                 if let id = selectedID, quoteStore.quotes.contains(where: { $0.id == id }) {
-                    QuoteEditorView(quote: binding(for: id))
+                    QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID)
                         .frame(minWidth: 380)
                 } else {
                     VStack(spacing: 8) {
@@ -7136,6 +7138,8 @@ struct QuotesTabView: View {
 
 struct QuoteEditorView: View {
     @Binding var quote: Quote
+    @Binding var rootTab: RootTab
+    @Binding var invoiceSelectedID: UUID?
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var store: InvoiceStore
 
@@ -7189,6 +7193,8 @@ struct QuoteEditorView: View {
                             store.upsert(invoice)
                             quote.convertedInvoiceNumber = invoice.number
                             quoteStore.upsert(quote)
+                            invoiceSelectedID = invoice.id
+                            rootTab = .invoices
                         } label: {
                             Label("Convertir en facture", systemImage: "arrow.right.doc.on.clipboard")
                         }
