@@ -1685,29 +1685,46 @@ struct InvoiceEditorView: View {
                                         }
                                     }
                                     .help("Créée le \(invoice.createdAt.formatted(.dateTime.day().month().year().hour().minute())) (non modifiable).")
-                                    HStack(spacing: 3) {
-                                        Picker("Type", selection: $invoice.type) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Type").font(.caption)
+                                            InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
+                                        }
+                                        Picker("", selection: $invoice.type) {
                                             ForEach(InvoiceTypeCode.allCases, id: \.self) { Text($0.label).tag($0) }
-                                        }.frame(width: 260)
-                                        InfoBadge(text: "BT-3 — Code type. 380 facture, 381 avoir, 384 rectificative.")
+                                        }.labelsHidden().frame(width: 260)
                                     }
-                                    fieldHighlight(NormRefPicker("Devise", options: NormRefs.currencies, code: $invoice.currency).frame(width: 160), forRuleIDs: ["BR-5"])
-                                    InfoBadge(text: "BT-5 — Code de la devise (ram:TaxCurrencyCode / ram:InvoiceCurrencyCode).")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Devise").font(.caption)
+                                            InfoBadge(text: "BT-5 — Code de la devise (ram:TaxCurrencyCode / ram:InvoiceCurrencyCode).")
+                                        }
+                                        fieldHighlight(NormRefPicker("", options: NormRefs.currencies, code: $invoice.currency).labelsHidden().frame(width: 160), forRuleIDs: ["BR-5"])
+                                    }
                                 }
-                                HStack {
-                                    HStack(spacing: 3) {
-                                        DatePicker("Date facture", selection: $invoice.issueDate, displayedComponents: .date)
-                                        InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Date facture").font(.caption)
+                                            InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
+                                        }
+                                        DatePicker("", selection: $invoice.issueDate, displayedComponents: .date).labelsHidden()
                                     }
-                                    HStack(spacing: 3) {
-                                        DatePicker("Échéance", selection: $invoice.dueDate, displayedComponents: .date)
-                                        InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Échéance").font(.caption)
+                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                        }
+                                        DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
                                     }
-                                    HStack(spacing: 3) {
-                                        Picker("Mode facturation (BT-23)", selection: $invoice.billingMode) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 3) {
+                                            Text("Mode facturation (BT-23)").font(.caption)
+                                            InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
+                                        }
+                                        Picker("", selection: $invoice.billingMode) {
                                             ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                                        }.frame(width: 320)
-                                        InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
+                                        }.labelsHidden().frame(width: 320)
                                     }
                                 }
                                 HStack(spacing: 3) {
