@@ -1,6 +1,37 @@
 import SwiftUI
 import FacturXCore
 
+private struct EnvironmentModeButton: View {
+    let systemImage: String
+    let title: String
+    let color: Color
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28))
+                Text(title)
+                    .font(.caption.bold())
+            }
+            .frame(width: 140, height: 72)
+            .foregroundStyle(isActive ? Color.white : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isActive ? color : Color.gray.opacity(0.15))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(isActive ? color : Color.gray.opacity(0.3), lineWidth: isActive ? 0 : 1)
+        )
+        .shadow(color: isActive ? color.opacity(0.4) : .clear, radius: 6, y: 2)
+    }
+}
+
 struct LoginView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var appEnv: AppEnvironment
@@ -23,33 +54,19 @@ struct LoginView: View {
                 Text("Factur-X").font(.largeTitle.bold())
                 Text("Connexion").font(.title3).foregroundStyle(.secondary)
             }
-            HStack(spacing: 12) {
-                Button {
-                    appEnv.setMode(.production)
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.title2)
-                        Text("PRODUCTION")
-                            .font(.caption.bold())
-                    }
-                    .frame(width: 130, height: 56)
-                }
-                .buttonStyle(.bordered)
-                .tint(appEnv.mode == .production ? .green : .secondary)
-                Button {
-                    appEnv.setMode(.test)
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "flask.fill")
-                            .font(.title2)
-                        Text("TEST")
-                            .font(.caption.bold())
-                    }
-                    .frame(width: 130, height: 56)
-                }
-                .buttonStyle(.bordered)
-                .tint(appEnv.mode == .test ? .orange : .secondary)
+            HStack(spacing: 16) {
+                EnvironmentModeButton(
+                    systemImage: "checkmark.seal.fill",
+                    title: "PRODUCTION",
+                    color: .green,
+                    isActive: appEnv.mode == .production
+                ) { appEnv.setMode(.production) }
+                EnvironmentModeButton(
+                    systemImage: "flask.fill",
+                    title: "TEST",
+                    color: .orange,
+                    isActive: appEnv.mode == .test
+                ) { appEnv.setMode(.test) }
             }
             VStack(spacing: 12) {
                 TextField("Adresse e-mail", text: $username)
@@ -83,6 +100,20 @@ struct LoginView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
+            VStack(spacing: 6) {
+                Link(destination: AppVersion.repositoryURL) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "link")
+                        Text("github.com/guitwo63/Facture_elec")
+                    }
+                    .font(.callout.weight(.medium))
+                }
+                Text("Facture_elec v\(AppVersion.current)")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text("© 2026 \(AppVersion.copyrightHolder) — \(AppVersion.licenseName)")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.bottom, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()

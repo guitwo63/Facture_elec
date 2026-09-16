@@ -155,3 +155,9 @@ Tests/FacturXCoreTests/
 Les commandes sont sauvegardées localement (UserDefaults, clés `orderx.*`) entre les sessions.
 
 > Note : comme pour les factures, le conteneur produit est conforme à la structure Order-X (XML + XMP + AF). Une validation Schematron complète via un validateur externe reste recommandée avant transmission.
+
+## Licence
+
+Ce projet est distribué sous licence [Apache License 2.0](LICENSE).
+
+Copyright © 2026 Arverneo

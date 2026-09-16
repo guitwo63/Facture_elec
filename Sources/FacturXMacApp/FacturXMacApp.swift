@@ -157,6 +157,18 @@ extension Notification.Name {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard SingleInstanceLock.shared.acquire() else {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "Facture_elec est déjà ouvert"
+            alert.informativeText = "Une autre instance de l'application est déjà lancée sur cette machine. Fermez-la avant d'en ouvrir une nouvelle, pour éviter tout conflit sur les données enregistrées."
+            alert.addButton(withTitle: "Quitter")
+            alert.runModal()
+            exit(0)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -4647,11 +4659,15 @@ struct ApplicationSettingsView: View {
 
                 Divider()
                 HStack {
-                    Text("Facture_elec v0.3.0").font(.caption).foregroundStyle(.secondary)
+                    Text("Facture_elec v\(AppVersion.current) — © 2026 \(AppVersion.copyrightHolder) — \(AppVersion.licenseName)")
+                        .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    if let repo = URL(string: "https://github.com/guitwo63/Facture_elec") {
-                        Link("GitHub", destination: repo).font(.caption)
-                    }
+                    Link(destination: AppVersion.repositoryURL) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "link")
+                            Text("GitHub")
+                        }
+                    }.font(.caption.weight(.semibold))
                 }
 
                 Spacer()
