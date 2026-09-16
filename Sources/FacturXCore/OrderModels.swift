@@ -92,6 +92,38 @@ public enum OrderStatus: String, Codable, CaseIterable {
         case .confirmed: return "1E7E34"
         }
     }
+
+    /// Verrouille la commande en édition (comme `InvoiceStatus.locksInvoice`) une fois
+    /// le cycle de vie arrivé à son terme.
+    public var locksOrder: Bool {
+        switch self {
+        case .confirmed, .cancelled: return true
+        default: return false
+        }
+    }
+
+    /// Transitions par défaut du cycle de vie normé (avant toute personnalisation en
+    /// Réglages > Statuts des commandes).
+    public func allowedTransitions() -> [OrderStatus] {
+        switch self {
+        case .draft:
+            return [.issued]
+        case .issued:
+            return [.sentToSociete, .cancelled]
+        case .sentToSociete:
+            return [.accepted, .rejected, .amended]
+        case .accepted:
+            return [.confirmed, .cancelled]
+        case .amended:
+            return [.sentToSociete, .cancelled]
+        case .rejected:
+            return [.amended, .cancelled]
+        case .confirmed:
+            return []
+        case .cancelled:
+            return []
+        }
+    }
 }
 
 public struct SalesOrder: Codable, Hashable, Identifiable {
@@ -268,12 +300,29 @@ public struct OrderStatusOverride: Codable, Hashable, Identifiable {
     public var label: String
     public var systemImage: String
     public var hexColor: String
+    public var transitionCodes: [String]
 
-    public init(id: String, label: String, systemImage: String, hexColor: String) {
+    public init(id: String, label: String, systemImage: String, hexColor: String, transitionCodes: [String] = []) {
         self.id = id
         self.label = label
         self.systemImage = systemImage
         self.hexColor = hexColor
+        self.transitionCodes = transitionCodes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, label, systemImage, hexColor, transitionCodes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        systemImage = try c.decode(String.self, forKey: .systemImage)
+        hexColor = try c.decode(String.self, forKey: .hexColor)
+        // Nouveau champ : absent des données déjà persistées, donc décodé en tolérant
+        // son absence (sinon le decode échoue et l'utilisateur perd ses personnalisations).
+        transitionCodes = try c.decodeIfPresent([String].self, forKey: .transitionCodes) ?? []
     }
 
     private static let pdpKeys: Set<String> = [
@@ -298,7 +347,10 @@ public final class OrderStatusStore: ObservableObject {
 
     public static var defaults: [OrderStatusOverride] {
         OrderStatus.allCases.map { s in
-            OrderStatusOverride(id: s.rawValue, label: s.label, systemImage: s.systemImage, hexColor: s.hexColor)
+            OrderStatusOverride(
+                id: s.rawValue, label: s.label, systemImage: s.systemImage, hexColor: s.hexColor,
+                transitionCodes: s.allowedTransitions().map { $0.rawValue }
+            )
         }
     }
 
@@ -337,6 +389,7 @@ public final class OrderStatusStore: ObservableObject {
 
     public func remove(at idx: Int) {
         guard overrides.indices.contains(idx) else { return }
+        guard !overrides[idx].isPDPStatus else { return }
         overrides.remove(at: idx)
         save()
     }
@@ -358,5 +411,26 @@ public final class OrderStatusStore: ObservableObject {
             return custom
         }
         return override(for: order.status)
+    }
+
+    /// Transitions autorisées depuis un statut donné, lues depuis la configuration
+    /// (paramétrable dans Réglages > Statuts des commandes). Un administrateur peut
+    /// en plus forcer n'importe quel autre statut standard ou personnalisé.
+    public func allowedTransitions(from status: OrderStatus, isAdmin: Bool) -> [OrderStatus] {
+        let configured = override(for: status).transitionCodes.compactMap { OrderStatus(rawValue: $0) }
+        guard isAdmin else { return configured }
+        var extended = configured
+        for s in OrderStatus.allCases where s != status && !extended.contains(s) {
+            extended.append(s)
+        }
+        return extended
+    }
+
+    /// Statuts personnalisés (hors cycle standard) — pour laisser l'admin les
+    /// atteindre malgré l'absence de transition configurée (parité avec l'ancien
+    /// sélecteur libre).
+    public var customStatuses: [OrderStatusOverride] {
+        let standard = Set(OrderStatus.allCases.map { $0.rawValue })
+        return overrides.filter { !standard.contains($0.id) }
     }
 }
