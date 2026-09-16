@@ -273,10 +273,6 @@ struct TreasuryDashboardView: View {
         inv.type.isCreditNote ? -inv.grandTotal : inv.grandTotal
     }
 
-    private func isOverdue(_ inv: Invoice) -> Bool {
-        inv.status != .paid && inv.dueDate < Date()
-    }
-
     private var currentMonthInvoices: [Invoice] {
         scopedInvoices.filter { Calendar.current.isDate($0.issueDate, equalTo: Date(), toGranularity: .month) }
     }
@@ -290,11 +286,11 @@ struct TreasuryDashboardView: View {
     }
 
     private var enRetard: Double {
-        activeInvoices.filter(isOverdue).reduce(0) { $0 + signedAmount($1) }
+        activeInvoices.filter(\.isOverdue).reduce(0) { $0 + signedAmount($1) }
     }
 
     private var enAttente: Double {
-        activeInvoices.filter { $0.status != .paid && !isOverdue($0) }.reduce(0) { $0 + signedAmount($1) }
+        activeInvoices.filter { $0.status != .paid && !$0.isOverdue }.reduce(0) { $0 + signedAmount($1) }
     }
 
     private var byClient: [ClientBalance] {
@@ -303,7 +299,7 @@ struct TreasuryDashboardView: View {
             let name = inv.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client sans nom" : inv.buyer.name
             var entry = byName[name] ?? (outstanding: 0, overdue: 0)
             entry.outstanding += signedAmount(inv)
-            if isOverdue(inv) { entry.overdue += signedAmount(inv) }
+            if inv.isOverdue { entry.overdue += signedAmount(inv) }
             byName[name] = entry
         }
         return byName.map { ClientBalance(id: $0.key, name: $0.key, outstanding: $0.value.outstanding, overdue: $0.value.overdue) }
@@ -482,7 +478,7 @@ struct RootView: View {
                     ForEach(RootTab.visible(for: auth.currentUser?.role)) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 380)
+                .frame(width: 460)
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {

@@ -5,6 +5,7 @@ struct CloudBackupSettingsView: View {
     @EnvironmentObject var pcloudSettings: PCloudSettings
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var directory: PartyDirectory
 
     @State private var testing = false
@@ -106,7 +107,7 @@ struct CloudBackupSettingsView: View {
         backingUp = true
         backupMessage = nil
         let credentials = pcloudSettings.credentials
-        let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, directory: directory)
+        let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
         Task {
             do {
                 let data = try Self.encodeBackup(bundle)
@@ -155,8 +156,8 @@ struct CloudBackupSettingsView: View {
                 let auth = try await service.login(credentials: credentials)
                 let data = try await service.download(fileID: file.fileID, credentials: credentials, auth: auth)
                 let bundle = try Self.decodeBackup(data)
-                BackupService.restore(bundle, invoiceStore: store, orderStore: orderStore, directory: directory)
-                restoreMessage = "Restauration terminée : \(bundle.invoices.count) facture(s), \(bundle.orders.count) commande(s), \(bundle.parties.count) tiers."
+                BackupService.restore(bundle, invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
+                restoreMessage = "Restauration terminée : \(bundle.invoices.count) facture(s), \(bundle.orders.count) commande(s), \(bundle.quotes.count) devis, \(bundle.parties.count) tiers."
             } catch {
                 restoreMessage = "Échec de la restauration : \(error.localizedDescription)"
             }

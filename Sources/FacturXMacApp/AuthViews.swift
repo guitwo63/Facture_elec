@@ -1291,6 +1291,7 @@ struct DataPartiesPanel: View {
 struct DataPortabilityPanel: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var orderStatusStore: OrderStatusStore
@@ -1316,6 +1317,9 @@ struct DataPortabilityPanel: View {
                 moduleRow(title: "Tiers (annuaire)", count: directory.entries.count,
                           onExport: { exportJSON(directory.entries, suggestedName: "annuaire.json") },
                           onImport: importParties)
+                moduleRow(title: "Devis", count: quoteStore.quotes.count,
+                          onExport: { exportJSON(quoteStore.quotes, suggestedName: "devis.json") },
+                          onImport: importQuotes)
 
                 Divider()
 
@@ -1401,6 +1405,17 @@ struct DataPortabilityPanel: View {
             let imported = try DataPortability.importJSON(DirectoryEntry.self, from: data)
             imported.forEach(directory.upsert)
             message = "\(imported.count) tiers importé(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func importQuotes() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(Quote.self, from: data)
+            imported.forEach(quoteStore.upsert)
+            message = "\(imported.count) devis importé(s)."
         } catch {
             message = "Échec de l'import : \(error.localizedDescription)"
         }

@@ -1,14 +1,16 @@
 import Foundation
 
 /// Sauvegarde complète en un seul fichier JSON — plus simple qu'une archive
-/// multi-fichiers. Couvre les données métier (factures, commandes, tiers) ;
-/// les identifiants/clés API restent volontairement exclus (propres à chaque
-/// poste et environnement, jamais à faire transiter vers un stockage cloud).
+/// multi-fichiers. Couvre les données métier (factures, commandes, devis,
+/// tiers) ; les identifiants/clés API restent volontairement exclus (propres
+/// à chaque poste et environnement, jamais à faire transiter vers un
+/// stockage cloud).
 public struct BackupBundle: Codable {
     public var createdAt: Date
     public var appVersion: String
     public var invoices: [Invoice]
     public var orders: [SalesOrder]
+    public var quotes: [Quote]
     public var parties: [DirectoryEntry]
 
     public init(
@@ -16,17 +18,19 @@ public struct BackupBundle: Codable {
         appVersion: String = AppVersion.current,
         invoices: [Invoice],
         orders: [SalesOrder],
+        quotes: [Quote] = [],
         parties: [DirectoryEntry]
     ) {
         self.createdAt = createdAt
         self.appVersion = appVersion
         self.invoices = invoices
         self.orders = orders
+        self.quotes = quotes
         self.parties = parties
     }
 
     private enum CodingKeys: String, CodingKey {
-        case createdAt, appVersion, invoices, orders, parties
+        case createdAt, appVersion, invoices, orders, quotes, parties
     }
 
     public init(from decoder: Decoder) throws {
@@ -35,6 +39,7 @@ public struct BackupBundle: Codable {
         appVersion = try c.decodeIfPresent(String.self, forKey: .appVersion) ?? ""
         invoices = try c.decodeIfPresent([Invoice].self, forKey: .invoices) ?? []
         orders = try c.decodeIfPresent([SalesOrder].self, forKey: .orders) ?? []
+        quotes = try c.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
         parties = try c.decodeIfPresent([DirectoryEntry].self, forKey: .parties) ?? []
     }
 
@@ -50,11 +55,13 @@ public enum BackupService {
     public static func capture(
         invoiceStore: InvoiceStore,
         orderStore: OrderStore,
+        quoteStore: QuoteStore,
         directory: PartyDirectory
     ) -> BackupBundle {
         BackupBundle(
             invoices: invoiceStore.invoices,
             orders: orderStore.orders,
+            quotes: quoteStore.quotes,
             parties: directory.entries
         )
     }
@@ -66,10 +73,12 @@ public enum BackupService {
         _ bundle: BackupBundle,
         invoiceStore: InvoiceStore,
         orderStore: OrderStore,
+        quoteStore: QuoteStore,
         directory: PartyDirectory
     ) {
         bundle.invoices.forEach(invoiceStore.upsert)
         bundle.orders.forEach(orderStore.upsert)
+        bundle.quotes.forEach(quoteStore.upsert)
         bundle.parties.forEach(directory.upsert)
     }
 }
