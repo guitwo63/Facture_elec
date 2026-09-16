@@ -44,7 +44,7 @@ public enum IBANValidator {
         if let expected = lengthsByCountry[country], cleaned.count != expected {
             return false
         }
-        guard cleaned.dropFirst(4).allSatisfy({ $0.isNumber }) else { return false }
+        guard cleaned.dropFirst(4).allSatisfy({ $0.isNumber || $0.isLetter }) else { return false }
         guard let checkDigits = Int(cleaned.dropFirst(2).prefix(2)), (0...99).contains(checkDigits) else {
             return false
         }

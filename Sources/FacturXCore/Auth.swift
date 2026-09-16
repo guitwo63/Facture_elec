@@ -385,7 +385,7 @@ public final class AuthStore: ObservableObject {
     @Published public var users: [User]
     @Published public var currentUser: User?
 
-    public weak var directory: PartyDirectory?
+    public var directory: PartyDirectory?
 
     /// By-pass de test : désactive la politique de mot de passe, le verrouillage de compte
     /// et l'expiration de session pour permettre une connexion directe en tests.
