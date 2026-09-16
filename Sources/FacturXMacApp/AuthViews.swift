@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CoreImage
+import UniformTypeIdentifiers
 import FacturXCore
 
 private struct EnvironmentModeButton: View {
@@ -1043,6 +1044,7 @@ struct DataAdminView: View {
         case invoices = "Factures"
         case orders = "Commandes"
         case parties = "Tiers"
+        case portability = "Export / Import"
         var id: String { rawValue }
     }
 
@@ -1066,6 +1068,7 @@ struct DataAdminView: View {
                     case .invoices: DataInvoicesPanel()
                     case .orders: DataOrdersPanel()
                     case .parties: DataPartiesPanel()
+                    case .portability: DataPortabilityPanel()
                     }
                 }
                 .frame(minWidth: 360)
@@ -1281,6 +1284,162 @@ struct DataPartiesPanel: View {
                 }
                 .padding(10)
             }
+        }
+    }
+}
+
+struct DataPortabilityPanel: View {
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var orderStatusStore: OrderStatusStore
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColorStore: KindColorStore
+    @State private var message: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Export / Import par module (JSON)").font(.headline)
+                    Text("Contrairement aux exports CSV (pensés pour un tableur), ce format structuré conserve toutes les données — lignes, statuts, champs optionnels — et permet donc un import fidèle, pas seulement une extraction pour lecture externe.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                moduleRow(title: "Factures", count: store.invoices.count,
+                          onExport: { exportJSON(store.invoices, suggestedName: "factures.json") },
+                          onImport: importInvoices)
+                moduleRow(title: "Commandes", count: orderStore.orders.count,
+                          onExport: { exportJSON(orderStore.orders, suggestedName: "commandes.json") },
+                          onImport: importOrders)
+                moduleRow(title: "Tiers (annuaire)", count: directory.entries.count,
+                          onExport: { exportJSON(directory.entries, suggestedName: "annuaire.json") },
+                          onImport: importParties)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Configuration").font(.headline)
+                    Text("Numérotation, statuts personnalisés, tags, couleurs — sans identifiants ni clés API, qui restent propres à chaque poste et à chaque environnement.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Exporter la configuration") { exportConfiguration() }.buttonStyle(.bordered)
+                    Button("Importer la configuration") { importConfiguration() }.buttonStyle(.bordered)
+                    Spacer()
+                }
+
+                if let m = message {
+                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func moduleRow(title: String, count: Int, onExport: @escaping () -> Void, onImport: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title).font(.body.weight(.semibold))
+            Text("(\(count))").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Exporter") { onExport() }.buttonStyle(.bordered)
+            Button("Importer") { onImport() }.buttonStyle(.bordered)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.3)))
+    }
+
+    private func exportJSON<T: Encodable>(_ items: [T], suggestedName: String) {
+        do {
+            let data = try DataPortability.exportJSON(items)
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = suggestedName
+            panel.allowedContentTypes = [.json]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try data.write(to: url)
+            message = "Export réussi : \(url.lastPathComponent)"
+        } catch {
+            message = "Échec de l'export : \(error.localizedDescription)"
+        }
+    }
+
+    private func pickJSONFile() -> Data? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    private func importInvoices() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(Invoice.self, from: data)
+            imported.forEach(store.upsert)
+            message = "\(imported.count) facture(s) importée(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func importOrders() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(SalesOrder.self, from: data)
+            imported.forEach(orderStore.upsert)
+            message = "\(imported.count) commande(s) importée(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func importParties() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(DirectoryEntry.self, from: data)
+            imported.forEach(directory.upsert)
+            message = "\(imported.count) tiers importé(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func exportConfiguration() {
+        let bundle = AppConfigurationBundle.capture(
+            invoiceStore: store, orderStore: orderStore,
+            invoiceStatusStore: invoiceStatusStore, orderStatusStore: orderStatusStore,
+            tagStore: tagStore, kindColorStore: kindColorStore
+        )
+        do {
+            let data = try DataPortability.exportJSON([bundle])
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "configuration.json"
+            panel.allowedContentTypes = [.json]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try data.write(to: url)
+            message = "Configuration exportée : \(url.lastPathComponent)"
+        } catch {
+            message = "Échec de l'export : \(error.localizedDescription)"
+        }
+    }
+
+    private func importConfiguration() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            guard let bundle = try DataPortability.importJSON(AppConfigurationBundle.self, from: data).first else {
+                message = "Échec de l'import : fichier vide."
+                return
+            }
+            bundle.apply(
+                invoiceStore: store, orderStore: orderStore,
+                invoiceStatusStore: invoiceStatusStore, orderStatusStore: orderStatusStore,
+                tagStore: tagStore, kindColorStore: kindColorStore
+            )
+            message = "Configuration importée."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
         }
     }
 }
