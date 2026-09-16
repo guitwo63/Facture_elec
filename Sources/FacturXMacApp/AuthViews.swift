@@ -248,11 +248,16 @@ struct UserManagementView: View {
     @State private var editingUser: User?
     @State private var creatingUser = false
     @State private var searchQuery = ""
+    @State private var roleFilter: UserRole? = nil
 
     private var filteredUsers: [User] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return auth.users }
-        return auth.users.filter {
+        var result = auth.users
+        if let rf = roleFilter {
+            result = result.filter { $0.hasRole(rf) }
+        }
+        guard !q.isEmpty else { return result }
+        return result.filter {
             $0.username.lowercased().contains(q) ||
             $0.effectiveDisplayName.lowercased().contains(q) ||
             $0.rolesLabel.lowercased().contains(q)
@@ -261,33 +266,33 @@ struct UserManagementView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                HStack {
-                    Text("Gestion utilisateurs").font(.headline)
-                    Spacer()
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Rechercher un utilisateur", text: $searchQuery)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 240)
-                    }
-                }
-                usersSection
+            HStack {
+                Text("Gestion utilisateurs").font(.title2.bold())
+                Spacer()
+                Text("\(auth.users.count) utilisateur(s)").font(.caption).foregroundStyle(.secondary)
             }
             .padding(12)
             Divider()
-            if let id = selectedUserID, let user = auth.users.first(where: { $0.id == id }) {
-                UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
-                               onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw, forceChange: true) })
-                    .padding(12)
-            } else {
-                VStack(spacing: 6) {
-                    Image(systemName: "person.badge.shield.checkmark").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("Sélectionnez un utilisateur.").foregroundStyle(.secondary)
+            HSplitView {
+                usersSection
+                    .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
+                Group {
+                    if let id = selectedUserID, let user = auth.users.first(where: { $0.id == id }) {
+                        ScrollView {
+                            UserDetailCard(user: user, onChange: { updated in auth.upsert(updated) },
+                                           onResetPassword: { pw in try? auth.updatePassword(user, newPassword: pw, forceChange: true) })
+                                .padding(12)
+                        }
+                    } else {
+                        VStack(spacing: 6) {
+                            Image(systemName: "person.badge.shield.checkmark").font(.largeTitle).foregroundStyle(.secondary)
+                            Text("Sélectionnez un utilisateur.").foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 360)
             }
-            Spacer()
         }
         .sheet(isPresented: $creatingUser) {
             UserEditorSheet { username, displayName, password, roles, societyIDs, defaultSeller in
@@ -321,16 +326,28 @@ struct UserManagementView: View {
     private var usersSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Utilisateurs").font(.headline)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher un utilisateur", text: $searchQuery)
+                    .textFieldStyle(.plain)
                 Spacer()
                 Button { creatingUser = true } label: { Label("Nouveau", systemImage: "plus") }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent).controlSize(.small)
             }
+            .padding(.horizontal, 8).padding(.top, 8)
+            Picker("Rôle", selection: $roleFilter) {
+                Text("Tous").tag(UserRole?.none)
+                ForEach(UserRole.allCases, id: \.self) { r in Text(r.label).tag(UserRole?.some(r)) }
+            }
+            .labelsHidden().pickerStyle(.segmented)
+            .padding(.horizontal, 8)
             List(filteredUsers, selection: Binding(
                 get: { selectedUserID },
                 set: { selectedUserID = $0 }
             )) { user in
-                HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: user.role.systemImage)
+                        .foregroundStyle(roleColor(user.role))
+                        .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(user.effectiveDisplayName).font(.body.weight(.medium))
                         Text("@\(user.username)").font(.caption2).foregroundStyle(.secondary)
@@ -339,15 +356,20 @@ struct UserManagementView: View {
                                 .padding(.horizontal, 6).padding(.vertical, 1)
                                 .background(roleColor(user.role).opacity(0.18), in: Capsule())
                                 .foregroundStyle(roleColor(user.role))
-                            Text("\(user.societyIDs.count) société(s)").font(.caption2).foregroundStyle(.secondary)
+                            if !user.isAdmin {
+                                Text("\(user.societyIDs.count) société(s)").font(.caption2).foregroundStyle(.secondary)
+                            }
                             if !user.isActive {
-                                Text("Désactivé").font(.caption2).foregroundStyle(.red)
+                                Text("Désactivé").font(.caption2.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Color.red, in: Capsule())
                             }
                         }
                     }
                     Spacer()
-                    Image(systemName: user.role.systemImage).foregroundStyle(.secondary)
                 }
+                .opacity(user.isActive ? 1 : 0.6)
+                .padding(.vertical, 2)
                 .contextMenu {
                     Button { editingUser = user } label: { Label("Modifier", systemImage: "pencil") }
                     Divider()
@@ -364,7 +386,6 @@ struct UserManagementView: View {
                     }
                 }
             }
-            .frame(minHeight: 240)
         }
     }
 
@@ -383,6 +404,7 @@ struct UserDetailCard: View {
     let onResetPassword: (String) -> Void
     @EnvironmentObject var auth: AuthStore
     @State private var newPw = ""
+    @State private var newPwConfirm = ""
 
     var body: some View {
         GroupBox("Utilisateur : \(user.effectiveDisplayName)") {
@@ -442,15 +464,23 @@ struct UserDetailCard: View {
                 }
                 Divider()
                 Text("Réinitialiser le mot de passe").font(.headline)
-                HStack {
-                    SecureField("Nouveau mot de passe", text: $newPw)
-                        .textFieldStyle(.roundedBorder).frame(width: 240)
-                    Button {
-                        onResetPassword(newPw)
-                        newPw = ""
-                    } label: { Label("Appliquer", systemImage: "checkmark.circle") }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(newPw.isEmpty)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        SecureField("Nouveau mot de passe", text: $newPw)
+                            .textFieldStyle(.roundedBorder).frame(width: 240)
+                        SecureField("Confirmer", text: $newPwConfirm)
+                            .textFieldStyle(.roundedBorder).frame(width: 240)
+                        Button {
+                            onResetPassword(newPw)
+                            newPw = ""
+                            newPwConfirm = ""
+                        } label: { Label("Appliquer", systemImage: "checkmark.circle") }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(newPw.isEmpty || newPw != newPwConfirm)
+                    }
+                    if !newPw.isEmpty && !newPwConfirm.isEmpty && newPw != newPwConfirm {
+                        Text("Les mots de passe ne correspondent pas.").font(.caption).foregroundStyle(.red)
+                    }
                 }
             }
             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
