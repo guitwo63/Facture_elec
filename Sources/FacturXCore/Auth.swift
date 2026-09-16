@@ -266,6 +266,7 @@ public enum EmailValidator {
 public enum AuditObjectType: String, Codable, CaseIterable {
     case invoice
     case order
+    case quote
     case party
     case user
     case other
@@ -274,6 +275,7 @@ public enum AuditObjectType: String, Codable, CaseIterable {
         switch self {
         case .invoice: return "Facture"
         case .order: return "Commande"
+        case .quote: return "Devis"
         case .party: return "Tiers"
         case .user: return "Utilisateur"
         case .other: return "Autre"
