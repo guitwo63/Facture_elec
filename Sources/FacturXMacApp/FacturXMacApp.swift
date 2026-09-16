@@ -1422,7 +1422,15 @@ struct InvoiceEditorView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
-            .padding(12)
+            .padding(.horizontal, 12).padding(.top, 12)
+            HStack(spacing: 6) {
+                Text("Conditions de paiement :").font(.caption).foregroundStyle(.secondary)
+                TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                    .textFieldStyle(.plain)
+                    .font(.caption)
+                    .disabled(fieldLocked)
+            }
+            .padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 4)
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · utilitaires · admin
@@ -1895,7 +1903,11 @@ struct InvoiceEditorView: View {
                                 InfoBadge(text: "BT-85 — BIC hérité de l'émetteur (annuaire).")
                             }
                         }
-                        TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                        if (invoice.paymentIBAN ?? "").isEmpty && (invoice.paymentBIC ?? "").isEmpty {
+                            Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text("Conditions de paiement : modifiables en haut de l'écran.")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }.padding(8)
                 }.lockable(fieldLocked)
 
