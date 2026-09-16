@@ -218,6 +218,7 @@ enum RootTab: String, CaseIterable, Identifiable {
     case directory = "Annuaire"
     case orders = "Commandes"
     case invoices = "Factures"
+    case dashboard = "Trésorerie"
     var id: String { rawValue }
 
     static func visible(for role: UserRole?) -> [RootTab] {
@@ -227,6 +228,131 @@ enum RootTab: String, CaseIterable, Identifiable {
         default:
             return allCases
         }
+    }
+}
+
+/// Vue agrégée en lecture sur InvoiceStore existant : aucun nouveau modèle,
+/// aucune donnée stockée séparément — tout est recalculé à l'affichage.
+struct TreasuryDashboardView: View {
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
+
+    private struct ClientBalance: Identifiable {
+        let id: String
+        let name: String
+        let outstanding: Double
+        let overdue: Double
+    }
+
+    private var scopedInvoices: [Invoice] {
+        var result = store.invoices
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { inv in
+                if let cid = inv.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result
+    }
+
+    /// Exclut les factures annulées : elles ne représentent plus un CA réel.
+    private var activeInvoices: [Invoice] {
+        scopedInvoices.filter { $0.status != .cancelled }
+    }
+
+    private func signedAmount(_ inv: Invoice) -> Double {
+        inv.type.isCreditNote ? -inv.grandTotal : inv.grandTotal
+    }
+
+    private func isOverdue(_ inv: Invoice) -> Bool {
+        inv.status != .paid && inv.dueDate < Date()
+    }
+
+    private var currentMonthInvoices: [Invoice] {
+        scopedInvoices.filter { Calendar.current.isDate($0.issueDate, equalTo: Date(), toGranularity: .month) }
+    }
+
+    private var caFactureMois: Double {
+        currentMonthInvoices.reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var encaisse: Double {
+        activeInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var enRetard: Double {
+        activeInvoices.filter(isOverdue).reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var enAttente: Double {
+        activeInvoices.filter { $0.status != .paid && !isOverdue($0) }.reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var byClient: [ClientBalance] {
+        var byName: [String: (outstanding: Double, overdue: Double)] = [:]
+        for inv in activeInvoices where inv.status != .paid {
+            let name = inv.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client sans nom" : inv.buyer.name
+            var entry = byName[name] ?? (outstanding: 0, overdue: 0)
+            entry.outstanding += signedAmount(inv)
+            if isOverdue(inv) { entry.overdue += signedAmount(inv) }
+            byName[name] = entry
+        }
+        return byName.map { ClientBalance(id: $0.key, name: $0.key, outstanding: $0.value.outstanding, overdue: $0.value.overdue) }
+            .sorted { $0.outstanding > $1.outstanding }
+    }
+
+    private var currency: String { scopedInvoices.first?.currency ?? "EUR" }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Trésorerie").font(.title2.bold())
+                HStack(spacing: 16) {
+                    kpiCard("CA facturé (mois)", caFactureMois, color: .blue, icon: "chart.line.uptrend.xyaxis")
+                    kpiCard("Encaissé", encaisse, color: .green, icon: "checkmark.circle.fill")
+                    kpiCard("En attente", enAttente, color: .orange, icon: "hourglass")
+                    kpiCard("En retard", enRetard, color: .red, icon: "exclamationmark.triangle.fill")
+                }
+                GroupBox("Par client — montant dû") {
+                    if byClient.isEmpty {
+                        Text("Aucun montant en attente.").foregroundStyle(.secondary).padding()
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(byClient) { c in
+                                HStack {
+                                    Text(c.name).font(.body)
+                                    Spacer()
+                                    if c.overdue < 0 {
+                                        Label(String(format: "%.2f %@ en retard", abs(c.overdue), currency), systemImage: "exclamationmark.triangle.fill")
+                                            .font(.caption).foregroundStyle(.red)
+                                    }
+                                    Text(String(format: "%.2f %@", c.outstanding, currency))
+                                        .font(.body.bold()).monospacedDigit()
+                                }
+                                .padding(.vertical, 6).padding(.horizontal, 8)
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func kpiCard(_ title: String, _ amount: Double, color: Color, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).foregroundStyle(color)
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(String(format: "%.2f %@", amount, currency))
+                .font(.title2.bold())
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.12)))
     }
 }
 
@@ -384,6 +510,8 @@ struct RootView: View {
                 OrdersTabView(selectedID: $selectedOrderID)
             case .directory:
                 DirectoryView()
+            case .dashboard:
+                TreasuryDashboardView()
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
