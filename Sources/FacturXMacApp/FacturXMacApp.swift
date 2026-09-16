@@ -4647,11 +4647,15 @@ struct ApplicationSettingsView: View {
 
                 Divider()
                 HStack {
-                    Text("Facture_elec v0.3.0").font(.caption).foregroundStyle(.secondary)
+                    Text("Facture_elec v\(AppVersion.current) — © 2026 \(AppVersion.copyrightHolder) — \(AppVersion.licenseName)")
+                        .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    if let repo = URL(string: "https://github.com/guitwo63/Facture_elec") {
-                        Link("GitHub", destination: repo).font(.caption)
-                    }
+                    Link(destination: AppVersion.repositoryURL) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "link")
+                            Text("GitHub")
+                        }
+                    }.font(.caption.weight(.semibold))
                 }
 
                 Spacer()
