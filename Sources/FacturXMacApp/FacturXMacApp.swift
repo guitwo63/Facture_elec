@@ -5966,7 +5966,7 @@ struct SuperPDPSearchSheet: View {
                     siretOrSiren: query,
                     credentials: superPDPSettings.credentials
                 )
-                results = r
+                results = Self.deduplicated(r)
                 if r.isEmpty { error = "Aucun résultat." }
             } catch let e as SuperPDPError {
                 self.error = e.errorDescription
@@ -5975,6 +5975,23 @@ struct SuperPDPSearchSheet: View {
             }
             searching = false
         }
+    }
+
+    /// SUPER PDP peut renvoyer plusieurs enregistrements techniques distincts
+    /// (facturation/e-reporting/commandes…) pour la même société, avec des
+    /// champs affichés strictement identiques — on ne garde qu'une occurrence
+    /// par combinaison nom/SIREN/SIRET/adresse pour éviter des lignes qui
+    /// semblent être de purs doublons.
+    private static func deduplicated(_ entries: [SuperPDPDirectoryEntry]) -> [SuperPDPDirectoryEntry] {
+        var seen = Set<String>()
+        var unique: [SuperPDPDirectoryEntry] = []
+        for e in entries {
+            let key = [e.name ?? "", e.siren ?? "", e.siret ?? "", e.addressLine ?? "", e.city ?? ""].joined(separator: "|")
+            if seen.insert(key).inserted {
+                unique.append(e)
+            }
+        }
+        return unique
     }
 }
 
