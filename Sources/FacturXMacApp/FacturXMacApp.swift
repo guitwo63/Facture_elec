@@ -127,6 +127,7 @@ struct FacturXMacApp: App {
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
     @StateObject private var smtpSettings = SMTPSettings.shared
+    @StateObject private var twoFactorSettings = TwoFactorSettings.shared
     @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
@@ -144,6 +145,7 @@ struct FacturXMacApp: App {
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
                 .environmentObject(smtpSettings)
+                .environmentObject(twoFactorSettings)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -243,6 +245,7 @@ struct RootView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var twoFactorSettings: TwoFactorSettings
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
@@ -280,6 +283,7 @@ struct RootView: View {
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
         smtpSettings.credentials = reloadSMTPCredentials()
+        twoFactorSettings.load()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
@@ -4270,12 +4274,14 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var twoFactorSettings: TwoFactorSettings
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
+    @State private var twoFactorExpanded = false
     @State private var testMessage: String?
     @State private var testing = false
     @State private var superPDPTestMessage: String?
@@ -4612,6 +4618,20 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("Alertes email (SMTP)", systemImage: "envelope.badge")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $twoFactorExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Active la possibilité, pour chaque utilisateur, d'activer la double authentification (application TOTP — Google Authenticator, Authy…) sur son propre profil (onglet Profil). Ce réglage est global à l'application ; désactivé, aucun utilisateur ne peut activer ni utiliser la 2FA, même s'il l'avait configurée auparavant.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Autoriser la double authentification (2FA)", isOn: Binding(
+                            get: { twoFactorSettings.enabledSolutionWide },
+                            set: { twoFactorSettings.enabledSolutionWide = $0; twoFactorSettings.save() }
+                        ))
+                    }.padding(8)
+                } label: {
+                    Label("Sécurité — Double authentification", systemImage: "lock.shield")
                         .font(.headline)
                 }
 

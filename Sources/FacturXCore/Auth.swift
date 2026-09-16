@@ -38,6 +38,10 @@ public struct User: Codable, Hashable, Identifiable {
     public var failedLoginAttempts: Int
     public var lockUntil: Date?
     public var lastActivityAt: Date?
+    public var totpEnabled: Bool
+    public var totpSecret: String?
+    public var totpRecoveryCodesSalt: String?
+    public var totpRecoveryCodeHashes: [String]
 
     public init(
         id: UUID = UUID(),
@@ -54,7 +58,11 @@ public struct User: Codable, Hashable, Identifiable {
         mustChangePassword: Bool = false,
         failedLoginAttempts: Int = 0,
         lockUntil: Date? = nil,
-        lastActivityAt: Date? = nil
+        lastActivityAt: Date? = nil,
+        totpEnabled: Bool = false,
+        totpSecret: String? = nil,
+        totpRecoveryCodesSalt: String? = nil,
+        totpRecoveryCodeHashes: [String] = []
     ) {
         self.id = id
         self.username = username
@@ -71,6 +79,10 @@ public struct User: Codable, Hashable, Identifiable {
         self.failedLoginAttempts = failedLoginAttempts
         self.lockUntil = lockUntil
         self.lastActivityAt = lastActivityAt
+        self.totpEnabled = totpEnabled
+        self.totpSecret = totpSecret
+        self.totpRecoveryCodesSalt = totpRecoveryCodesSalt
+        self.totpRecoveryCodeHashes = totpRecoveryCodeHashes
     }
 
     public var role: UserRole { roles.first ?? .comptable }
@@ -86,6 +98,7 @@ public struct User: Codable, Hashable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id, username, displayName, role, roles, passwordHash, salt, societyIDs, defaultSellerEntryID, isActive, createdAt
         case mustChangePassword, failedLoginAttempts, lockUntil, lastActivityAt
+        case totpEnabled, totpSecret, totpRecoveryCodesSalt, totpRecoveryCodeHashes
     }
 
     public init(from decoder: Decoder) throws {
@@ -110,6 +123,10 @@ public struct User: Codable, Hashable, Identifiable {
         failedLoginAttempts = try c.decodeIfPresent(Int.self, forKey: .failedLoginAttempts) ?? 0
         lockUntil = try c.decodeIfPresent(Date.self, forKey: .lockUntil)
         lastActivityAt = try c.decodeIfPresent(Date.self, forKey: .lastActivityAt)
+        totpEnabled = try c.decodeIfPresent(Bool.self, forKey: .totpEnabled) ?? false
+        totpSecret = try c.decodeIfPresent(String.self, forKey: .totpSecret)
+        totpRecoveryCodesSalt = try c.decodeIfPresent(String.self, forKey: .totpRecoveryCodesSalt)
+        totpRecoveryCodeHashes = try c.decodeIfPresent([String].self, forKey: .totpRecoveryCodeHashes) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -129,6 +146,10 @@ public struct User: Codable, Hashable, Identifiable {
         try c.encode(failedLoginAttempts, forKey: .failedLoginAttempts)
         try c.encodeIfPresent(lockUntil, forKey: .lockUntil)
         try c.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
+        try c.encode(totpEnabled, forKey: .totpEnabled)
+        try c.encodeIfPresent(totpSecret, forKey: .totpSecret)
+        try c.encodeIfPresent(totpRecoveryCodesSalt, forKey: .totpRecoveryCodesSalt)
+        try c.encode(totpRecoveryCodeHashes, forKey: .totpRecoveryCodeHashes)
     }
 }
 
@@ -225,6 +246,10 @@ public enum AuthError: Error, LocalizedError {
     case lockedOut(retryAt: Date)
     case passwordPolicy(PasswordPolicy.Violation)
     case mustChangePassword
+    case twoFactorRequired(userID: UUID)
+    case wrongTwoFactorCode
+    case twoFactorNotConfigured
+    case twoFactorDisabledGlobally
 
     public var errorDescription: String? {
         switch self {
@@ -242,6 +267,10 @@ public enum AuthError: Error, LocalizedError {
             return "Compte temporairement verrouillé suite à des échecs. Réessayez après \(f.string(from: retryAt))."
         case .passwordPolicy(let v): return v.message
         case .mustChangePassword: return "Vous devez changer votre mot de passe à la première connexion."
+        case .twoFactorRequired: return "Code de double authentification requis."
+        case .wrongTwoFactorCode: return "Code de double authentification incorrect."
+        case .twoFactorNotConfigured: return "La double authentification n'est pas activée sur ce compte."
+        case .twoFactorDisabledGlobally: return "La double authentification est désactivée pour cette application (paramètre administrateur)."
         }
     }
 }
@@ -537,11 +566,96 @@ public final class AuthStore: ObservableObject {
             users[idx].failedLoginAttempts = 0
             users[idx].lockUntil = nil
         }
+        if !testBypassSecurity, TwoFactorSettings.shared.enabledSolutionWide, user.totpEnabled {
+            save()
+            audit.record(actor: user.username, action: "login_password_ok", target: "", details: "en attente du code 2FA")
+            throw AuthError.twoFactorRequired(userID: user.id)
+        }
         currentUser = user
         touchActivity()
         save()
         audit.record(actor: user.username, action: "login_success", target: "")
         return user
+    }
+
+    /// Second temps de connexion quand `login` a levé `.twoFactorRequired` :
+    /// vérifie le code TOTP, ou à défaut un code de récupération à usage unique.
+    @discardableResult
+    public func completeTwoFactorLogin(userID: UUID, code: String) throws -> User {
+        guard let idx = users.firstIndex(where: { $0.id == userID }) else { throw AuthError.unknownUser }
+        var user = users[idx]
+        guard user.totpEnabled, let secret = user.totpSecret else { throw AuthError.twoFactorNotConfigured }
+
+        if TOTPService.verify(code: code, secret: secret) {
+            users[idx] = user
+            currentUser = user
+            touchActivity()
+            save()
+            audit.record(actor: user.username, action: "login_success", target: "", details: "2FA")
+            return user
+        }
+        if consumeRecoveryCode(&user, code: code) {
+            users[idx] = user
+            currentUser = user
+            touchActivity()
+            save()
+            audit.record(actor: user.username, action: "login_success", target: "", details: "code de récupération 2FA")
+            return user
+        }
+        audit.record(actor: user.username, action: "login_failed", target: "", details: "code 2FA invalide")
+        save()
+        throw AuthError.wrongTwoFactorCode
+    }
+
+    private func consumeRecoveryCode(_ user: inout User, code: String) -> Bool {
+        guard let salt = user.totpRecoveryCodesSalt, !user.totpRecoveryCodeHashes.isEmpty else { return false }
+        let normalized = RecoveryCodeGenerator.normalize(code)
+        let candidateHash = PasswordHasher.hash(password: normalized, salt: salt)
+        guard let matchIdx = user.totpRecoveryCodeHashes.firstIndex(where: { PasswordHasher.constantTimeEquals($0, candidateHash) }) else {
+            return false
+        }
+        user.totpRecoveryCodeHashes.remove(at: matchIdx)
+        return true
+    }
+
+    /// Génère un nouveau secret TOTP pour l'utilisateur, sans encore l'activer :
+    /// l'activation n'a lieu qu'après vérification d'un premier code (confirmEnrollTwoFactor).
+    public func beginEnrollTwoFactor(for user: User) -> (secret: String, provisioningURI: String) {
+        let secret = TOTPService.generateSecret()
+        let uri = TOTPService.provisioningURI(secret: secret, accountName: user.username)
+        return (secret, uri)
+    }
+
+    /// Vérifie le code de confirmation puis active la 2FA, génère les codes de récupération
+    /// (retournés une seule fois, en clair, à charge de l'utilisateur de les conserver).
+    @discardableResult
+    public func confirmEnrollTwoFactor(for user: User, secret: String, code: String) throws -> [String] {
+        guard TwoFactorSettings.shared.enabledSolutionWide else { throw AuthError.twoFactorDisabledGlobally }
+        guard TOTPService.verify(code: code, secret: secret) else { throw AuthError.wrongTwoFactorCode }
+        guard let idx = users.firstIndex(where: { $0.id == user.id }) else { throw AuthError.unknownUser }
+        let recoveryCodes = RecoveryCodeGenerator.generate()
+        let recoverySalt = PasswordHasher.generateSalt()
+        users[idx].totpEnabled = true
+        users[idx].totpSecret = secret
+        users[idx].totpRecoveryCodesSalt = recoverySalt
+        users[idx].totpRecoveryCodeHashes = recoveryCodes.map { PasswordHasher.hash(password: $0, salt: recoverySalt) }
+        if currentUser?.id == user.id { currentUser = users[idx] }
+        save()
+        audit.record(actor: user.username, action: "twofactor_enabled", target: "")
+        return recoveryCodes
+    }
+
+    /// Désactive la 2FA — utilisable par l'utilisateur lui-même ou par un admin
+    /// (chemin de secours si l'utilisateur a perdu l'accès à son application TOTP).
+    public func disableTwoFactor(for user: User, actor: String) {
+        guard let idx = users.firstIndex(where: { $0.id == user.id }) else { return }
+        users[idx].totpEnabled = false
+        users[idx].totpSecret = nil
+        users[idx].totpRecoveryCodesSalt = nil
+        users[idx].totpRecoveryCodeHashes = []
+        if currentUser?.id == user.id { currentUser = users[idx] }
+        save()
+        audit.record(actor: actor, action: "twofactor_disabled", target: user.username)
     }
 
     private func registerFailedAttempt(_ user: User) {

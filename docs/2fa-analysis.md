@@ -52,3 +52,12 @@ Si tu valides la direction TOTP, une implémentation ultérieure devrait couvrir
 - Option admin : pouvoir désactiver la 2FA d'un utilisateur qui a perdu l'accès (nécessite un chemin de secours humain, comme pour tout système de 2FA).
 
 Cette portée n'est **pas implémentée dans cette PR** — à valider et à planifier séparément.
+
+## 5. Mise à jour — implémentation (chantier A, second volet)
+
+L'option B (TOTP) recommandée ci-dessus a été implémentée :
+- `TOTPService` (`Sources/FacturXCore/TOTPService.swift`) : génération/vérification RFC 6238 (HMAC-SHA1, fenêtre de tolérance ±1 pas), génération de secret et d'URI `otpauth://` pour QR code, 100% local, aucune dépendance externe.
+- `User.totpEnabled` / `totpSecret` / codes de récupération (10 codes à usage unique, hachés comme les mots de passe) — champs optionnels avec migration silencieuse pour les données existantes.
+- **Paramètre solution (global)** : `TwoFactorSettings.enabledSolutionWide`, réglable par un administrateur dans Réglages > Application > Sécurité. Désactivé, aucun utilisateur ne peut activer ni utiliser la 2FA, même déjà configurée.
+- Écran de configuration dans le profil (QR code + clé manuelle + confirmation + affichage unique des codes de récupération), second facteur demandé à la connexion si activé, et un chemin de secours admin (désactivation depuis la gestion utilisateurs) pour un utilisateur ayant perdu son application TOTP.
+- Option A (email) et Option C (clé matérielle) restent non implémentées, conformément à la recommandation ci-dessus.
