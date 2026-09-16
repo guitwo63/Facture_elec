@@ -234,11 +234,21 @@ public struct SuperPDPInvoiceEvent: Identifiable, Hashable {
         // Événements techniques de circulation avec le Portail Public de
         // Facturation (PPF), distincts des statuts métier fr:xxx.
         case "ppf:validated": return "Validée par le Portail Public de Facturation"
+        case "ppf:validated-ack": return "Accusé de réception — validée par le PPF"
         case "ppf:payment-received": return "Paiement notifié au Portail Public de Facturation"
         default:
-            if statusCode.hasPrefix("ppf:") {
-                let readable = statusCode.dropFirst(4).replacingOccurrences(of: "-", with: " ")
-                return "PPF — \(readable)"
+            // Espaces de codes non documentés publiquement (ppf:, api:, et
+            // d'éventuels futurs). Plutôt que de traduire au cas par cas une
+            // liste potentiellement sans fin, on humanise le slug générique
+            // ("api:uploaded" -> "API — uploaded") pour rester lisible même
+            // sur un code jamais vu.
+            if let colonIndex = statusCode.firstIndex(of: ":") {
+                let namespace = statusCode[statusCode.startIndex..<colonIndex]
+                let remainder = statusCode[statusCode.index(after: colonIndex)...]
+                if remainder.contains(where: { $0.isLetter }) {
+                    let readable = remainder.replacingOccurrences(of: "-", with: " ")
+                    return "\(namespace.uppercased()) — \(readable)"
+                }
             }
             return "Événement \(statusCode)"
         }
