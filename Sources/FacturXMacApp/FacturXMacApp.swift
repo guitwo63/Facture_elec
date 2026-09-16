@@ -1380,6 +1380,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var duplicatedNumber: String?
@@ -1757,33 +1758,40 @@ struct InvoiceEditorView: View {
                                     Image(systemName: invoice.status.systemImage)
                                         .foregroundColor(Color(hex: invoice.status.hexColor))
                                         .font(.caption2)
-                                    let transitions = InvoiceStatus.allowedTransitions(from: invoice.status, isAdmin: isAdmin)
-                                    if transitions.isEmpty {
-                                        Text(invoice.status.label)
-                                            .foregroundStyle(.secondary)
-                                            .help("Statut terminal — aucune transition possible.")
-                                    } else {
-                                        Menu {
-                                            Button {
-                                            } label: {
-                                                Label(invoice.status.label, systemImage: invoice.status.systemImage)
-                                            }.disabled(true)
-                                            Divider()
-                                            ForEach(transitions, id: \.self) { s in
-                                                Button {
-                                                    invoice.status = s
-                                                } label: {
-                                                    Label(s.label, systemImage: s.systemImage)
-                                                }
-                                            }
+                                    Text(invoice.status.label).font(.caption2).foregroundStyle(.secondary)
+                                    let configuredTransitions = invoiceStatusStore.override(for: invoice.status).transitionCodes.compactMap { InvoiceStatus(rawValue: $0) }
+                                    ForEach(configuredTransitions, id: \.self) { s in
+                                        Button {
+                                            invoice.status = s
                                         } label: {
-                                            HStack(spacing: 4) {
-                                                Text(invoice.status.label).lineLimit(1)
-                                                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
-                                            }
+                                            Label(s.label, systemImage: s.systemImage)
                                         }
-                                        .fixedSize()
-                                        .help("Statut actuel : \(invoice.status.label). Transitions autorisées affichées dans le menu.")
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        .tint(Color(hex: s.hexColor))
+                                        .help("Passer au statut « \(s.label) »")
+                                    }
+                                    if isAdmin {
+                                        let forceable = InvoiceStatus.allCases.filter { $0 != invoice.status && !configuredTransitions.contains($0) }
+                                        if !forceable.isEmpty {
+                                            Menu {
+                                                ForEach(forceable, id: \.self) { s in
+                                                    Button {
+                                                        invoice.status = s
+                                                    } label: {
+                                                        Label(s.label, systemImage: s.systemImage)
+                                                    }
+                                                }
+                                            } label: {
+                                                Label("Forcer", systemImage: "bolt.fill")
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
+                                            .help("Administrateur : forcer un statut hors des transitions configurées")
+                                        }
+                                    }
+                                    if configuredTransitions.isEmpty && !isAdmin {
+                                        Text("(statut terminal)").font(.caption2).foregroundStyle(.tertiary)
                                     }
                                     if superPDPSettings.credentials.usePDP {
                                     Button {
@@ -2320,24 +2328,8 @@ struct InvoiceEditorView: View {
     private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         guard superPDPSettings.credentials.isConfigured else { return }
-        let statusCode: String
-        var detailLabel: String
-        switch newStatus {
-        case .paid:
-            statusCode = "fr:212"
-            detailLabel = "Encaissée"
-        case .cancelled:
-            statusCode = "fr:320"
-            detailLabel = "Annulée"
-        case .accepted:
-            statusCode = "fr:310"
-            detailLabel = "Acceptée"
-        case .rejected:
-            statusCode = "fr:311"
-            detailLabel = "Rejetée"
-        default:
-            return
-        }
+        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode, statusCode != "200" else { return }
+        let detailLabel = newStatus.label
         if !force, let last = lastSentPDPStatusCode, last == statusCode {
             superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
             return
@@ -5207,6 +5199,10 @@ struct InvoiceStatusEditorSheet: View {
     @State private var label: String
     @State private var systemImage: String
     @State private var hexColor: String
+    @State private var transitionCodes: Set<String>
+
+    private var currentStatus: InvoiceStatus? { InvoiceStatus(rawValue: override.id) }
+    private var possibleTargets: [InvoiceStatus] { InvoiceStatus.allCases.filter { $0.rawValue != override.id } }
 
     init(override: InvoiceStatusOverride, onSave: @escaping (InvoiceStatusOverride) -> Void) {
         self.override = override
@@ -5214,6 +5210,7 @@ struct InvoiceStatusEditorSheet: View {
         _label = State(initialValue: override.label)
         _systemImage = State(initialValue: override.systemImage)
         _hexColor = State(initialValue: override.hexColor)
+        _transitionCodes = State(initialValue: Set(override.transitionCodes))
     }
 
     var body: some View {
@@ -5251,10 +5248,30 @@ struct InvoiceStatusEditorSheet: View {
                     .disabled(override.isReformStatus)
                 }
             }
+            if currentStatus != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transitions autorisées vers…").font(.subheadline.bold())
+                    Text("Statuts accessibles depuis « \(label) » via les boutons d'action de la facture (un administrateur peut toujours forcer les autres).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(possibleTargets, id: \.self) { target in
+                        Toggle(isOn: Binding(
+                            get: { transitionCodes.contains(target.rawValue) },
+                            set: { isOn in
+                                if isOn { transitionCodes.insert(target.rawValue) }
+                                else { transitionCodes.remove(target.rawValue) }
+                            }
+                        )) {
+                            Label(target.label, systemImage: target.systemImage)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(InvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: override.transitionCodes))
+                    let ordered = InvoiceStatus.allCases.map { $0.rawValue }.filter { transitionCodes.contains($0) }
+                    onSave(InvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: ordered))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -5263,7 +5280,7 @@ struct InvoiceStatusEditorSheet: View {
             Spacer()
         }
         .padding()
-        .frame(width: 420, height: 320)
+        .frame(width: 460, height: 460)
     }
 }
 

@@ -427,15 +427,6 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         }
     }
 
-    public static func allowedTransitions(from status: InvoiceStatus, isAdmin: Bool) -> [InvoiceStatus] {
-        let standard = status.allowedTransitions()
-        guard isAdmin else { return standard }
-        var extended = standard
-        if status != .cancelled && !extended.contains(.cancelled) {
-            extended.append(.cancelled)
-        }
-        return extended.sorted { $0.label < $1.label }
-    }
 }
 
 public struct Invoice: Codable, Hashable, Identifiable {
