@@ -5837,6 +5837,17 @@ struct PartyEditorView: View {
         "\((party.name.trimmingCharacters(in: .whitespaces)))|\((party.siren ?? ""))"
     }
 
+    @State private var addressExpanded = false
+    @FocusState private var addressFieldFocused: Bool
+
+    private var addressSummary: String {
+        let cityLine = [party.postcode, party.city]
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .joined(separator: " ")
+        let parts = [party.street, cityLine].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return parts.isEmpty ? "Adresse non renseignée" : parts.joined(separator: ", ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -5859,21 +5870,42 @@ struct PartyEditorView: View {
             TextField("Nom", text: $party.name)
                 .onChange(of: party.name) { _ in scheduleDinumSearch() }
             VStack(alignment: .leading, spacing: 6) {
-                TextField("Adresse", text: $party.street)
-                HStack(spacing: 8) {
-                    TextField("Code postal", text: $party.postcode).frame(width: 90)
-                    TextField("Ville", text: $party.city)
-                    HStack(spacing: 2) {
-                        Text("Pays").font(.caption); star
-                        NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 160)
+                Group {
+                    if addressExpanded || addressFieldFocused {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("Adresse", text: $party.street)
+                                .focused($addressFieldFocused)
+                            HStack(spacing: 8) {
+                                TextField("Code postal", text: $party.postcode).frame(width: 90)
+                                    .focused($addressFieldFocused)
+                                TextField("Ville", text: $party.city)
+                                    .focused($addressFieldFocused)
+                                HStack(spacing: 2) {
+                                    Text("Pays").font(.caption); star
+                                    NormRefPicker("Pays", options: NormRefs.countries, code: $party.country).frame(width: 160)
+                                }
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "location").font(.caption2).foregroundStyle(.secondary)
+                            Text(addressSummary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
                     }
                 }
+                .onHover { hovering in addressExpanded = hovering }
                 HStack(spacing: 8) {
                     HStack(spacing: 4) {
                         Text("SIREN").font(.caption); star
                         TextField("SIREN (9 chiffres)", text: Binding($party.siren, replacingNilWith: ""))
                             .frame(width: 130)
                             .onChange(of: party.siren) { _ in scheduleDinumSearch() }
+                        if let sn = party.siren?.trimmingCharacters(in: .whitespaces), !sn.isEmpty {
+                            Image(systemName: SireneValidator.isValidSiren(sn) ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(SireneValidator.isValidSiren(sn) ? .green : .orange)
+                                .help(SireneValidator.isValidSiren(sn) ? "SIREN valide" : "SIREN invalide")
+                        }
                     }
                     HStack(spacing: 4) {
                         Text("TVA").font(.caption)
@@ -5882,25 +5914,11 @@ struct PartyEditorView: View {
                     HStack(spacing: 4) {
                         Text("SIRET").font(.caption)
                         TextField("SIRET (14 chiffres)", text: Binding($party.siret, replacingNilWith: "")).frame(width: 150)
-                    }
-                }
-                HStack(spacing: 12) {
-                    if let sn = party.siren?.trimmingCharacters(in: .whitespaces), !sn.isEmpty {
-                        if SireneValidator.isValidSiren(sn) {
-                            Label("SIREN ok", systemImage: "checkmark.circle.fill")
-                                .font(.caption2).foregroundStyle(.green)
-                        } else {
-                            Label("SIREN invalide", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2).foregroundStyle(.orange)
-                        }
-                    }
-                    if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
-                        if SireneValidator.isValidSiret(st) {
-                            Label("SIRET ok", systemImage: "checkmark.circle.fill")
-                                .font(.caption2).foregroundStyle(.green)
-                        } else {
-                            Label("SIRET invalide", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2).foregroundStyle(.orange)
+                        if let st = party.siret?.trimmingCharacters(in: .whitespaces), !st.isEmpty {
+                            Image(systemName: SireneValidator.isValidSiret(st) ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(SireneValidator.isValidSiret(st) ? .green : .orange)
+                                .help(SireneValidator.isValidSiret(st) ? "SIRET valide" : "SIRET invalide")
                         }
                     }
                 }
@@ -5914,8 +5932,8 @@ struct PartyEditorView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button {
                             showRoutingPicker = true
-                        } label: { Label("Choisir", systemImage: "envelope") }
-                            .buttonStyle(.bordered)
+                        } label: { Image(systemName: "envelope.circle.fill").font(.title3) }
+                            .buttonStyle(.borderless)
                             .help("Choisir ou créer une adresse électronique depuis la fiche tiers")
                     } else {
                         TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
@@ -5924,14 +5942,19 @@ struct PartyEditorView: View {
                 }
             }
             if isMultiContact {
-                Button {
-                    editingContact = nil
-                    showContactEditor = true
-                } label: {
-                    Label("Contacts", systemImage: "person.crop.circle.badge.plus")
+                HStack {
+                    Text("Contacts").font(.caption)
+                    Spacer()
+                    Button {
+                        editingContact = nil
+                        showContactEditor = true
+                    } label: { Image(systemName: "plus.circle.fill").font(.title3) }
+                        .buttonStyle(.borderless)
+                        .help("Ajouter un contact")
                 }
-                .buttonStyle(.bordered)
-                if !contacts.isEmpty {
+                if contacts.isEmpty {
+                    Text("Aucun contact").font(.callout).foregroundStyle(.secondary)
+                } else {
                     ForEach(contacts) { ct in
                         HStack(spacing: 8) {
                             if ct.isDefault {
@@ -5939,12 +5962,12 @@ struct PartyEditorView: View {
                                     .background(Color.accentColor.opacity(0.2), in: Capsule())
                             }
                             Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
-                                .font(.caption.bold())
+                                .font(.callout.bold())
                             if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
-                                Text(e).font(.caption).foregroundStyle(.secondary)
+                                Text(e).font(.callout).foregroundStyle(.secondary)
                             }
                             if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
-                                Text(p).font(.caption).foregroundStyle(.secondary)
+                                Text(p).font(.callout).foregroundStyle(.secondary)
                             }
                             if !ct.isActive {
                                 Text("inactif").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
@@ -5977,20 +6000,20 @@ struct PartyEditorView: View {
                         Spacer()
                         Button {
                             showContactPicker = true
-                        } label: { Label("Choisir", systemImage: "person") }
-                            .buttonStyle(.bordered)
+                        } label: { Image(systemName: "person.crop.circle.fill.badge.checkmark").font(.title3) }
+                            .buttonStyle(.borderless)
                             .help("Choisir ou créer un contact depuis la fiche tiers")
                     }
                     let name = party.contactName?.trimmingCharacters(in: .whitespaces) ?? ""
                     let email = hideEmail ? "" : (party.contactEmail?.trimmingCharacters(in: .whitespaces) ?? "")
                     let phone = party.contactPhone?.trimmingCharacters(in: .whitespaces) ?? ""
                     if name.isEmpty && email.isEmpty && phone.isEmpty {
-                        Text("Aucun contact").font(.caption).foregroundStyle(.secondary)
+                        Text("Aucun contact").font(.callout).foregroundStyle(.secondary)
                     } else {
                         HStack(spacing: 8) {
-                            Text(name.isEmpty ? "(sans nom)" : name).font(.caption.bold())
-                            if !email.isEmpty { Text(email).font(.caption).foregroundStyle(.secondary) }
-                            if !phone.isEmpty { Text(phone).font(.caption).foregroundStyle(.secondary) }
+                            Text(name.isEmpty ? "(sans nom)" : name).font(.callout.bold())
+                            if !email.isEmpty { Text(email).font(.callout).foregroundStyle(.secondary) }
+                            if !phone.isEmpty { Text(phone).font(.callout).foregroundStyle(.secondary) }
                             Spacer()
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -6038,8 +6061,8 @@ struct PartyEditorView: View {
             if !hideElectronicAddress, !routingAddresses.isEmpty {
                 ForEach(routingAddresses) { addr in
                     HStack(spacing: 8) {
-                        Text(addr.format.label).font(.caption.bold())
-                        Text(addr.composedAddress).font(.system(.caption, design: .monospaced))
+                        Text(addr.format.label).font(.callout.bold())
+                        Text(addr.composedAddress).font(.system(.callout, design: .monospaced))
                         if addr.isDefault {
                             Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(Color.accentColor.opacity(0.2), in: Capsule())
