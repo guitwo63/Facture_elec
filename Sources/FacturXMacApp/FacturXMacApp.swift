@@ -1547,6 +1547,8 @@ struct InvoiceEditorView: View {
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · utilitaires · admin
+            // Défile horizontalement plutôt que de recadrer les boutons si la fenêtre est étroite.
+            ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 let configuredTransitions = invoiceStatusStore.override(for: invoice.status).transitionCodes.compactMap { InvoiceStatus(rawValue: $0) }
                 HStack(spacing: 8) {
@@ -1694,6 +1696,7 @@ struct InvoiceEditorView: View {
                 Spacer()
             }
             .padding(12)
+            }
             Divider()
             if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil {
                 VStack(alignment: .leading, spacing: 8) {
@@ -6752,6 +6755,7 @@ struct OrderEditorView: View {
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · admin
+            ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 let currentStatus = statusStore.override(for: order)
                 let configuredTransitions = statusStore.override(for: order.status).transitionCodes.compactMap { OrderStatus(rawValue: $0) }
@@ -6816,6 +6820,7 @@ struct OrderEditorView: View {
                 Spacer()
             }
             .padding(12)
+            }
             Divider()
             if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || createdInvoiceNumber != nil {
                 VStack(alignment: .leading, spacing: 8) {
