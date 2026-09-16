@@ -249,6 +249,8 @@ struct RootView: View {
     @State private var showSettings = false
     @State private var showUserManagement = false
     @State private var showEnvConfirm = false
+    @State private var showSetupWizard = false
+    @State private var setupWizardSkippedThisSession = false
 
     var body: some View {
         Group {
@@ -447,8 +449,25 @@ struct RootView: View {
                 tab = .orders
             }
             syncAuditActor()
+            maybeShowSetupWizard()
         }
-        .onChange(of: auth.currentUser) { _ in syncAuditActor() }
+        .onChange(of: auth.currentUser) { _ in
+            syncAuditActor()
+            maybeShowSetupWizard()
+        }
+        .sheet(isPresented: $showSetupWizard) {
+            SetupWizardView {
+                showSetupWizard = false
+                setupWizardSkippedThisSession = true
+            }
+        }
+    }
+
+    private func maybeShowSetupWizard() {
+        guard !setupWizardSkippedThisSession else { return }
+        guard auth.currentUser?.isAdmin == true else { return }
+        guard !directory.entries.contains(where: { $0.kind == .societe }) else { return }
+        showSetupWizard = true
     }
 
     private func syncAuditActor() {
