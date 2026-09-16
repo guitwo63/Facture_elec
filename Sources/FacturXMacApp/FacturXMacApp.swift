@@ -968,6 +968,10 @@ struct InvoicesTabView: View {
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
                                 Text(invoice.type == .creditNote ? "Avoir" : invoice.type.isInternalCreditNote ? "Avoir interne" : "Facture")
                                     .font(.caption2).foregroundStyle(invoice.type.isCreditNote ? Color.orange : Color.accentColor)
+                                if invoice.isOverdue {
+                                    Label("En retard", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption2).foregroundStyle(.red)
+                                }
                                 Spacer()
                             }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
@@ -1331,6 +1335,8 @@ struct InvoiceEditorView: View {
     @State private var pdpValidating = false
     @State private var pdpValidationReport: SuperPDPValidationReport?
     @State private var showPDPValidationPanel = false
+    @State private var sendingReminder = false
+    @State private var reminderMessage: String?
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
     private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
@@ -1388,6 +1394,13 @@ struct InvoiceEditorView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(Color(hex: invoice.status.hexColor)))
+                if invoice.isOverdue {
+                    Label("En retard (\(invoice.overdueDays) j)", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.red))
+                }
                 if superPDPSettings.credentials.usePDP {
                     Button {
                         fetchPDPEvents()
@@ -1538,6 +1551,37 @@ struct InvoiceEditorView: View {
                     }
                 }
 
+                if invoice.isOverdue {
+                    Divider().frame(height: 20)
+                    HStack(spacing: 8) {
+                        Menu {
+                            ForEach(PaymentReminderLevel.allCases) { level in
+                                Button {
+                                    sendReminder(level: level)
+                                } label: { Label(level.label, systemImage: level.systemImage) }
+                            }
+                        } label: {
+                            if sendingReminder {
+                                HStack(spacing: 4) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Envoi…")
+                                }
+                            } else {
+                                Label("Relance", systemImage: "exclamationmark.bubble")
+                            }
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                        .disabled(sendingReminder
+                                  || (invoice.buyer.contactEmail ?? "").isEmpty
+                                  || !smtpSettings.credentials.isConfigured)
+                        .help((invoice.buyer.contactEmail ?? "").isEmpty
+                              ? "Aucune adresse email cliente renseignée"
+                              : !smtpSettings.credentials.isConfigured
+                              ? "Configurez l'envoi d'email (Réglages) pour envoyer une relance"
+                              : "Envoyer un email de relance au client")
+                    }
+                }
+
                 if isAdmin {
                     let forceable = InvoiceStatus.allCases.filter { $0 != invoice.status && !configuredTransitions.contains($0) }
                     if !forceable.isEmpty || superPDPSettings.credentials.usePDP {
@@ -1577,7 +1621,7 @@ struct InvoiceEditorView: View {
             .padding(12)
             }
             Divider()
-            if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil {
+            if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil || reminderMessage != nil {
                 VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
@@ -1595,6 +1639,10 @@ struct InvoiceEditorView: View {
                 if let n = duplicatedNumber {
                     Text("Facture dupliquée : \(n) (disponible dans la liste)").font(.caption).foregroundStyle(.green)
                         .onChange(of: invoice.number) { _ in duplicatedNumber = nil }
+                }
+                if let m = reminderMessage {
+                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        .onChange(of: invoice.number) { _ in reminderMessage = nil }
                 }
                 if let m = superPDPMessage {
                     HStack(spacing: 6) {
@@ -2257,6 +2305,30 @@ struct InvoiceEditorView: View {
                 pdpEvents = []
             }
             pdpEventsLoading = false
+        }
+    }
+
+    private func sendReminder(level: PaymentReminderLevel) {
+        guard let recipient = invoice.buyer.contactEmail, !recipient.isEmpty else {
+            reminderMessage = "Échec relance : aucune adresse email cliente renseignée."
+            return
+        }
+        let credentials = smtpSettings.credentials
+        guard credentials.isConfigured else {
+            reminderMessage = "Échec relance : envoi d'email non configuré (Réglages)."
+            return
+        }
+        let email = PaymentReminderComposer.compose(level: level, for: invoice)
+        sendingReminder = true
+        reminderMessage = nil
+        Task {
+            do {
+                try await SMTPService().send(to: recipient, subject: email.subject, body: email.body, credentials: credentials)
+                reminderMessage = "Relance « \(level.label) » envoyée à \(recipient)."
+            } catch {
+                reminderMessage = "Échec relance : \(error.localizedDescription)"
+            }
+            sendingReminder = false
         }
     }
 
