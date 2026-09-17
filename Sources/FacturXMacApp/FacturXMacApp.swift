@@ -4458,12 +4458,12 @@ struct SettingsTabView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("", selection: $settingsTab) {
-                Text("Profil").tag(0)
+                Label("Profil", systemImage: "person.crop.circle").tag(0)
                 if auth.currentUser?.isAdmin == true {
-                    Text("Tables").tag(1)
-                    Text("Application").tag(2)
-                    Text("Journal").tag(3)
-                    Text("Données").tag(4)
+                    Label("Tables", systemImage: "tablecells").tag(1)
+                    Label("Application", systemImage: "gearshape.2").tag(2)
+                    Label("Journal", systemImage: "clock.arrow.circlepath").tag(3)
+                    Label("Données", systemImage: "externaldrive.fill").tag(4)
                 }
             }
             .pickerStyle(.segmented)
