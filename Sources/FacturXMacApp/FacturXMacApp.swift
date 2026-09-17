@@ -129,6 +129,7 @@ struct FacturXMacApp: App {
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
     @StateObject private var smtpSettings = SMTPSettings.shared
+    @StateObject private var emailTemplateStore = EmailTemplateStore.shared
     @StateObject private var twoFactorSettings = TwoFactorSettings.shared
     @StateObject private var pcloudSettings = PCloudSettings.shared
     @StateObject private var moduleStore = ModuleStore.shared
@@ -153,6 +154,7 @@ struct FacturXMacApp: App {
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
                 .environmentObject(smtpSettings)
+                .environmentObject(emailTemplateStore)
                 .environmentObject(twoFactorSettings)
                 .environmentObject(pcloudSettings)
                 .environmentObject(moduleStore)
@@ -1654,7 +1656,10 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
+    @State private var sendingInvoiceEmail = false
+    @State private var invoiceEmailMessage: String?
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var duplicatedNumber: String?
@@ -1927,34 +1932,62 @@ struct InvoiceEditorView: View {
                     }
                 }
 
-                if invoice.isOverdue {
+                if emailTemplateStore.globalEnabled {
                     Divider().frame(height: 20)
-                    HStack(spacing: 8) {
-                        Menu {
-                            ForEach(PaymentReminderLevel.allCases) { level in
-                                Button {
-                                    sendReminder(level: level)
-                                } label: { Label(level.label, systemImage: level.systemImage) }
-                            }
-                        } label: {
-                            if sendingReminder {
-                                HStack(spacing: 4) {
-                                    ProgressView().controlSize(.small)
-                                    Text("Envoi…")
-                                }
-                            } else {
-                                Label("Relance", systemImage: "exclamationmark.bubble")
-                            }
+                    Button {
+                        sendInvoiceEmail()
+                    } label: {
+                        if sendingInvoiceEmail {
+                            HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Envoi…") }
+                        } else {
+                            Label("Envoyer la facture", systemImage: EmailTemplateKind.invoiceSent.systemImage)
                         }
-                        .buttonStyle(ToolbarActionButtonStyle(tint: .red))
-                        .disabled(sendingReminder
-                                  || (invoice.buyer.contactEmail ?? "").isEmpty
-                                  || !smtpSettings.credentials.isConfigured)
-                        .help((invoice.buyer.contactEmail ?? "").isEmpty
-                              ? "Aucune adresse email cliente renseignée"
-                              : !smtpSettings.credentials.isConfigured
-                              ? "Configurez l'envoi d'email (Réglages) pour envoyer une relance"
-                              : "Envoyer un email de relance au client")
+                    }
+                    .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
+                    .disabled(sendingInvoiceEmail
+                              || !emailTemplateStore.isSendEnabled(.invoiceSent)
+                              || (invoice.buyer.contactEmail ?? "").isEmpty
+                              || !smtpSettings.credentials.isConfigured)
+                    .help(!emailTemplateStore.template(for: .invoiceSent).enabled
+                          ? "Cet email est désactivé (Réglages > Application)"
+                          : (invoice.buyer.contactEmail ?? "").isEmpty
+                          ? "Aucune adresse email cliente renseignée"
+                          : !smtpSettings.credentials.isConfigured
+                          ? "Configurez l'envoi d'email (Réglages) pour envoyer la facture"
+                          : "Envoyer la facture par email au client")
+
+                    if invoice.isOverdue {
+                        Divider().frame(height: 20)
+                        HStack(spacing: 8) {
+                            Menu {
+                                ForEach(PaymentReminderLevel.allCases) { level in
+                                    Button {
+                                        sendReminder(level: level)
+                                    } label: { Label(level.label, systemImage: level.systemImage) }
+                                }
+                            } label: {
+                                if sendingReminder {
+                                    HStack(spacing: 4) {
+                                        ProgressView().controlSize(.small)
+                                        Text("Envoi…")
+                                    }
+                                } else {
+                                    Label("Relance", systemImage: "exclamationmark.bubble")
+                                }
+                            }
+                            .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                            .disabled(sendingReminder
+                                      || !emailTemplateStore.isSendEnabled(.invoiceReminder)
+                                      || (invoice.buyer.contactEmail ?? "").isEmpty
+                                      || !smtpSettings.credentials.isConfigured)
+                            .help(!emailTemplateStore.template(for: .invoiceReminder).enabled
+                                  ? "Les relances sont désactivées (Réglages > Application)"
+                                  : (invoice.buyer.contactEmail ?? "").isEmpty
+                                  ? "Aucune adresse email cliente renseignée"
+                                  : !smtpSettings.credentials.isConfigured
+                                  ? "Configurez l'envoi d'email (Réglages) pour envoyer une relance"
+                                  : "Envoyer un email de relance au client")
+                        }
                     }
                 }
 
@@ -1997,7 +2030,7 @@ struct InvoiceEditorView: View {
             .padding(12)
             }
             Divider()
-            if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil || reminderMessage != nil {
+            if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil || reminderMessage != nil || invoiceEmailMessage != nil {
                 VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
@@ -2019,6 +2052,10 @@ struct InvoiceEditorView: View {
                 if let m = reminderMessage {
                     Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
                         .onChange(of: invoice.number) { _ in reminderMessage = nil }
+                }
+                if let m = invoiceEmailMessage {
+                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        .onChange(of: invoice.number) { _ in invoiceEmailMessage = nil }
                 }
                 if let m = superPDPMessage {
                     HStack(spacing: 6) {
@@ -2756,6 +2793,37 @@ struct InvoiceEditorView: View {
                 reminderMessage = "Échec relance : \(error.localizedDescription)"
             }
             sendingReminder = false
+        }
+    }
+
+    private func sendInvoiceEmail() {
+        guard let recipient = invoice.buyer.contactEmail, !recipient.isEmpty else {
+            invoiceEmailMessage = "Échec envoi : aucune adresse email cliente renseignée."
+            return
+        }
+        let credentials = smtpSettings.credentials
+        guard credentials.isConfigured else {
+            invoiceEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
+            return
+        }
+        let template = emailTemplateStore.template(for: .invoiceSent)
+        let email = EmailComposer.compose(template: template, variables: [
+            "numero": invoice.number,
+            "client": invoice.buyer.name,
+            "societe": invoice.seller.name,
+            "montant": String(format: "%.2f %@", invoice.grandTotal, invoice.currency),
+            "date": invoice.dueDate.formatted(.dateTime.day().month().year())
+        ])
+        sendingInvoiceEmail = true
+        invoiceEmailMessage = nil
+        Task {
+            do {
+                try await SMTPService().send(to: recipient, subject: email.subject, body: email.body, credentials: credentials)
+                invoiceEmailMessage = "Facture envoyée à \(recipient)."
+            } catch {
+                invoiceEmailMessage = "Échec envoi : \(error.localizedDescription)"
+            }
+            sendingInvoiceEmail = false
         }
     }
 
@@ -4777,6 +4845,7 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @EnvironmentObject var twoFactorSettings: TwoFactorSettings
     @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var appEnv: AppEnvironment
@@ -4794,6 +4863,7 @@ struct ApplicationSettingsView: View {
     @State private var pdpSessionChecking = false
     @State private var envExpanded = true
     @State private var modulesExpanded = false
+    @State private var emailTemplatesExpanded = false
     @State private var societiesExpanded = false
     @State private var dinumExpanded = false
     @State private var pisteExpanded = false
@@ -5153,6 +5223,35 @@ struct ApplicationSettingsView: View {
                         .font(.headline)
                 }
 
+                DisclosureGroup(isExpanded: $emailTemplatesExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Emails envoyés automatiquement au client ou au fournisseur pour accompagner un document (devis, commande, facture) — utilise le même serveur SMTP que les alertes ci-dessus.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle(isOn: Binding(
+                            get: { emailTemplateStore.globalEnabled },
+                            set: { emailTemplateStore.globalEnabled = $0; emailTemplateStore.save() }
+                        )) {
+                            Text("Activer l'envoi de ces emails").font(.body.weight(.semibold))
+                        }
+                        .toggleStyle(.switch)
+                        .help("Désactivé, tous les boutons d'envoi disparaissent de l'application, quel que soit le réglage de chaque email ci-dessous.")
+                        if !emailTemplateStore.globalEnabled {
+                            Label("Tous les boutons d'envoi sont masqués tant que c'est désactivé.", systemImage: "eye.slash")
+                                .font(.caption).foregroundStyle(.orange)
+                        } else {
+                            Divider()
+                            Text(EmailTemplateKind.placeholderHelp)
+                                .font(.caption2).foregroundStyle(.tertiary)
+                            ForEach(EmailTemplateKind.allCases) { kind in
+                                emailTemplateRow(kind)
+                            }
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Emails automatiques (devis, commande, facture)", systemImage: "paperplane.fill")
+                        .font(.headline)
+                }
+
                 DisclosureGroup(isExpanded: $twoFactorExpanded) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Active la possibilité, pour chaque utilisateur, d'activer la double authentification (application TOTP — Google Authenticator, Authy…) sur son propre profil (onglet Profil). Ce réglage est global à l'application ; désactivé, aucun utilisateur ne peut activer ni utiliser la 2FA, même s'il l'avait configurée auparavant.")
@@ -5318,6 +5417,34 @@ struct ApplicationSettingsView: View {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
         return nil
+    }
+
+    @ViewBuilder
+    private func emailTemplateRow(_ kind: EmailTemplateKind) -> some View {
+        let binding = Binding<EmailTemplate>(
+            get: { emailTemplateStore.template(for: kind) },
+            set: { emailTemplateStore.upsert($0) }
+        )
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: binding.enabled) {
+                Label(kind.label, systemImage: kind.systemImage).font(.body.weight(.semibold))
+            }
+            .toggleStyle(.switch)
+            if kind.hasEditableContent {
+                if binding.wrappedValue.enabled {
+                    TextField("Sujet", text: binding.subject)
+                        .textFieldStyle(.roundedBorder)
+                    TextEditor(text: binding.body)
+                        .font(.caption)
+                        .frame(height: 80)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+                }
+            } else {
+                Text("La relance utilise 3 modèles distincts selon le niveau d'urgence (rappel amical, mise en demeure, majoration légale), non modifiables ici — seule l'activation se règle à cet endroit.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
+        }
     }
 
     /// Le format en cours d'édition : celui de la société sélectionnée (créé à la volée à
@@ -8125,6 +8252,10 @@ struct QuoteEditorView: View {
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var emailTemplateStore: EmailTemplateStore
+    @State private var sendingQuoteEmail = false
+    @State private var quoteEmailMessage: String?
 
     private var isLocked: Bool { quote.status.locksQuote }
 
@@ -8160,6 +8291,29 @@ struct QuoteEditorView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
+                    if emailTemplateStore.globalEnabled {
+                        Button {
+                            sendQuoteEmail()
+                        } label: {
+                            if sendingQuoteEmail {
+                                HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Envoi…") }
+                            } else {
+                                Label("Envoyer le devis", systemImage: EmailTemplateKind.quoteSent.systemImage)
+                            }
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
+                        .disabled(sendingQuoteEmail
+                                  || !emailTemplateStore.isSendEnabled(.quoteSent)
+                                  || (quote.buyer.contactEmail ?? "").isEmpty
+                                  || !smtpSettings.credentials.isConfigured)
+                        .help(!emailTemplateStore.template(for: .quoteSent).enabled
+                              ? "Cet email est désactivé (Réglages > Application)"
+                              : (quote.buyer.contactEmail ?? "").isEmpty
+                              ? "Aucune adresse email cliente renseignée"
+                              : !smtpSettings.credentials.isConfigured
+                              ? "Configurez l'envoi d'email (Réglages) pour envoyer un devis"
+                              : "Envoyer le devis par email au client")
+                    }
                     ForEach(quoteStatusStore.allowedTransitions(from: quote.status), id: \.self) { s in
                         let so = quoteStatusStore.override(for: s)
                         Button {
@@ -8192,6 +8346,11 @@ struct QuoteEditorView: View {
                 Text("Converti en facture : \(n) (disponible dans l'onglet Factures)")
                     .font(.caption).foregroundStyle(.green)
                     .padding(.horizontal, 12)
+            }
+            if let m = quoteEmailMessage, !m.isEmpty {
+                Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                    .padding(.horizontal, 12)
+                    .onChange(of: quote.number) { _ in quoteEmailMessage = nil }
             }
 
             Divider()
@@ -8247,6 +8406,37 @@ struct QuoteEditorView: View {
             .formStyle(.grouped)
         }
     }
+
+    private func sendQuoteEmail() {
+        guard let recipient = quote.buyer.contactEmail, !recipient.isEmpty else {
+            quoteEmailMessage = "Échec envoi : aucune adresse email cliente renseignée."
+            return
+        }
+        let credentials = smtpSettings.credentials
+        guard credentials.isConfigured else {
+            quoteEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
+            return
+        }
+        let template = emailTemplateStore.template(for: .quoteSent)
+        let email = EmailComposer.compose(template: template, variables: [
+            "numero": quote.number,
+            "client": quote.buyer.name,
+            "societe": quote.seller.name,
+            "montant": String(format: "%.2f %@", quote.grandTotal, quote.currency),
+            "date": quote.validUntil.formatted(.dateTime.day().month().year())
+        ])
+        sendingQuoteEmail = true
+        quoteEmailMessage = nil
+        Task {
+            do {
+                try await SMTPService().send(to: recipient, subject: email.subject, body: email.body, credentials: credentials)
+                quoteEmailMessage = "Devis envoyé à \(recipient)."
+            } catch {
+                quoteEmailMessage = "Échec envoi : \(error.localizedDescription)"
+            }
+            sendingQuoteEmail = false
+        }
+    }
 }
 
 struct OrderEditorView: View {
@@ -8255,6 +8445,8 @@ struct OrderEditorView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var validation: FacturXValidationResult?
@@ -8263,6 +8455,8 @@ struct OrderEditorView: View {
     @State private var showUnlockAlert = false
     @State private var createdInvoiceNumber: String?
     @State private var showMandatoryDetails = false
+    @State private var sendingOrderEmail: EmailTemplateKind?
+    @State private var orderEmailMessage: String?
 
     private var statusLocked: Bool { order.status.locksOrder }
     private var isLocked: Bool { statusLocked || isManuallyLocked }
@@ -8369,6 +8563,13 @@ struct OrderEditorView: View {
                     Button("Créer la facture") { createInvoice() }
                         .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
                 }
+                if emailTemplateStore.globalEnabled {
+                    Divider().frame(height: 20)
+                    HStack(spacing: 8) {
+                        orderEmailButton(kind: .orderConfirmation, label: "Confirmer par email")
+                        orderEmailButton(kind: .deliveryNotice, label: "Avis de livraison")
+                    }
+                }
                 if isAdmin {
                     let forceable = statusStore.overrides.filter { $0.id != currentStatus.id && !configuredTransitions.map(\.rawValue).contains($0.id) }
                     if !forceable.isEmpty {
@@ -8398,8 +8599,12 @@ struct OrderEditorView: View {
             .padding(12)
             }
             Divider()
-            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || createdInvoiceNumber != nil {
+            if hasMandatoryWarnings || showValidation || exportError != nil || exportedURL != nil || createdInvoiceNumber != nil || orderEmailMessage != nil {
                 VStack(alignment: .leading, spacing: 8) {
+                if let m = orderEmailMessage, !m.isEmpty {
+                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        .onChange(of: order.number) { _ in orderEmailMessage = nil }
+                }
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
                         .onChange(of: order.number) { _ in exportError = nil }
@@ -8687,6 +8892,62 @@ struct OrderEditorView: View {
         let invoice = order.toInvoice(number: number)
         store.upsert(invoice)
         createdInvoiceNumber = number
+    }
+
+    @ViewBuilder
+    private func orderEmailButton(kind: EmailTemplateKind, label: String) -> some View {
+        Button {
+            sendOrderEmail(kind: kind)
+        } label: {
+            if sendingOrderEmail == kind {
+                HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Envoi…") }
+            } else {
+                Label(label, systemImage: kind.systemImage)
+            }
+        }
+        .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
+        .disabled(sendingOrderEmail != nil
+                  || !emailTemplateStore.isSendEnabled(kind)
+                  || (order.buyer.contactEmail ?? "").isEmpty
+                  || !smtpSettings.credentials.isConfigured)
+        .help(!emailTemplateStore.template(for: kind).enabled
+              ? "Cet email est désactivé (Réglages > Application)"
+              : (order.buyer.contactEmail ?? "").isEmpty
+              ? "Aucune adresse email cliente renseignée"
+              : !smtpSettings.credentials.isConfigured
+              ? "Configurez l'envoi d'email (Réglages) pour envoyer cet email"
+              : "Envoyer « \(kind.label) » par email au client")
+    }
+
+    private func sendOrderEmail(kind: EmailTemplateKind) {
+        guard let recipient = order.buyer.contactEmail, !recipient.isEmpty else {
+            orderEmailMessage = "Échec envoi : aucune adresse email cliente renseignée."
+            return
+        }
+        let credentials = smtpSettings.credentials
+        guard credentials.isConfigured else {
+            orderEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
+            return
+        }
+        let template = emailTemplateStore.template(for: kind)
+        let email = EmailComposer.compose(template: template, variables: [
+            "numero": order.number,
+            "client": order.buyer.name,
+            "societe": order.seller.name,
+            "montant": String(format: "%.2f %@", order.grandTotal, order.currency),
+            "date": order.requestedDeliveryDate.formatted(.dateTime.day().month().year())
+        ])
+        sendingOrderEmail = kind
+        orderEmailMessage = nil
+        Task {
+            do {
+                try await SMTPService().send(to: recipient, subject: email.subject, body: email.body, credentials: credentials)
+                orderEmailMessage = "« \(kind.label) » envoyé à \(recipient)."
+            } catch {
+                orderEmailMessage = "Échec envoi : \(error.localizedDescription)"
+            }
+            sendingOrderEmail = nil
+        }
     }
 
     private func exportXML() {
