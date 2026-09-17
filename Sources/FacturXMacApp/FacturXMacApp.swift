@@ -1703,7 +1703,8 @@ struct InvoiceEditorView: View {
             }
             .padding(.horizontal, 12).padding(.top, 12)
             HStack(spacing: 6) {
-                Text("Conditions de paiement :").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "banknote").foregroundStyle(.secondary)
+                Text("Conditions de paiement :").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
                 Picker("", selection: paymentTermsPresetIDBinding) {
                     ForEach(paymentTermsStore.presets) { preset in
                         Text(preset.label).tag(Optional(preset.id))
@@ -1711,15 +1712,22 @@ struct InvoiceEditorView: View {
                     Text("Personnalisé").tag(String?.none)
                 }
                 .labelsHidden()
-                .frame(width: 170)
+                .frame(width: 180)
                 .disabled(fieldLocked)
                 .help("Applique le texte du préréglage et recalcule l'échéance ci-dessous — celle-ci reste modifiable manuellement ensuite.")
                 TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
-                    .textFieldStyle(.plain)
-                    .font(.caption)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+                    .frame(maxWidth: 260)
                     .disabled(fieldLocked)
+                if (invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                    Label("Non renseignées", systemImage: "exclamationmark.circle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Spacer()
             }
-            .padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 4)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity((invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty ? 0.08 : 0)))
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · utilitaires · admin
