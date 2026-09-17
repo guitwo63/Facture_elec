@@ -5078,7 +5078,7 @@ struct ApplicationSettingsView: View {
                         Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini. Le compteur est toujours indépendant par société émettrice ; le format (préfixe, année, séparateur) peut l'être aussi si une société a besoin d'une numérotation différente — sinon toutes les sociétés partagent le format par défaut.")
                             .font(.caption).foregroundStyle(.secondary)
                         let societies = auth.visibleSocieties(for: auth.currentUser)
-                        if societies.count > 1 {
+                        if !societies.isEmpty {
                             Picker("Société", selection: $numberingCompanyID) {
                                 Text("Toutes (format par défaut)").tag(UUID?.none)
                                 ForEach(societies) { c in
