@@ -1702,32 +1702,6 @@ struct InvoiceEditorView: View {
                 .lineLimit(1)
             }
             .padding(.horizontal, 12).padding(.top, 12)
-            HStack(spacing: 6) {
-                Image(systemName: "banknote").foregroundStyle(.secondary)
-                Text("Conditions de paiement :").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
-                Picker("", selection: paymentTermsPresetIDBinding) {
-                    ForEach(paymentTermsStore.presets) { preset in
-                        Text(preset.label).tag(Optional(preset.id))
-                    }
-                    Text("Personnalisé").tag(String?.none)
-                }
-                .labelsHidden()
-                .frame(width: 180)
-                .disabled(fieldLocked)
-                .help("Applique le texte du préréglage et recalcule l'échéance ci-dessous — celle-ci reste modifiable manuellement ensuite.")
-                TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.callout)
-                    .frame(maxWidth: 260)
-                    .disabled(fieldLocked)
-                if (invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-                    Label("Non renseignées", systemImage: "exclamationmark.circle")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity((invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty ? 0.08 : 0)))
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · utilitaires · admin
@@ -2078,6 +2052,31 @@ struct InvoiceEditorView: View {
                                         }.labelsHidden().frame(width: 320)
                                     }
                                 }
+                                HStack(spacing: 6) {
+                                    Image(systemName: "banknote").foregroundStyle(.secondary)
+                                    Text("Conditions de paiement :").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                                    Picker("", selection: paymentTermsPresetIDBinding) {
+                                        ForEach(paymentTermsStore.presets) { preset in
+                                            Text(preset.label).tag(Optional(preset.id))
+                                        }
+                                        Text("Personnalisé").tag(String?.none)
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 180)
+                                    .disabled(fieldLocked)
+                                    .help("Applique le texte du préréglage et recalcule l'échéance ci-dessus — celle-ci reste modifiable manuellement ensuite.")
+                                    TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.callout)
+                                        .frame(maxWidth: 260)
+                                        .disabled(fieldLocked)
+                                    if (invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                                        Label("Non renseignées", systemImage: "exclamationmark.circle")
+                                            .font(.caption).foregroundStyle(.orange)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity((invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty ? 0.08 : 0)))
                                 HStack(spacing: 3) {
                                     TextField("Référence commande (BT-13)", text: Binding($invoice.purchaseOrderRef, replacingNilWith: "")).frame(width: 260)
                                     InfoBadge(text: "BT-13 — Numéro de commande acheteur (BuyerOrderReferencedDocument/IssuerAssignedID). Distinct du BT-10 : c'est le numéro du bon de commande, pas la référence de routage.")
@@ -2249,7 +2248,7 @@ struct InvoiceEditorView: View {
                         if (invoice.paymentIBAN ?? "").isEmpty && (invoice.paymentBIC ?? "").isEmpty {
                             Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("Conditions de paiement : modifiables en haut de l'écran.")
+                        Text("Conditions de paiement : modifiables dans l'en-tête ci-dessus.")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }.padding(8)
                 }.lockable(fieldLocked)
