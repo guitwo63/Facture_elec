@@ -202,6 +202,7 @@ struct FacturXMacApp: App {
 extension Notification.Name {
     static let newInvoiceRequested = Notification.Name("newInvoiceRequested")
     static let newOrderRequested = Notification.Name("newOrderRequested")
+    static let fullSettingsWizardRequested = Notification.Name("fullSettingsWizardRequested")
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -427,6 +428,7 @@ struct RootView: View {
     @State private var showEnvConfirm = false
     @State private var showSetupWizard = false
     @State private var setupWizardSkippedThisSession = false
+    @State private var showFullSettingsWizard = false
 
     var body: some View {
         Group {
@@ -650,6 +652,14 @@ struct RootView: View {
             SetupWizardView {
                 showSetupWizard = false
                 setupWizardSkippedThisSession = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fullSettingsWizardRequested)) { _ in
+            showFullSettingsWizard = true
+        }
+        .sheet(isPresented: $showFullSettingsWizard) {
+            FullSettingsWizardView {
+                showFullSettingsWizard = false
             }
         }
     }
@@ -4732,6 +4742,15 @@ struct ApplicationSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Label("Toutes les catégories ci-dessous, en revue guidée pas à pas :", systemImage: "checklist")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        NotificationCenter.default.post(name: .fullSettingsWizardRequested, object: nil)
+                    } label: { Label("Relancer l'assistant complet", systemImage: "checklist") }
+                        .buttonStyle(.bordered)
+                }
                 DisclosureGroup(isExpanded: $envExpanded) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
