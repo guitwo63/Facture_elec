@@ -4597,18 +4597,33 @@ struct SettingsTabView: View {
     @EnvironmentObject var auth: AuthStore
     @State private var settingsTab = 0
 
+    private struct TabItem { let index: Int; let label: String; let icon: String }
+
+    /// Un `Picker` en style segmenté n'affiche pas fiablement l'icône d'un `Label` sur
+    /// macOS (texte seul par segment) — même limitation que celle qui a motivé le
+    /// remplacement de la barre de navigation principale par de vrais boutons. Mêmes
+    /// boutons ici plutôt que de refaire la même erreur.
+    private var tabs: [TabItem] {
+        var items = [TabItem(index: 0, label: "Profil", icon: "person.crop.circle")]
+        if auth.currentUser?.isAdmin == true {
+            items.append(contentsOf: [
+                TabItem(index: 1, label: "Tables", icon: "tablecells"),
+                TabItem(index: 2, label: "Application", icon: "gearshape.2"),
+                TabItem(index: 3, label: "Journal", icon: "clock.arrow.circlepath"),
+                TabItem(index: 4, label: "Données", icon: "externaldrive.fill")
+            ])
+        }
+        return items
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $settingsTab) {
-                Label("Profil", systemImage: "person.crop.circle").tag(0)
-                if auth.currentUser?.isAdmin == true {
-                    Label("Tables", systemImage: "tablecells").tag(1)
-                    Label("Application", systemImage: "gearshape.2").tag(2)
-                    Label("Journal", systemImage: "clock.arrow.circlepath").tag(3)
-                    Label("Données", systemImage: "externaldrive.fill").tag(4)
+            HStack(spacing: 6) {
+                ForEach(tabs, id: \.index) { tab in
+                    settingsTabButton(tab)
                 }
+                Spacer()
             }
-            .pickerStyle(.segmented)
             .padding(10)
             Divider()
             switch settingsTab {
@@ -4624,6 +4639,24 @@ struct SettingsTabView: View {
                 ApplicationSettingsView()
             }
         }
+    }
+
+    private func settingsTabButton(_ tab: TabItem) -> some View {
+        let isSelected = settingsTab == tab.index
+        return Button {
+            settingsTab = tab.index
+        } label: {
+            Label(tab.label, systemImage: tab.icon)
+                .font(.callout.weight(isSelected ? .semibold : .regular))
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        )
     }
 }
 
