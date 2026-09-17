@@ -6475,6 +6475,15 @@ struct PartyEditorView: View {
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
 
+    private var paymentTermsPresetBinding: Binding<PaymentTermsPreset> {
+        Binding(
+            get: { PaymentTermsPreset.matching(party.paymentTerms) },
+            set: { newPreset in
+                if let text = newPreset.text { party.paymentTerms = text }
+            }
+        )
+    }
+
     init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, locked: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
         self._party = party
         self.showWebButton = showWebButton
@@ -6741,7 +6750,14 @@ struct PartyEditorView: View {
                         }
                         TextField("BIC", text: Binding($party.bic, replacingNilWith: ""))
                             .textCase(.uppercase)
-                        TextField("Conditions de paiement", text: Binding($party.paymentTerms, replacingNilWith: ""))
+                        Picker("Conditions de paiement", selection: paymentTermsPresetBinding) {
+                            ForEach(PaymentTermsPreset.allCases) { preset in
+                                Text(preset.label).tag(preset)
+                            }
+                        }
+                        if paymentTermsPresetBinding.wrappedValue == .personnalise {
+                            TextField("Texte libre", text: Binding($party.paymentTerms, replacingNilWith: ""))
+                        }
                     }
                 }
                 .font(.caption)
