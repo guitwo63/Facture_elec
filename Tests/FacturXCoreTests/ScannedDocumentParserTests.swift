@@ -76,4 +76,94 @@ final class ScannedDocumentParserTests: XCTestCase {
     func testExtractSIRENReturnsNilWhenAbsent() {
         XCTAssertNil(ScannedDocumentParser.extractSIREN(from: "Aucun numéro ici."))
     }
+
+    // MARK: - parseAmount
+
+    func testParseAmountHandlesFrenchThousandsAndDecimalComma() {
+        XCTAssertEqual(ScannedDocumentParser.parseAmount("1 234,56"), 1234.56)
+        XCTAssertEqual(ScannedDocumentParser.parseAmount("1.234,56"), 1234.56)
+    }
+
+    func testParseAmountHandlesPlainDecimalPoint() {
+        XCTAssertEqual(ScannedDocumentParser.parseAmount("1234.56"), 1234.56)
+    }
+
+    func testParseAmountHandlesCurrencySuffixAndTrailingZeroDecimals() {
+        XCTAssertEqual(ScannedDocumentParser.parseAmount("1250 €"), 1250.0)
+        XCTAssertEqual(ScannedDocumentParser.parseAmount("56,00"), 56.0)
+    }
+
+    func testParseAmountReturnsNilForNonNumericText() {
+        XCTAssertNil(ScannedDocumentParser.parseAmount("abc"))
+    }
+
+    // MARK: - extractTotal
+
+    func testExtractTotalPrefersNetAPayerOverGenericTotalLabel() {
+        let text = """
+        Total HT : 1000,00
+        TVA 20% : 200,00
+        Total TTC : 1 200,00 €
+        """
+        XCTAssertEqual(ScannedDocumentParser.extractTotal(from: text), 1200.0)
+    }
+
+    func testExtractTotalReturnsNilWhenNoRecognizableTotalLine() {
+        XCTAssertNil(ScannedDocumentParser.extractTotal(from: "Aucun montant ici."))
+    }
+
+    // MARK: - extractLineItems
+
+    func testExtractLineItemsParsesTrailingAmountAndLeadingQuantity() {
+        let text = """
+        Installation tableau électrique 450,00
+        2 x Prise murale 30,00
+        Total TTC : 576,00
+        """
+        let lines = ScannedDocumentParser.extractLineItems(from: text)
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0].name, "Installation tableau électrique")
+        XCTAssertEqual(lines[0].quantity, 1)
+        XCTAssertEqual(lines[0].unitPrice, 450.00, accuracy: 0.001)
+        XCTAssertEqual(lines[1].name, "Prise murale")
+        XCTAssertEqual(lines[1].quantity, 2)
+        XCTAssertEqual(lines[1].unitPrice, 15.00, accuracy: 0.001)
+    }
+
+    func testExtractLineItemsExcludesTotalAndTaxLines() {
+        let text = """
+        Prestation 100,00
+        Sous-total 100,00
+        TVA 20% 20,00
+        Total TTC 120,00
+        """
+        let lines = ScannedDocumentParser.extractLineItems(from: text)
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].name, "Prestation")
+    }
+
+    func testExtractLineItemsReturnsEmptyWhenNoLineHasATrailingAmount() {
+        XCTAssertEqual(ScannedDocumentParser.extractLineItems(from: "Aucune ligne exploitable ici.").count, 0)
+    }
+
+    // MARK: - totalMatches
+
+    func testTotalMatchesReturnsNilWhenNoTotalWasExtracted() {
+        XCTAssertNil(ScannedDocumentParser.totalMatches(lines: [], extractedTotal: nil))
+    }
+
+    func testTotalMatchesTrueWhenSumOfHTLineTotalsMatches() {
+        let lines = [InvoiceLine(name: "A", quantity: 1, unitPrice: 100, vatRate: 0)]
+        XCTAssertEqual(ScannedDocumentParser.totalMatches(lines: lines, extractedTotal: 100.0), true)
+    }
+
+    func testTotalMatchesTrueWhenSumOfTTCLineTotalsMatches() {
+        let lines = [InvoiceLine(name: "A", quantity: 1, unitPrice: 100, vatRate: 20)]
+        XCTAssertEqual(ScannedDocumentParser.totalMatches(lines: lines, extractedTotal: 120.0), true)
+    }
+
+    func testTotalMatchesFalseWhenNeitherHTNorTTCSumIsClose() {
+        let lines = [InvoiceLine(name: "A", quantity: 1, unitPrice: 100, vatRate: 20)]
+        XCTAssertEqual(ScannedDocumentParser.totalMatches(lines: lines, extractedTotal: 500.0), false)
+    }
 }
