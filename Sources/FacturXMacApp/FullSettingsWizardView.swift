@@ -7,12 +7,11 @@ import FacturXCore
 /// qui veut s'assurer que rien n'a été oublié. Relançable à tout moment depuis
 /// Réglages > Application ("Relancer l'assistant complet").
 ///
-/// Pour les réglages simples (bascule test/prod, activation de module, activation
-/// PDP/SMTP/2FA) les contrôles réels sont directement ici — ce sont les mêmes
-/// `@Published` que dans Réglages, donc aucun risque de divergence. Pour les
-/// réglages à plusieurs champs (identifiants SUPER PDP/SMTP, sociétés, tables de
-/// préréglages), cet assistant affiche l'état actuel et renvoie vers Réglages >
-/// Application plutôt que de dupliquer tout le formulaire.
+/// Chaque étape édite les valeurs réelles directement (mêmes `@Published` que
+/// Réglages, donc aucun risque de divergence ni de double saisie) — retour du
+/// 2026-09-17 : la première version se contentait d'un statut en lecture seule
+/// pour les réglages à plusieurs champs et renvoyait vers Réglages, ce qui
+/// n'était pas ce qui était demandé.
 struct FullSettingsWizardView: View {
     var onFinished: () -> Void
 
@@ -27,6 +26,9 @@ struct FullSettingsWizardView: View {
 
     @State private var step: Step = .welcome
     @State private var creatingSociety = false
+    @State private var editingSociety: DirectoryEntry?
+    @State private var superPDPSaved = false
+    @State private var smtpSaved = false
 
     enum Step: Int, CaseIterable {
         case welcome, environment, societies, modules, numbering, paymentTerms, superPDP, smtp, twoFactor, backup, done
@@ -95,6 +97,15 @@ struct FullSettingsWizardView: View {
                 creatingSociety = false
             }
         }
+        .sheet(item: $editingSociety) { entry in
+            DirectoryEditorView(entry: entry, onSave: { updated in
+                directory.upsert(updated)
+                editingSociety = nil
+            }, onDelete: { toDelete in
+                directory.delete(toDelete)
+                editingSociety = nil
+            })
+        }
     }
 
     private func forward() {
@@ -115,7 +126,7 @@ struct FullSettingsWizardView: View {
         VStack(spacing: 16) {
             Image(systemName: "checklist").font(.system(size: 48)).foregroundStyle(Color.accentColor)
             Text("Revue complète des réglages").font(.title2.bold())
-            Text("Cet assistant passe en revue toutes les catégories de réglages de l'application, une par une, pour vérifier que rien n'a été oublié. Les réglages à plusieurs champs (identifiants d'API…) restent à compléter dans Réglages > Application ; cet assistant vous y renvoie le cas échéant. Vous pouvez le relancer à tout moment.")
+            Text("Cet assistant passe en revue et modifie toutes les catégories de réglages de l'application, une par une : mêmes valeurs que dans Réglages > Application, éditées directement ici. Vous pouvez le relancer à tout moment.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -143,7 +154,7 @@ struct FullSettingsWizardView: View {
 
     private var societiesStep: some View {
         stepContainer(icon: "building.2.fill", title: "Sociétés du périmètre") {
-            Text("Chaque société émettrice définit un périmètre (utilisateurs, factures, numérotation…). Gestion complète (logo, profil Factur-X…) dans Réglages > Application > Sociétés du périmètre.")
+            Text("Chaque société émettrice définit un périmètre (utilisateurs, factures, numérotation…).")
                 .font(.caption).foregroundStyle(.secondary)
             if societies.isEmpty {
                 Label("Aucune société — indispensable avant de facturer.", systemImage: "exclamationmark.triangle.fill")
@@ -155,6 +166,8 @@ struct FullSettingsWizardView: View {
                         Text(s.displayName)
                         Spacer()
                         Text(s.party.city).font(.caption).foregroundStyle(.secondary)
+                        Button("Modifier") { editingSociety = s }
+                            .buttonStyle(.link)
                     }
                 }
             }
@@ -182,22 +195,58 @@ struct FullSettingsWizardView: View {
 
     private var numberingStep: some View {
         stepContainer(icon: "number", title: "Numérotation des factures") {
-            Text("Format des numéros de facture (préfixe, année, séparateur, numéro de début). Aperçu avec le format actuel :")
+            Text("Format par défaut des numéros de facture. Le compteur est indépendant par société ; un format différent par société se règle dans Réglages > Application.")
                 .font(.caption).foregroundStyle(.secondary)
-            Text(invoiceStore.previewNextNumber()).monospaced().font(.callout.bold())
-            Text("Réglable dans Réglages > Application > Numérotation des factures.")
-                .font(.caption2).foregroundStyle(.tertiary)
+            HStack {
+                Text("Préfixe texte").font(.caption)
+                TextField("ex. FAC", text: Binding(
+                    get: { invoiceStore.numberPrefix },
+                    set: { invoiceStore.numberPrefix = $0; invoiceStore.save() }
+                )).frame(width: 140)
+            }
+            Toggle("Inclure l'année", isOn: Binding(
+                get: { invoiceStore.numberIncludeYear },
+                set: { invoiceStore.numberIncludeYear = $0; invoiceStore.save() }
+            ))
+            HStack {
+                Text("Numéro de début").font(.caption)
+                Stepper(value: Binding(
+                    get: { invoiceStore.numberStart },
+                    set: { invoiceStore.numberStart = $0; invoiceStore.save() }
+                ), in: 1...999999) {
+                    Text("\(invoiceStore.numberStart)")
+                }
+            }
+            Toggle("Séparer par un \"-\"", isOn: Binding(
+                get: { invoiceStore.numberUseSeparator },
+                set: { invoiceStore.numberUseSeparator = $0; invoiceStore.save() }
+            ))
+            Divider()
+            HStack {
+                Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
+                Text(invoiceStore.previewNextNumber()).monospaced().font(.callout.bold())
+            }
         }
     }
 
     private var paymentTermsStep: some View {
         stepContainer(icon: "banknote", title: "Conditions de paiement") {
-            Text("Préréglages proposés à la saisie sur les fiches société (Comptant, 30 jours net…), avec calcul automatique de l'échéance. \(paymentTermsStore.presets.count) préréglage(s) actuellement.")
+            Text("Préréglages proposés à la saisie sur les fiches société, avec calcul automatique de l'échéance. Modifiez le texte directement :")
                 .font(.caption).foregroundStyle(.secondary)
-            ForEach(paymentTermsStore.presets.prefix(6)) { preset in
-                Label(preset.label, systemImage: "checkmark").font(.caption)
+            ForEach(paymentTermsStore.presets) { preset in
+                HStack {
+                    Text(preset.label).font(.caption.bold()).frame(width: 150, alignment: .leading)
+                    TextField("Texte", text: Binding(
+                        get: { preset.text },
+                        set: { newValue in
+                            var updated = preset
+                            updated.text = newValue
+                            paymentTermsStore.upsert(updated)
+                        }
+                    ))
+                }
             }
-            Text("Réglable dans Réglages > Tables > Conditions de paiement.")
+            Text("Tables complètes (ajout/suppression de préréglages, statuts…) dans Réglages > Tables.")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
     }
@@ -212,12 +261,27 @@ struct FullSettingsWizardView: View {
             )) {
                 Text("Utiliser PDP").font(.body.weight(.semibold))
             }
-            statusLabel(configured: superPDPSettings.credentials.isConfigured,
-                        okText: "Identifiants configurés",
-                        koText: "Identifiants non configurés")
-            if superPDPSettings.credentials.usePDP && !superPDPSettings.credentials.isConfigured {
-                Text("Renseignez client_id/client_secret dans Réglages > Application > SUPER PDP.")
-                    .font(.caption2).foregroundStyle(.orange)
+            if superPDPSettings.credentials.usePDP {
+                HStack {
+                    Text("Client ID").frame(width: 100, alignment: .leading)
+                    TextField("Client ID", text: $superPDPSettings.credentials.clientID)
+                }
+                HStack {
+                    Text("Client Secret").frame(width: 100, alignment: .leading)
+                    SecureField("Client Secret", text: $superPDPSettings.credentials.clientSecret)
+                }
+                HStack {
+                    Button {
+                        superPDPSettings.save()
+                        superPDPSaved = true
+                    } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                        .buttonStyle(.borderedProminent)
+                    if superPDPSaved {
+                        Label("Enregistré", systemImage: "checkmark").font(.caption2).foregroundStyle(.green)
+                    }
+                }
+                Text("Réglages avancés (base API, test de connexion) dans Réglages > Application > SUPER PDP.")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
         }
     }
@@ -232,12 +296,37 @@ struct FullSettingsWizardView: View {
             )) {
                 Text("Activer les alertes email").font(.body.weight(.semibold))
             }
-            statusLabel(configured: smtpSettings.credentials.isConfigured,
-                        okText: "Serveur configuré",
-                        koText: "Serveur non configuré")
-            if smtpSettings.credentials.alertsEnabled && !smtpSettings.credentials.isConfigured {
-                Text("Renseignez le serveur/identifiants dans Réglages > Application > Alertes email.")
-                    .font(.caption2).foregroundStyle(.orange)
+            if smtpSettings.credentials.alertsEnabled {
+                HStack {
+                    Text("Serveur").frame(width: 100, alignment: .leading)
+                    TextField("smtp.exemple.fr", text: $smtpSettings.credentials.host)
+                    Text("Port").foregroundStyle(.secondary)
+                    TextField("465", value: $smtpSettings.credentials.port, format: .number).frame(width: 70)
+                }
+                HStack {
+                    Text("Utilisateur").frame(width: 100, alignment: .leading)
+                    TextField("Identifiant SMTP", text: $smtpSettings.credentials.username)
+                }
+                HStack {
+                    Text("Mot de passe").frame(width: 100, alignment: .leading)
+                    SecureField("Mot de passe SMTP", text: $smtpSettings.credentials.password)
+                }
+                HStack {
+                    Text("Expéditeur").frame(width: 100, alignment: .leading)
+                    TextField("alertes@votre-domaine.fr", text: $smtpSettings.credentials.fromAddress)
+                }
+                HStack {
+                    Button {
+                        smtpSettings.save()
+                        smtpSaved = true
+                    } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                        .buttonStyle(.borderedProminent)
+                    if smtpSaved {
+                        Label("Enregistré", systemImage: "checkmark").font(.caption2).foregroundStyle(.green)
+                    }
+                }
+                Text("Déclencheurs et test d'envoi dans Réglages > Application > Alertes email.")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
         }
     }
@@ -279,11 +368,5 @@ struct FullSettingsWizardView: View {
             Label(title, systemImage: icon).font(.title3.bold())
             content()
         }
-    }
-
-    private func statusLabel(configured: Bool, okText: String, koText: String) -> some View {
-        Label(configured ? okText : koText, systemImage: configured ? "checkmark.circle.fill" : "questionmark.circle")
-            .font(.caption)
-            .foregroundStyle(configured ? .green : .orange)
     }
 }
