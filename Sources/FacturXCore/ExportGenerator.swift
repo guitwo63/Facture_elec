@@ -157,62 +157,6 @@ public struct ExportGenerator {
         return encode(rows: rows)
     }
 
-    /// En-têtes et lignes CSV pour une liste de devis.
-    public func quoteCSV(_ quotes: [Quote]) -> String {
-        var rows: [[String]] = []
-        rows.append([
-            "Numéro", "Statut", "Date", "Valable jusqu'au", "Devise",
-            "Émetteur (nom)", "Émetteur (SIREN)",
-            "Client (nom)", "Client (SIREN)", "Client (TVA)",
-            "Total HT", "Total TVA", "Total TTC", "Facture convertie", "Notes"
-        ])
-        for quote in quotes {
-            rows.append([
-                csv(quote.number),
-                csv(quote.status.label),
-                csv(df.string(from: quote.issueDate)),
-                csv(df.string(from: quote.validUntil)),
-                csv(quote.currency),
-                csv(quote.seller.name),
-                csv(orBlank(quote.seller.siren)),
-                csv(quote.buyer.name),
-                csv(orBlank(quote.buyer.siren)),
-                csv(orBlank(quote.buyer.vatNumber)),
-                String(format: "%.2f", quote.lineTotal),
-                String(format: "%.2f", quote.taxTotal),
-                String(format: "%.2f", quote.grandTotal),
-                csv(orBlank(quote.convertedInvoiceNumber)),
-                csv(orBlank(quote.notes))
-            ])
-        }
-        return encode(rows: rows)
-    }
-
-    /// En-têtes et lignes CSV détaillant toutes les lignes de devis.
-    public func quoteLinesCSV(_ quotes: [Quote]) -> String {
-        var rows: [[String]] = []
-        rows.append([
-            "N° devis", "Date", "Client",
-            "Désignation", "Quantité", "Unité", "P.U. HT", "TVA %", "Total HT"
-        ])
-        for quote in quotes {
-            for line in quote.lines {
-                rows.append([
-                    csv(quote.number),
-                    csv(df.string(from: quote.issueDate)),
-                    csv(quote.buyer.name),
-                    csv(line.name),
-                    String(format: "%g", line.quantity),
-                    csv(line.unit),
-                    String(format: "%.2f", line.unitPrice),
-                    String(format: "%g", line.vatRate),
-                    String(format: "%.2f", line.lineTotal)
-                ])
-            }
-        }
-        return encode(rows: rows)
-    }
-
     /// En-têtes et lignes CSV pour une liste de tiers (annuaire).
     public func directoryCSV(_ entries: [DirectoryEntry]) -> String {
         var rows: [[String]] = []
