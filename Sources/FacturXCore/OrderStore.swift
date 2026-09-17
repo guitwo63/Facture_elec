@@ -4,7 +4,7 @@ public final class OrderStore: ObservableObject {
     public static let shared = OrderStore()
 
     @Published public var orders: [SalesOrder]
-    public var defaultSellerEntryID: UUID?
+    public var defaultBuyerEntryID: UUID?
     @Published public var numberPrefix: String = "CD"
     @Published public var numberIncludeYear: Bool = true
     @Published public var numberStart: Int = 1
@@ -15,13 +15,7 @@ public final class OrderStore: ObservableObject {
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("orderx.orders.v1") }
-    // Nom de clé historique conservé tel quel (valeur déjà persistée chez les
-    // utilisateurs) même si la propriété qu'elle alimente a été renommée lors
-    // de l'inversion buyer/seller — inutile de migrer un simple UUID de société.
-    private var sellerEntryKey: String { env.key("orderx.defaultbuyer.entryid.v1") }
-    // Migration one-shot : avant cette version, `buyer` désignait notre société
-    // et `seller` le tiers — l'inverse de Devis/Facture. Voir `migrateBuyerSellerSemanticsIfNeeded()`.
-    private var buyerSellerMigratedKey: String { env.key("orderx.buyerSellerSemantics.migrated.v1") }
+    private var buyerEntryKey: String { env.key("orderx.defaultbuyer.entryid.v1") }
     private var numPrefixKey: String { env.key("orderx.number.prefix.v1") }
     private var numYearKey: String { env.key("orderx.number.includeyear.v1") }
     private var numStartKey: String { env.key("orderx.number.start.v1") }
@@ -37,36 +31,21 @@ public final class OrderStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([SalesOrder].self, from: data) {
             orders = decoded
         }
-        defaultSellerEntryID = defaults.string(forKey: sellerEntryKey).flatMap { UUID(uuidString: $0) }
+        defaultBuyerEntryID = defaults.string(forKey: buyerEntryKey).flatMap { UUID(uuidString: $0) }
         numberPrefix = defaults.string(forKey: numPrefixKey) ?? "CD"
         numberIncludeYear = defaults.object(forKey: numYearKey) as? Bool ?? true
         numberStart = defaults.object(forKey: numStartKey) as? Int ?? 1
         numberUseSeparator = defaults.object(forKey: numSepKey) as? Bool ?? true
-        migrateBuyerSellerSemanticsIfNeeded()
-    }
-
-    /// Avant cette version, `SalesOrder.buyer` recevait notre société et `.seller`
-    /// le tiers — l'inverse de Devis/Facture. Exécuté une seule fois par poste :
-    /// permute les deux champs sur toutes les commandes déjà persistées puis pose
-    /// un drapeau pour ne jamais rejouer (sinon une commande créée après la migration
-    /// serait permutée à nouveau, à tort, au prochain lancement).
-    private func migrateBuyerSellerSemanticsIfNeeded() {
-        guard !defaults.bool(forKey: buyerSellerMigratedKey) else { return }
-        for idx in orders.indices {
-            orders[idx].swapBuyerAndSeller()
-        }
-        save()
-        defaults.set(true, forKey: buyerSellerMigratedKey)
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(orders) {
             defaults.set(data, forKey: storageKey)
         }
-        if let id = defaultSellerEntryID {
-            defaults.set(id.uuidString, forKey: sellerEntryKey)
+        if let id = defaultBuyerEntryID {
+            defaults.set(id.uuidString, forKey: buyerEntryKey)
         } else {
-            defaults.removeObject(forKey: sellerEntryKey)
+            defaults.removeObject(forKey: buyerEntryKey)
         }
         defaults.set(numberPrefix, forKey: numPrefixKey)
         defaults.set(numberIncludeYear, forKey: numYearKey)
@@ -74,8 +53,8 @@ public final class OrderStore: ObservableObject {
         defaults.set(numberUseSeparator, forKey: numSepKey)
     }
 
-    public func resolveDefaultSeller(from directory: PartyDirectory) -> InvoiceParty? {
-        guard let id = defaultSellerEntryID,
+    public func resolveDefaultBuyer(from directory: PartyDirectory) -> InvoiceParty? {
+        guard let id = defaultBuyerEntryID,
               let entry = directory.entries.first(where: { $0.id == id }) else { return nil }
         var p = entry.party
         if let routing = entry.defaultRoutingAddress, routing.isActive {
@@ -118,11 +97,11 @@ public final class OrderStore: ObservableObject {
                        objectType: .order, objectCode: order.number)
     }
 
-    public func newDraft(directory: PartyDirectory? = nil, preferredSellerEntryID: UUID? = nil, companyID: UUID? = nil) -> SalesOrder {
+    public func newDraft(directory: PartyDirectory? = nil, preferredBuyerEntryID: UUID? = nil, companyID: UUID? = nil) -> SalesOrder {
         let dir = directory ?? PartyDirectory.shared
-        let sellerEntryID = preferredSellerEntryID ?? defaultSellerEntryID
-        let seller: InvoiceParty = {
-            if let id = sellerEntryID, let entry = dir.entries.first(where: { $0.id == id }) {
+        let buyerEntryID = preferredBuyerEntryID ?? defaultBuyerEntryID
+        let buyer: InvoiceParty = {
+            if let id = buyerEntryID, let entry = dir.entries.first(where: { $0.id == id }) {
                 var p = entry.party
                 if let routing = entry.defaultRoutingAddress, routing.isActive {
                     let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
@@ -138,10 +117,10 @@ public final class OrderStore: ObservableObject {
                 }
                 return p
             }
-            return resolveDefaultSeller(from: dir)
+            return resolveDefaultBuyer(from: dir)
                 ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         }()
-        let buyer = InvoiceParty(name: "", street: "", postcode: "", city: "")
+        let seller = InvoiceParty(name: "", street: "", postcode: "", city: "")
         return SalesOrder(
             number: nextNumber(),
             buyer: buyer,

@@ -58,10 +58,10 @@ public enum OrderStatus: String, Codable, CaseIterable {
         switch self {
         case .draft: return "Brouillon"
         case .issued: return "Émise"
-        case .sentToSociete: return "Envoyée au client"
-        case .accepted: return "Acceptée par le client"
+        case .sentToSociete: return "Transmise à la société"
+        case .accepted: return "Acceptée par la société"
         case .amended: return "Modifiée"
-        case .rejected: return "Rejetée par le client"
+        case .rejected: return "Rejetée par la société"
         case .cancelled: return "Annulée"
         case .confirmed: return "Confirmée"
         }
@@ -276,15 +276,15 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
             dueDate: Date().addingTimeInterval(30 * 86400),
             currency: currency,
             profile: .en16931,
-            seller: seller,
-            buyer: buyer,
+            seller: buyer,
+            buyer: seller,
             companyID: companyID,
             buyerReference: buyerReference,
             purchaseOrderRef: quotationRef,
             lines: mappedLines,
-            paymentIBAN: seller.iban,
-            paymentBIC: seller.bic,
-            paymentTerms: seller.paymentTerms,
+            paymentIBAN: buyer.iban,
+            paymentBIC: buyer.bic,
+            paymentTerms: buyer.paymentTerms,
             notes: notes,
             billingMode: .m1
         )
@@ -292,17 +292,6 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
             invoice.contractRef = contractRef
         }
         return invoice
-    }
-}
-
-public extension SalesOrder {
-    /// Utilisé uniquement pour migrer des commandes créées avant l'inversion de
-    /// sens de `buyer`/`seller` (`seller` = notre société, comme Devis/Facture,
-    /// depuis cette migration) — jamais en fonctionnement normal.
-    mutating func swapBuyerAndSeller() {
-        let oldBuyer = buyer
-        buyer = seller
-        seller = oldBuyer
     }
 }
 

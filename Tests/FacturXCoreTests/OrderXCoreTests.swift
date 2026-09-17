@@ -12,16 +12,6 @@ final class OrderXCoreTests: XCTestCase {
             currency: "EUR",
             profile: .comfort,
             buyer: InvoiceParty(
-                name: "Société Exemple SAS",
-                street: "8 avenue des Champs",
-                postcode: "75008",
-                city: "Paris",
-                country: "FR",
-                siren: "987654321",
-                endpointID: "987654321",
-                endpointSchemeID: "0225"
-            ),
-            seller: InvoiceParty(
                 name: "Mon Entreprise SARL",
                 street: "12 rue du Commerce",
                 postcode: "75001",
@@ -29,8 +19,18 @@ final class OrderXCoreTests: XCTestCase {
                 country: "FR",
                 vatNumber: "FR12345678901",
                 siren: "123456789",
-                contactEmail: "contact@monentreprise.fr",
+                contactEmail: "achats@monentreprise.fr",
                 endpointID: "123456789",
+                endpointSchemeID: "0225"
+            ),
+            seller: InvoiceParty(
+                name: "Société Exemple SAS",
+                street: "8 avenue des Champs",
+                postcode: "75008",
+                city: "Paris",
+                country: "FR",
+                siren: "987654321",
+                endpointID: "987654321",
                 endpointSchemeID: "0225"
             ),
             buyerReference: "ACHAT-REF-42",
@@ -47,18 +47,6 @@ final class OrderXCoreTests: XCTestCase {
         XCTAssertEqual(order.lineTotal, 2100.00, accuracy: 0.001)
         XCTAssertEqual(order.taxTotal, 420.00, accuracy: 0.001)
         XCTAssertEqual(order.grandTotal, 2520.00, accuracy: 0.001)
-    }
-
-    /// `SalesOrder.seller` = notre société, comme Devis/Facture : la conversion
-    /// ne doit plus permuter les parties (contrairement à avant l'inversion du
-    /// modèle, où `buyer` désignait notre société sur la commande).
-    func testToInvoiceKeepsSellerAndBuyerAsIs() {
-        let order = sampleOrder()
-        let invoice = order.toInvoice(number: "FAC-0001")
-        XCTAssertEqual(invoice.seller.name, order.seller.name)
-        XCTAssertEqual(invoice.buyer.name, order.buyer.name)
-        XCTAssertEqual(invoice.paymentIBAN, order.seller.iban)
-        XCTAssertEqual(invoice.paymentTerms, order.seller.paymentTerms)
     }
 
     func testXMLContainsOrderXURN() throws {
@@ -159,7 +147,7 @@ final class OrderXCoreTests: XCTestCase {
         XCTAssertFalse(v.isValid)
         XCTAssertTrue(v.errors.contains(where: { $0.contains("numéro de commande") }))
         XCTAssertTrue(v.errors.contains(where: { $0.contains("acheteur") }))
-        XCTAssertTrue(v.errors.contains(where: { $0.contains("société émettrice") }))
+        XCTAssertTrue(v.errors.contains(where: { $0.contains("client") }))
         XCTAssertTrue(v.errors.contains(where: { $0.contains("au moins une ligne") }))
     }
 

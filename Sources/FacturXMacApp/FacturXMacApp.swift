@@ -620,7 +620,7 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newOrderRequested)) { _ in
             tab = .orders
-            let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultDraftCompanyID())
+            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultDraftCompanyID())
             orderStore.upsert(draft)
             selectedOrderID = draft.id
         }
@@ -861,7 +861,7 @@ struct OrderToInvoiceSheet: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(order.number).font(.headline)
-                            Text("\(order.buyer.name.isEmpty ? "Sans client" : order.buyer.name)")
+                            Text("\(order.seller.name.isEmpty ? "Sans client" : order.seller.name)")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
                                 .font(.caption2).foregroundStyle(.secondary)
@@ -7116,9 +7116,9 @@ struct OrdersTabView: View {
         guard !q.isEmpty else { return result }
         return result.filter { order in
             order.number.lowercased().contains(q)
-                || order.buyer.name.lowercased().contains(q)
-                || (order.buyer.siren ?? "").lowercased().contains(q)
                 || order.seller.name.lowercased().contains(q)
+                || (order.seller.siren ?? "").lowercased().contains(q)
+                || order.buyer.name.lowercased().contains(q)
         }
     }
 
@@ -7127,7 +7127,7 @@ struct OrdersTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
+                        let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
                         orderStore.upsert(draft)
                         selectedID = draft.id
                     } label: { Label("Nouvelle commande", systemImage: "plus") }
@@ -7176,7 +7176,7 @@ struct OrdersTabView: View {
                         Text("Aucune commande.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle commande") {
-                            let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
+                            let draft = orderStore.newDraft(preferredBuyerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
                             orderStore.upsert(draft)
                             selectedID = draft.id
                         }
@@ -7204,7 +7204,7 @@ struct OrdersTabView: View {
                                             .font(.caption2).foregroundStyle(Color.accentColor)
                                         Spacer()
                                     }
-                                    Text("\(order.buyer.name.isEmpty ? "Sans client" : order.buyer.name)")
+                                    Text("\(order.seller.name.isEmpty ? "Sans client" : order.seller.name)")
                                         .font(.caption).foregroundStyle(.secondary)
                                     Text(String(format: "%.2f %@ TTC", order.grandTotal, order.currency))
                                         .font(.caption2).foregroundStyle(.secondary)
@@ -7652,9 +7652,9 @@ struct OrderEditorView: View {
                 }
                 Spacer()
                 HStack(spacing: 4) {
-                    Text(order.seller.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Société non renseignée" : order.seller.name)
+                    Text(order.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Acheteur non renseigné" : order.buyer.name)
                     Image(systemName: "arrow.right").font(.caption2)
-                    Text(order.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client non renseigné" : order.buyer.name)
+                    Text(order.seller.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client non renseigné" : order.seller.name)
                 }
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -7856,11 +7856,11 @@ struct OrderEditorView: View {
                 }.lockable(fieldLocked)
 
                 HStack(alignment: .top, spacing: 12) {
-                    GroupBox("Société (vous)") {
-                        OrderPartySection(party: $order.seller, role: .seller, locked: fieldLocked)
+                    GroupBox("Acheteur (vous)") {
+                        OrderPartySection(party: $order.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     GroupBox("Client") {
-                        OrderPartySection(party: $order.buyer, role: .buyer, locked: fieldLocked)
+                        OrderPartySection(party: $order.seller, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                 }
 
