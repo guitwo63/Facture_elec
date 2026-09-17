@@ -1550,6 +1550,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
     @State private var exportError: String?
     @State private var exportedURL: URL?
     @State private var duplicatedNumber: String?
@@ -1620,6 +1621,21 @@ struct InvoiceEditorView: View {
         return Set(v.businessRules.filter { $0.severity == .error }.map { $0.ruleId })
     }
 
+    /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
+    /// Appliquer un préréglage recalcule aussi l'échéance (BT-9) à partir de la date de
+    /// facture — l'utilisateur garde toujours la main pour modifier la date ensuite,
+    /// ce calcul ne verrouille jamais le champ.
+    private var paymentTermsPresetIDBinding: Binding<String?> {
+        Binding(
+            get: { paymentTermsStore.matchingPresetID(for: invoice.paymentTerms) },
+            set: { newID in
+                guard let id = newID, let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                invoice.paymentTerms = preset.text
+                invoice.dueDate = preset.dueRule.dueDate(from: invoice.issueDate)
+            }
+        )
+    }
+
     private func fieldHighlight<V: View>(_ view: V, forRuleIDs ids: [String]) -> some View {
         view.overlay(
             RoundedRectangle(cornerRadius: 4)
@@ -1688,6 +1704,16 @@ struct InvoiceEditorView: View {
             .padding(.horizontal, 12).padding(.top, 12)
             HStack(spacing: 6) {
                 Text("Conditions de paiement :").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: paymentTermsPresetIDBinding) {
+                    ForEach(paymentTermsStore.presets) { preset in
+                        Text(preset.label).tag(Optional(preset.id))
+                    }
+                    Text("Personnalisé").tag(String?.none)
+                }
+                .labelsHidden()
+                .frame(width: 170)
+                .disabled(fieldLocked)
+                .help("Applique le texte du préréglage et recalcule l'échéance ci-dessous — celle-ci reste modifiable manuellement ensuite.")
                 TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
                     .textFieldStyle(.plain)
                     .font(.caption)
@@ -2021,6 +2047,11 @@ struct InvoiceEditorView: View {
                                             InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
                                         }
                                         DatePicker("", selection: $invoice.issueDate, displayedComponents: .date).labelsHidden()
+                                            .onChange(of: invoice.issueDate) { newDate in
+                                                guard let id = paymentTermsPresetIDBinding.wrappedValue,
+                                                      let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                                                invoice.dueDate = preset.dueRule.dueDate(from: newDate)
+                                            }
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {

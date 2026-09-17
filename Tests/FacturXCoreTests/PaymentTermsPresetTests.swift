@@ -79,4 +79,60 @@ final class PaymentTermsPresetStoreTests: XCTestCase {
 
         XCTAssertEqual(store.presets.map(\.id), ["comptant", "net30", "finDeMois30", "aReception"])
     }
+
+    func testBuiltInPresetsCarryExpectedDueRules() {
+        let byID = Dictionary(uniqueKeysWithValues: PaymentTermsPresetStore.defaults.map { ($0.id, $0.dueRule) })
+        XCTAssertEqual(byID["comptant"], PaymentTermsDueRule.none)
+        XCTAssertEqual(byID["net30"], .days(30))
+        XCTAssertEqual(byID["finDeMois30"], .endOfMonthPlusDays(30))
+        XCTAssertEqual(byID["aReception"], PaymentTermsDueRule.none)
+    }
+
+    /// Un préréglage persisté avant l'ajout de `dueRule` (ex. par une version antérieure
+    /// de l'app) ne doit pas empêcher le décodage — cf. le pattern de migration sûre
+    /// utilisé partout ailleurs (`decodeIfPresent(...) ?? default`).
+    func testDecodingPresetWithoutDueRuleDefaultsToNone() throws {
+        let legacyJSON = """
+        {"id": "custom", "label": "Ancien", "text": "Paiement à 45 jours"}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(PaymentTermsPreset.self, from: legacyJSON)
+        XCTAssertEqual(decoded.dueRule, .none)
+        XCTAssertEqual(decoded.text, "Paiement à 45 jours")
+    }
+}
+
+final class PaymentTermsDueRuleTests: XCTestCase {
+    private var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Paris")!
+        return cal
+    }
+
+    private func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day))!
+    }
+
+    func testNoneReturnsIssueDateUnchanged() {
+        let issue = date(2026, 3, 15)
+        XCTAssertEqual(PaymentTermsDueRule.none.dueDate(from: issue, calendar: calendar), issue)
+    }
+
+    func testDaysAddsCalendarDays() {
+        let issue = date(2026, 3, 15)
+        let due = PaymentTermsDueRule.days(30).dueDate(from: issue, calendar: calendar)
+        XCTAssertEqual(due, date(2026, 4, 14))
+    }
+
+    func testEndOfMonthPlusDaysUsesLastDayOfIssueMonth() {
+        // Février 2026 (non bissextile) : 28 jours.
+        let issue = date(2026, 2, 5)
+        let due = PaymentTermsDueRule.endOfMonthPlusDays(30).dueDate(from: issue, calendar: calendar)
+        XCTAssertEqual(due, date(2026, 3, 30), "28 fév + 30 jours")
+    }
+
+    func testEndOfMonthPlusDaysHandlesDecemberYearBoundary() {
+        let issue = date(2026, 12, 10)
+        let due = PaymentTermsDueRule.endOfMonthPlusDays(30).dueDate(from: issue, calendar: calendar)
+        XCTAssertEqual(due, date(2027, 1, 30), "31 déc + 30 jours")
+    }
 }

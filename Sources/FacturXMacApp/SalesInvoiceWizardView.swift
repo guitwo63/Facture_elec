@@ -13,6 +13,7 @@ struct SalesInvoiceWizardView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
 
     @State private var step: Step = .company
     @State private var companyID: UUID?
@@ -67,7 +68,19 @@ struct SalesInvoiceWizardView: View {
                       visibleCompanies.contains(where: { $0.id == preferred.id }) {
                 companyID = preferred.id
             }
+            applySuggestedDueDate()
         }
+        .onChange(of: companyID) { _ in applySuggestedDueDate() }
+    }
+
+    /// Si les conditions de paiement de la société émettrice correspondent à un
+    /// préréglage connu, propose l'échéance calculée — l'utilisateur garde la main
+    /// pour la modifier à l'étape récapitulative (DatePicker normal, non verrouillé).
+    private func applySuggestedDueDate() {
+        guard let cid = companyID, let company = visibleCompanies.first(where: { $0.id == cid }) else { return }
+        guard let presetID = paymentTermsStore.matchingPresetID(for: company.party.paymentTerms),
+              let preset = paymentTermsStore.presets.first(where: { $0.id == presetID }) else { return }
+        dueDate = preset.dueRule.dueDate(from: Date())
     }
 
     private var header: some View {

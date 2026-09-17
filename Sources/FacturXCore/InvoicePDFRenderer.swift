@@ -32,7 +32,7 @@ public final class InvoicePDFRenderer {
         let yTop = pageRect.height - margin
         let logoBox: CGRect? = drawLogo(context: context, logo: logo, y: yTop, maxWidth: 160, maxHeight: 60)
         drawHeader(context: context, invoice: invoice, y: yTop, logoBox: logoBox)
-        drawParties(context: context, invoice: invoice, y: yTop - 70)
+        drawParties(context: context, invoice: invoice, y: yTop - 84)
         let tableY = drawLinesTable(context: context, invoice: invoice, y: yTop - 230)
         drawTotals(context: context, invoice: invoice, y: tableY - 20)
         drawFooter(context: context, invoice: invoice)
@@ -83,7 +83,12 @@ public final class InvoicePDFRenderer {
         let dueLine = "Échéance: \(df.string(from: invoice.dueDate))"
         drawText(context: context, text: issueLine, x: pageWidth - margin - 180, y: y - 18, font: font(size: 10), color: .black)
         drawText(context: context, text: dueLine, x: pageWidth - margin - 180, y: y - 34, font: font(size: 10), color: .black)
-        drawText(context: context, text: invoice.type.label, x: pageWidth - margin - 180, y: y - 50, font: font(size: 10), color: .darkGray)
+        var infoY = y - 50
+        if let terms = invoice.paymentTerms?.trimmingCharacters(in: .whitespaces), !terms.isEmpty {
+            drawText(context: context, text: "Conditions: \(terms)", x: pageWidth - margin - 180, y: infoY, font: font(size: 9), color: .darkGray)
+            infoY -= 14
+        }
+        drawText(context: context, text: invoice.type.label, x: pageWidth - margin - 180, y: infoY, font: font(size: 10), color: .darkGray)
     }
 
     private func drawParties(context: CGContext, invoice: Invoice, y: CGFloat) {
@@ -188,9 +193,7 @@ public final class InvoicePDFRenderer {
         if let bic = invoice.paymentBIC {
             drawText(context: context, text: "BIC: \(bic)", x: margin, y: paymentY - 12, font: font(size: 9), color: .darkGray)
         }
-        if let terms = invoice.paymentTerms {
-            drawText(context: context, text: "Conditions: \(terms)", x: margin, y: paymentY - 24, font: font(size: 9), color: .darkGray)
-        }
+        // Conditions de paiement affichées en haut (drawHeader), pas ici, pour rester visibles sans défiler.
         drawText(context: context, text: "Facture électronique Factur-X profil \(invoice.profile.rawValue) — conforme EN 16931",
                  x: margin, y: 40, font: font(size: 8), color: .gray)
     }
