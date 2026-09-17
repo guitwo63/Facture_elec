@@ -1030,6 +1030,7 @@ struct InvoicesTabView: View {
     @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
     @State private var showQuickInvoiceWizard = false
+    @State private var showScanImport = false
     @State private var exportMessage: String?
     @State private var showAdvancedFilters = false
     @State private var advField1: InvoiceFilterField = .none
@@ -1094,6 +1095,11 @@ struct InvoicesTabView: View {
                     } label: { Label("Facture guidée", systemImage: "wand.and.stars") }
                         .buttonStyle(.bordered)
                         .help("Créer une facture en quelques étapes avec le minimum d'informations")
+                    Button {
+                        showScanImport = true
+                    } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
+                        .buttonStyle(.bordered)
+                        .help("Importer la photo/le scan d'un devis signé ou d'un bon de commande client pour pré-remplir une facture")
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
                             Text(f.rawValue).tag(f)
@@ -1276,6 +1282,15 @@ struct InvoicesTabView: View {
                     showQuickInvoiceWizard = false
                 },
                 onCancel: { showQuickInvoiceWizard = false }
+            )
+        }
+        .sheet(isPresented: $showScanImport) {
+            DocumentScanInvoiceImportView(
+                onCreated: { invoiceID in
+                    selectedID = invoiceID
+                    showScanImport = false
+                },
+                onCancel: { showScanImport = false }
             )
         }
         .onChange(of: filteredInvoices) { newList in
