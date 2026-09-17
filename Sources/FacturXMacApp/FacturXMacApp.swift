@@ -1513,6 +1513,8 @@ struct InvoiceEditorView: View {
     @State private var showValidation = false
     @State private var isManuallyLocked = false
     @State private var showUnlockAlert = false
+    @State private var adminConfirmedEdit = false
+    @State private var showAdminEditConfirm = false
     @State private var showPrecedingInvoicePicker = false
     @State private var showMandatoryDetails = false
     @State private var superPDPSubmitting = false
@@ -1537,7 +1539,14 @@ struct InvoiceEditorView: View {
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
     private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
-    private var fieldLocked: Bool { isLocked && !isAdmin }
+    /// Un admin peut modifier une facture verrouillée par son statut (payée,
+    /// acceptée, annulée), mais seulement après confirmation explicite — jamais
+    /// en silence, pour éviter une incohérence comptable accidentelle.
+    private var fieldLocked: Bool {
+        guard isLocked else { return false }
+        if statusLocked { return !(isAdmin && adminConfirmedEdit) }
+        return !isAdmin
+    }
     private var sellerLogo: Data? {
         guard let cid = invoice.companyID else { return nil }
         return PartyDirectory.shared.entries.first(where: { $0.id == cid })?.logoData
@@ -1617,9 +1626,9 @@ struct InvoiceEditorView: View {
                         .foregroundStyle(statusLocked ? Color(hex: invoice.status.hexColor) : .secondary)
                         .padding(.horizontal, 6)
                         .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
-                    if isAdmin {
-                        Text("(admin : modification autorisée)")
-                            .font(.caption2).foregroundStyle(.secondary)
+                    if isAdmin && statusLocked && adminConfirmedEdit {
+                        Label("Modification admin activée", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2.bold()).foregroundStyle(.red)
                     }
                 }
                 Spacer()
@@ -1647,6 +1656,12 @@ struct InvoiceEditorView: View {
                         }
                         .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
                         .help("Repasser en édition (la facture n'est plus protégée)")
+                    } else if statusLocked && isAdmin && !adminConfirmedEdit {
+                        Button { showAdminEditConfirm = true } label: {
+                            Label("Modifier quand même", systemImage: "exclamationmark.triangle")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                        .help("Facture « \(invoice.status.label) » : la modifier peut créer une incohérence comptable ou avec SUPER PDP — confirmation requise")
                     } else if !isLocked && validation?.isValid == true {
                         Button { isManuallyLocked = true } label: {
                             Label("Verrouiller", systemImage: "lock")
@@ -2169,6 +2184,23 @@ struct InvoiceEditorView: View {
             } message: {
                 Text("La facture était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout dépôt PDP.")
             }
+            .alert("Modifier une facture « \(invoice.status.label) » ?", isPresented: $showAdminEditConfirm) {
+                Button("Annuler", role: .cancel) { }
+                Button("Modifier quand même", role: .destructive) {
+                    adminConfirmedEdit = true
+                    store.audit?.record(
+                        actor: auth.currentUser?.username ?? "admin",
+                        action: "invoice_edit_unlocked_by_admin",
+                        target: invoice.number,
+                        details: "statut au moment du déverrouillage : \(invoice.status.label)",
+                        objectType: .invoice,
+                        objectCode: invoice.number
+                    )
+                }
+            } message: {
+                Text("Cette facture a le statut « \(invoice.status.label) ». La modifier peut créer une incohérence comptable ou avec SUPER PDP (facture déjà réglée ou acceptée). Cette action est tracée dans le journal d'audit. Continuer ?")
+            }
+            .onChange(of: invoice.number) { _ in adminConfirmedEdit = false }
             .sheet(isPresented: $showPrecedingInvoicePicker) {
                 InvoicePickerSheet(
                     invoices: linkableInvoices,
