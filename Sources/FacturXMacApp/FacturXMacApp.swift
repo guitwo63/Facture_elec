@@ -517,13 +517,17 @@ struct RootView: View {
             }
             .frame(minWidth: 76)
             .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+            )
+            // Sans ça, la zone transparente (module non sélectionné) n'est pas fiable
+            // au clic — d'où le "il faut 2 clics" : le premier tombait dans une zone
+            // que SwiftUI ne comptait pas comme cliquable faute de contenu opaque.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-        )
     }
 
     private var mainBody: some View {
