@@ -322,6 +322,13 @@ struct TreasuryDashboardView: View {
         sentInvoices.filter { $0.status != .paid && !$0.isOverdue }.reduce(0) { $0 + signedAmount($1) }
     }
 
+    /// Factures au statut « Validée (non envoyée) » : verrouillées côté saisie mais pas
+    /// encore engagées vis-à-vis du client — exclues de `sentInvoices`, donc absentes
+    /// des autres KPI. Utile pour repérer les factures prêtes qui attendent l'envoi.
+    private var validatedNotSent: Double {
+        activeInvoices.filter { $0.status == .issued }.reduce(0) { $0 + signedAmount($1) }
+    }
+
     private var byClient: [ClientBalance] {
         var byName: [String: (outstanding: Double, overdue: Double)] = [:]
         for inv in sentInvoices where inv.status != .paid {
@@ -346,6 +353,7 @@ struct TreasuryDashboardView: View {
                     kpiCard("Encaissé", encaisse, color: .green, icon: "checkmark.circle.fill")
                     kpiCard("En attente", enAttente, color: .orange, icon: "hourglass")
                     kpiCard("En retard", enRetard, color: .red, icon: "exclamationmark.triangle.fill")
+                    kpiCard("Validées, non envoyées", validatedNotSent, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
                 }
                 GroupBox("Par client — montant dû") {
                     if byClient.isEmpty {
