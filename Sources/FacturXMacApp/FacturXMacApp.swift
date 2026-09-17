@@ -131,6 +131,7 @@ struct FacturXMacApp: App {
     @StateObject private var smtpSettings = SMTPSettings.shared
     @StateObject private var twoFactorSettings = TwoFactorSettings.shared
     @StateObject private var pcloudSettings = PCloudSettings.shared
+    @StateObject private var moduleStore = ModuleStore.shared
     @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
@@ -152,6 +153,7 @@ struct FacturXMacApp: App {
                 .environmentObject(smtpSettings)
                 .environmentObject(twoFactorSettings)
                 .environmentObject(pcloudSettings)
+                .environmentObject(moduleStore)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -242,13 +244,17 @@ enum RootTab: String, CaseIterable, Identifiable {
         }
     }
 
-    static func visible(for role: UserRole?) -> [RootTab] {
+    static func visible(for role: UserRole?, modules: ModuleSettings = ModuleStore.shared.settings) -> [RootTab] {
+        var result: [RootTab]
         switch role {
         case .acheteur:
-            return [.orders]
+            result = [.orders]
         default:
-            return allCases
+            result = allCases
         }
+        if !modules.ordersEnabled { result.removeAll { $0 == .orders } }
+        if !modules.quotesEnabled { result.removeAll { $0 == .quotes } }
+        return result
     }
 }
 
@@ -397,6 +403,7 @@ struct RootView: View {
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var twoFactorSettings: TwoFactorSettings
     @EnvironmentObject var pcloudSettings: PCloudSettings
+    @EnvironmentObject var moduleStore: ModuleStore
     @State private var tab: RootTab = .invoices
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
@@ -441,6 +448,7 @@ struct RootView: View {
         smtpSettings.credentials = reloadSMTPCredentials()
         twoFactorSettings.load()
         pcloudSettings.load()
+        moduleStore.load()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
         quoteStore.audit = AuditStore.shared
@@ -496,7 +504,7 @@ struct RootView: View {
             .background(appEnv.isTest ? Color.orange.opacity(0.12) : Color.green.opacity(0.12))
             HStack {
                 Picker("", selection: $tab) {
-                    ForEach(RootTab.visible(for: auth.currentUser?.role)) {
+                    ForEach(RootTab.visible(for: auth.currentUser?.role, modules: moduleStore.settings)) {
                         Label($0.rawValue, systemImage: $0.systemImage).tag($0)
                     }
                 }
@@ -612,7 +620,7 @@ struct RootView: View {
             selectedOrderID = draft.id
         }
         .onAppear {
-            if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur).contains(tab) {
+            if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur, modules: moduleStore.settings).contains(tab) {
                 tab = .orders
             }
             syncAuditActor()
@@ -978,6 +986,7 @@ struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var moduleStore: ModuleStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
@@ -1037,10 +1046,12 @@ struct InvoicesTabView: View {
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Factures").font(.title2.bold())
-                    Button {
-                        showOrderPicker = true
-                    } label: { Label("Depuis une commande", systemImage: "cart") }
-                        .buttonStyle(.bordered)
+                    if moduleStore.settings.ordersEnabled {
+                        Button {
+                            showOrderPicker = true
+                        } label: { Label("Depuis une commande", systemImage: "cart") }
+                            .buttonStyle(.bordered)
+                    }
                     Button {
                         showQuickInvoiceWizard = true
                     } label: { Label("Facture guidée", systemImage: "wand.and.stars") }
@@ -4596,6 +4607,7 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var twoFactorSettings: TwoFactorSettings
+    @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var tagStore: TagStore
@@ -4610,6 +4622,7 @@ struct ApplicationSettingsView: View {
     @State private var pdpSessionMessage: String?
     @State private var pdpSessionChecking = false
     @State private var envExpanded = true
+    @State private var modulesExpanded = false
     @State private var societiesExpanded = false
     @State private var dinumExpanded = false
     @State private var pisteExpanded = false
@@ -4655,6 +4668,20 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("Environnement", systemImage: appEnv.isTest ? "flask" : "checkmark.seal.fill")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $modulesExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Désactive un module optionnel pour toute l'application — l'onglet correspondant disparaît, et les fonctionnalités qui en dépendent ailleurs (ex. créer une facture depuis une commande) se masquent automatiquement. Annuaire et Factures restent toujours actifs.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Devis", isOn: $moduleStore.settings.quotesEnabled)
+                            .onChange(of: moduleStore.settings.quotesEnabled) { _ in moduleStore.save() }
+                        Toggle("Ventes (commandes)", isOn: $moduleStore.settings.ordersEnabled)
+                            .onChange(of: moduleStore.settings.ordersEnabled) { _ in moduleStore.save() }
+                    }.padding(8)
+                } label: {
+                    Label("Modules", systemImage: "square.grid.2x2")
                         .font(.headline)
                 }
 
