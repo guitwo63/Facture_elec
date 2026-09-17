@@ -191,6 +191,21 @@ public struct PCloudService {
         }.sorted { $0.name > $1.name }
     }
 
+    public func delete(fileID: Int, credentials: PCloudCredentials, auth: String) async throws {
+        guard var comps = URLComponents(string: "\(baseURL(credentials))/deletefile") else {
+            throw PCloudError.invalidResponse
+        }
+        comps.queryItems = [
+            URLQueryItem(name: "auth", value: auth),
+            URLQueryItem(name: "fileid", value: String(fileID))
+        ]
+        guard let url = comps.url else { throw PCloudError.invalidResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (data, _) = try await perform(request)
+        try checkResult(try decodeJSON(data))
+    }
+
     public func download(fileID: Int, credentials: PCloudCredentials, auth: String) async throws -> Data {
         guard var comps = URLComponents(string: "\(baseURL(credentials))/getfilelink") else {
             throw PCloudError.invalidResponse

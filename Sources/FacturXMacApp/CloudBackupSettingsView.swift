@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 import FacturXCore
 
 struct CloudBackupSettingsView: View {
     @EnvironmentObject var pcloudSettings: PCloudSettings
+    @EnvironmentObject var backupStrategyStore: BackupStrategyStore
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var quoteStore: QuoteStore
@@ -74,8 +76,33 @@ struct CloudBackupSettingsView: View {
             if let m = backupMessage {
                 Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Stratégie de sauvegarde").font(.subheadline.bold())
+                Stepper(
+                    "Conserver les \(backupStrategyStore.settings.retentionCount) dernières sauvegardes",
+                    value: $backupStrategyStore.settings.retentionCount, in: 1...20
+                )
+                .help("Les sauvegardes plus anciennes sont supprimées automatiquement après chaque nouvelle sauvegarde réussie — sur pCloud et sur la copie locale si configurée.")
+                Toggle("Sauvegarder automatiquement au lancement de l'application", isOn: $backupStrategyStore.settings.autoBackupOnLaunch)
+                    .disabled(!pcloudSettings.credentials.isConfigured)
+                HStack {
+                    Text("Copie locale (emplacement différent, optionnel) :").font(.caption)
+                    Text(backupStrategyStore.settings.localBackupFolderPath ?? "Aucune")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Button("Choisir…") { pickLocalFolder() }.buttonStyle(.bordered).controlSize(.small)
+                    if backupStrategyStore.settings.localBackupFolderPath != nil {
+                        Button("Retirer") {
+                            backupStrategyStore.settings.localBackupFolderPath = nil
+                        }.buttonStyle(.borderless).controlSize(.small)
+                    }
+                }
+            }
         }
         .onChange(of: pcloudSettings.credentials) { _ in pcloudSettings.save() }
+        .onChange(of: backupStrategyStore.settings) { _ in backupStrategyStore.save() }
         .sheet(isPresented: $showRestoreSheet) {
             RestoreBackupSheet(
                 candidates: restoreCandidates,
@@ -107,22 +134,26 @@ struct CloudBackupSettingsView: View {
         backingUp = true
         backupMessage = nil
         let credentials = pcloudSettings.credentials
+        let strategy = backupStrategyStore.settings
         let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
         Task {
             do {
-                let data = try Self.encodeBackup(bundle)
-                let service = PCloudService()
-                let auth = try await service.login(credentials: credentials)
-                let uploaded = try await service.upload(
-                    data: data, filename: BackupBundle.suggestedFilename(),
-                    credentials: credentials, auth: auth
-                )
-                backupMessage = "Sauvegarde envoyée : \(uploaded.name)."
+                backupMessage = try await BackupRunner.run(bundle: bundle, pcloudCredentials: credentials, strategy: strategy)
             } catch {
                 backupMessage = "Échec de la sauvegarde : \(error.localizedDescription)"
             }
             backingUp = false
         }
+    }
+
+    private func pickLocalFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.title = "Choisir un dossier de sauvegarde locale"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        backupStrategyStore.settings.localBackupFolderPath = url.path
     }
 
     private func openRestoreSheet() {
@@ -155,7 +186,7 @@ struct CloudBackupSettingsView: View {
                 let service = PCloudService()
                 let auth = try await service.login(credentials: credentials)
                 let data = try await service.download(fileID: file.fileID, credentials: credentials, auth: auth)
-                let bundle = try Self.decodeBackup(data)
+                let bundle = try BackupService.decode(data)
                 BackupService.restore(bundle, invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
                 restoreMessage = "Restauration terminée : \(bundle.invoices.count) facture(s), \(bundle.orders.count) commande(s), \(bundle.quotes.count) devis, \(bundle.parties.count) tiers."
             } catch {
@@ -165,18 +196,6 @@ struct CloudBackupSettingsView: View {
         }
     }
 
-    private static func encodeBackup(_ bundle: BackupBundle) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(bundle)
-    }
-
-    private static func decodeBackup(_ data: Data) throws -> BackupBundle {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(BackupBundle.self, from: data)
-    }
 }
 
 struct RestoreBackupSheet: View {
