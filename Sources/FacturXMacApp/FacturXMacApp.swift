@@ -987,6 +987,89 @@ struct OrderToInvoiceSheet: View {
     }
 }
 
+/// Miroir de OrderToInvoiceSheet pour les devis : ne liste que les devis déjà
+/// acceptés et pas encore convertis (même règle que le bouton "Convertir en
+/// facture" sur la fiche devis), pour donner un second point d'entrée depuis
+/// l'onglet Factures sans dupliquer la logique métier.
+struct QuoteToInvoiceSheet: View {
+    let quotes: [Quote]
+    let onCreate: (Quote) -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var selectedQuoteID: UUID?
+
+    private var filteredQuotes: [Quote] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return quotes }
+        return quotes.filter { quote in
+            quote.number.lowercased().contains(q)
+                || quote.buyer.name.lowercased().contains(q)
+                || quote.seller.name.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Créer une facture depuis un devis").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, client…)", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filteredQuotes.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text.below.ecg").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucun devis accepté disponible à facturer dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(Array(filteredQuotes.enumerated()), id: \.element.id) { _, quote in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(quote.number).font(.headline)
+                            Text("\(quote.buyer.name.isEmpty ? "Sans client" : quote.buyer.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", quote.grandTotal, quote.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(quote.issueDate, format: .dateTime.day().month().year())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedQuoteID = quote.id }
+                    .background(selectedQuoteID == quote.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Créer la facture") {
+                    if let quote = filteredQuotes.first(where: { $0.id == selectedQuoteID }) {
+                        onCreate(quote)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedQuoteID == nil)
+            }
+            .padding(12)
+        }
+        .frame(width: 520, height: 420)
+    }
+}
+
 struct InvoicePickerSheet: View {
     let invoices: [Invoice]
     let selectedID: UUID?
@@ -1106,12 +1189,14 @@ struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var moduleStore: ModuleStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
     @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
+    @State private var showQuotePicker = false
     @State private var showQuickInvoiceWizard = false
     @State private var showScanImport = false
     @State private var exportMessage: String?
@@ -1172,6 +1257,13 @@ struct InvoicesTabView: View {
                             showOrderPicker = true
                         } label: { Label("Depuis une commande", systemImage: "cart") }
                             .buttonStyle(.bordered)
+                    }
+                    if moduleStore.settings.quotesEnabled {
+                        Button {
+                            showQuotePicker = true
+                        } label: { Label("Depuis un devis", systemImage: "doc.text.below.ecg") }
+                            .buttonStyle(.bordered)
+                            .help("Convertit un devis accepté en facture")
                     }
                     Button {
                         showQuickInvoiceWizard = true
@@ -1358,6 +1450,22 @@ struct InvoicesTabView: View {
                 onCancel: { showOrderPicker = false }
             )
         }
+        .sheet(isPresented: $showQuotePicker) {
+            QuoteToInvoiceSheet(
+                quotes: scopedInvoiceableQuotes,
+                onCreate: { quote in
+                    let number = store.nextNumber(companyID: quote.companyID)
+                    let invoice = quote.toInvoice(number: number)
+                    store.upsert(invoice)
+                    var converted = quote
+                    converted.convertedInvoiceNumber = invoice.number
+                    quoteStore.upsert(converted)
+                    selectedID = invoice.id
+                    showQuotePicker = false
+                },
+                onCancel: { showQuotePicker = false }
+            )
+        }
         .sheet(isPresented: $showQuickInvoiceWizard) {
             SalesInvoiceWizardView(
                 onCreated: { invoiceID in
@@ -1393,6 +1501,20 @@ struct InvoicesTabView: View {
         if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
             result = result.filter { order in
                 if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    /// Devis facturables : acceptés (le client a dit oui) et pas déjà convertis — même
+    /// garde que le bouton "Convertir en facture" sur la fiche devis elle-même, pour que
+    /// cette seconde entrée n'invente pas une règle différente.
+    private var scopedInvoiceableQuotes: [Quote] {
+        var result = quoteStore.quotes.filter { $0.status == .accepted && $0.convertedInvoiceNumber == nil }
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { quote in
+                if let cid = quote.companyID { return scope.contains(cid) }
                 return false
             }
         }
