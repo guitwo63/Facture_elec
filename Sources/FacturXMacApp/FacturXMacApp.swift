@@ -7679,10 +7679,7 @@ struct QuotesTabView: View {
         Binding(
             get: { quoteStore.quotes.first(where: { $0.id == id }) ?? Quote(number: "", seller: InvoiceParty(name: "", street: "", postcode: "", city: ""), buyer: InvoiceParty(name: "", street: "", postcode: "", city: "")) },
             set: { newValue in
-                if let idx = quoteStore.quotes.firstIndex(where: { $0.id == id }) {
-                    quoteStore.quotes[idx] = newValue
-                    quoteStore.save()
-                }
+                quoteStore.upsert(newValue)
             }
         )
     }
@@ -7734,7 +7731,6 @@ struct QuoteEditorView: View {
                         let so = quoteStatusStore.override(for: s)
                         Button {
                             quote.status = s
-                            quoteStore.upsert(quote)
                         } label: {
                             Label(so.label, systemImage: so.systemImage)
                         }
@@ -7747,7 +7743,6 @@ struct QuoteEditorView: View {
                             let invoice = quote.toInvoice(number: number)
                             store.upsert(invoice)
                             quote.convertedInvoiceNumber = invoice.number
-                            quoteStore.upsert(quote)
                             invoiceSelectedID = invoice.id
                             rootTab = .invoices
                         } label: {
@@ -7817,9 +7812,6 @@ struct QuoteEditorView: View {
                 }
             }
             .formStyle(.grouped)
-        }
-        .onChange(of: quote) { newValue in
-            quoteStore.upsert(newValue)
         }
     }
 }
