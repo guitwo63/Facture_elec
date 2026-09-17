@@ -26,9 +26,23 @@ struct DocumentScanImportView: View {
     @State private var date = Date()
     @State private var matchedEntry: DirectoryEntry?
     @State private var companyID: UUID?
+    @State private var extractedLines: [InvoiceLine] = []
+    @State private var extractedTotal: Double?
 
     private var visibleCompanies: [DirectoryEntry] {
         auth.visibleSocieties(for: auth.currentUser)
+    }
+
+    private var extractedLinesTotal: Double {
+        extractedLines.reduce(0) { $0 + $1.lineTotal }
+    }
+
+    private var totalConsistency: Bool? {
+        ScannedDocumentParser.totalMatches(lines: extractedLines, extractedTotal: extractedTotal)
+    }
+
+    private func fmt(_ v: Double) -> String {
+        v.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", v) : String(format: "%.2f", v)
     }
 
     var body: some View {
@@ -115,6 +129,42 @@ struct DocumentScanImportView: View {
                         }
                     }
                 }
+                Section("Lignes détectées (\(extractedLines.count))") {
+                    if extractedLines.isEmpty {
+                        Text("Aucune ligne reconnue automatiquement — une ligne vide sera créée, à compléter dans l'éditeur de commande.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(extractedLines) { line in
+                            HStack {
+                                Text(line.name)
+                                Spacer()
+                                Text("\(fmt(line.quantity)) × \(fmt(line.unitPrice))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(String(format: "%.2f", line.lineTotal))
+                                    .font(.callout.bold()).frame(width: 70, alignment: .trailing)
+                            }
+                        }
+                        HStack {
+                            Text("Total des lignes (HT)").font(.caption.bold())
+                            Spacer()
+                            Text(String(format: "%.2f", extractedLinesTotal)).font(.caption.bold())
+                        }
+                        if let extractedTotal {
+                            switch totalConsistency {
+                            case .some(true):
+                                Label("Cohérent avec le total lu sur le document (\(String(format: "%.2f", extractedTotal)))", systemImage: "checkmark.circle.fill")
+                                    .font(.caption).foregroundStyle(.green)
+                            case .some(false):
+                                Label("Écart avec le total lu sur le document (\(String(format: "%.2f", extractedTotal))) — vérifiez les lignes avant validation", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption).foregroundStyle(.orange)
+                            case .none:
+                                EmptyView()
+                            }
+                        }
+                        Text("Vérifiables et corrigeables dans l'éditeur de commande après création.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Texte reconnu (OCR)") {
                     TextEditor(text: .constant(recognizedText))
                         .font(.system(.caption, design: .monospaced))
@@ -167,6 +217,8 @@ struct DocumentScanImportView: View {
     private func applyHeuristics(to text: String) {
         if let ref = ScannedDocumentParser.extractReference(from: text) { reference = ref }
         if let d = ScannedDocumentParser.extractDate(from: text) { date = d }
+        extractedLines = ScannedDocumentParser.extractLineItems(from: text)
+        extractedTotal = ScannedDocumentParser.extractTotal(from: text)
         if let siren = ScannedDocumentParser.extractSIREN(from: text),
            let entry = directory.entries.first(where: { ($0.party.siren ?? "").filter(\.isNumber) == siren }) {
             matchedEntry = entry
@@ -205,7 +257,7 @@ struct DocumentScanImportView: View {
             issueDate: date,
             buyer: scannedParty,
             seller: ourCompany,
-            lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
+            lines: extractedLines.isEmpty ? [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)] : extractedLines,
             companyID: companyID
         )
         let trimmedRef = reference.trimmingCharacters(in: .whitespaces)
