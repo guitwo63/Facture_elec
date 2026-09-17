@@ -758,6 +758,39 @@ enum InvoiceFilterField: String, CaseIterable, Hashable {
     case type = "Type"
 }
 
+enum OrderFilterField: String, CaseIterable, Hashable {
+    case none = "Aucun"
+    case number = "N° commande"
+    case buyerName = "Client"
+    case buyerSiren = "SIREN client"
+    case buyerVat = "TVA client"
+    case sellerName = "Émetteur"
+    case sellerSiren = "SIREN émetteur"
+    case amountMin = "Montant TTC min"
+    case amountMax = "Montant TTC max"
+    case issueDateFrom = "Émise depuis"
+    case issueDateTo = "Émise jusqu'à"
+    case quotationRef = "Réf. devis"
+    case contractRef = "Réf. contrat"
+    case buyerReference = "Réf. acheteur"
+    case status = "Statut"
+}
+
+enum QuoteFilterField: String, CaseIterable, Hashable {
+    case none = "Aucun"
+    case number = "N° devis"
+    case buyerName = "Client"
+    case buyerSiren = "SIREN client"
+    case buyerVat = "TVA client"
+    case sellerName = "Émetteur"
+    case amountMin = "Montant TTC min"
+    case amountMax = "Montant TTC max"
+    case issueDateFrom = "Émis depuis"
+    case issueDateTo = "Émis jusqu'à"
+    case validUntilFrom = "Valable jusqu'au (depuis)"
+    case status = "Statut"
+}
+
 /// Export direct des documents déjà filtrés dans la liste d'origine : pas de
 /// fenêtre intermédiaire de sélection, juste le choix du format puis
 /// l'emplacement de sauvegarde.
@@ -772,6 +805,13 @@ enum QuickExport {
         case csvList = "Liste (CSV/Excel)"
         case csvLines = "Détail des lignes (CSV/Excel)"
         case electronic = "Fichiers électroniques (Order-X)"
+    }
+
+    /// Pas de format "électronique" : un devis n'est pas un document Factur-X/Order-X,
+    /// juste une liste/CSV.
+    enum QuoteFormat: String, CaseIterable, Hashable {
+        case csvList = "Liste (CSV/Excel)"
+        case csvLines = "Détail des lignes (CSV/Excel)"
     }
 
     static func run(invoices: [Invoice], format: Format) -> String {
@@ -793,6 +833,15 @@ enum QuickExport {
             return saveCSV(ExportGenerator().orderLinesCSV(orders), filename: "commandes-lignes")
         case .electronic:
             return exportElectronicOrders(orders)
+        }
+    }
+
+    static func run(quotes: [Quote], format: QuoteFormat) -> String {
+        switch format {
+        case .csvList:
+            return saveCSV(ExportGenerator().quoteCSV(quotes), filename: "devis")
+        case .csvLines:
+            return saveCSV(ExportGenerator().quoteLinesCSV(quotes), filename: "devis-lignes")
         }
     }
 
@@ -7367,6 +7416,14 @@ struct OrdersTabView: View {
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var showScanImport = false
+    @State private var statusFilter: OrderStatus? = nil
+    @State private var showAdvancedFilters = false
+    @State private var advField1: OrderFilterField = .none
+    @State private var advValue1 = ""
+    @State private var advField2: OrderFilterField = .none
+    @State private var advValue2 = ""
+    @State private var advField3: OrderFilterField = .none
+    @State private var advValue3 = ""
 
     var filteredOrders: [SalesOrder] {
         var result = orderStore.orders
@@ -7376,6 +7433,12 @@ struct OrdersTabView: View {
                 return false
             }
         }
+        if let sf = statusFilter {
+            result = result.filter { $0.status == sf }
+        }
+        result = applyAdvancedFilter(result, field: advField1, value: advValue1)
+        result = applyAdvancedFilter(result, field: advField2, value: advValue2)
+        result = applyAdvancedFilter(result, field: advField3, value: advValue3)
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
         return result.filter { order in
@@ -7384,6 +7447,126 @@ struct OrdersTabView: View {
                 || (order.buyer.siren ?? "").lowercased().contains(q)
                 || order.seller.name.lowercased().contains(q)
         }
+    }
+
+    private func applyAdvancedFilter(_ orders: [SalesOrder], field: OrderFilterField, value: String) -> [SalesOrder] {
+        let raw = value.trimmingCharacters(in: .whitespaces)
+        let v = raw.lowercased()
+        guard field != .none, !v.isEmpty else { return orders }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "fr_FR_POSIX")
+        df.dateFormat = "yyyy-MM-dd"
+        func parseDate(_ s: String) -> Date? {
+            if let d = df.date(from: s) { return d }
+            df.dateFormat = "dd/MM/yyyy"
+            return df.date(from: s)
+        }
+        switch field {
+        case .number:
+            return orders.filter { $0.number.lowercased().contains(v) }
+        case .buyerName:
+            return orders.filter { $0.buyer.name.lowercased().contains(v) }
+        case .buyerSiren:
+            return orders.filter { ($0.buyer.siren ?? "").lowercased().contains(v) }
+        case .buyerVat:
+            return orders.filter { ($0.buyer.vatNumber ?? "").lowercased().contains(v) }
+        case .sellerName:
+            return orders.filter { $0.seller.name.lowercased().contains(v) }
+        case .sellerSiren:
+            return orders.filter { ($0.seller.siren ?? "").lowercased().contains(v) }
+        case .amountMin:
+            if let min = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return orders.filter { $0.grandTotal >= min }
+            }
+            return orders
+        case .amountMax:
+            if let max = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return orders.filter { $0.grandTotal <= max }
+            }
+            return orders
+        case .issueDateFrom:
+            if let d = parseDate(raw) { return orders.filter { $0.issueDate >= d } }
+            return orders
+        case .issueDateTo:
+            if let d = parseDate(raw) { return orders.filter { $0.issueDate <= d } }
+            return orders
+        case .quotationRef:
+            return orders.filter { ($0.quotationRef ?? "").lowercased().contains(v) }
+        case .contractRef:
+            return orders.filter { ($0.contractRef ?? "").lowercased().contains(v) }
+        case .buyerReference:
+            return orders.filter { ($0.buyerReference ?? "").lowercased().contains(v) }
+        case .status:
+            return orders.filter { $0.status.rawValue.lowercased() == v || $0.status.label.lowercased().contains(v) }
+        case .none:
+            return orders
+        }
+    }
+
+    @ViewBuilder
+    private func advancedFilterRow(field: Binding<OrderFilterField>, value: Binding<String>, index: Int) -> some View {
+        let isDate = (field.wrappedValue == .issueDateFrom || field.wrappedValue == .issueDateTo)
+        let isAmount = (field.wrappedValue == .amountMin || field.wrappedValue == .amountMax)
+        HStack(spacing: 8) {
+            Picker("", selection: field) {
+                ForEach(OrderFilterField.allCases, id: \.self) { f in
+                    Text(f.rawValue).tag(f)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+            if isDate {
+                let dateBinding = Binding<Date>(
+                    get: {
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        if let d = df.date(from: value.wrappedValue) { return d }
+                        df.dateFormat = "dd/MM/yyyy"
+                        return df.date(from: value.wrappedValue) ?? Date()
+                    },
+                    set: { newDate in
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        value.wrappedValue = df.string(from: newDate)
+                    }
+                )
+                DatePicker("", selection: dateBinding, displayedComponents: .date)
+                    .labelsHidden()
+                    .frame(width: 130)
+            } else if isAmount {
+                TextField("Valeur", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 130)
+            } else {
+                TextField("Recherche", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+            }
+            if !value.wrappedValue.isEmpty {
+                Button { value.wrappedValue = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var activeAdvancedFilterCount: Int {
+        var n = 0
+        if advField1 != .none && !advValue1.isEmpty { n += 1 }
+        if advField2 != .none && !advValue2.isEmpty { n += 1 }
+        if advField3 != .none && !advValue3.isEmpty { n += 1 }
+        return n
+    }
+
+    private func resetAdvancedFilters() {
+        advField1 = .none; advValue1 = ""
+        advField2 = .none; advValue2 = ""
+        advField3 = .none; advValue3 = ""
     }
 
     var body: some View {
@@ -7402,6 +7585,14 @@ struct OrdersTabView: View {
                         .buttonStyle(.bordered)
                         .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
                     Text("Ventes").font(.title2.bold())
+                    Picker("Statut", selection: $statusFilter) {
+                        Text("Tous statuts").tag(OrderStatus?.none)
+                        ForEach(OrderStatus.allCases, id: \.self) { s in
+                            Label(s.label, systemImage: s.systemImage).tag(OrderStatus?.some(s))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 200)
                     Spacer()
                     Menu {
                         ForEach(QuickExport.OrderFormat.allCases, id: \.self) { f in
@@ -7428,6 +7619,40 @@ struct OrdersTabView: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+                DisclosureGroup(isExpanded: $showAdvancedFilters) {
+                    HStack(alignment: .center, spacing: 12) {
+                        advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
+                        if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
+                        }
+                        if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.caption)
+                        Text("Filtres avancés")
+                            .font(.caption.bold())
+                        Text("(\(activeAdvancedFilterCount))")
+                            .font(.caption.bold())
+                            .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
+                        if activeAdvancedFilterCount > 0 {
+                            Button {
+                                resetAdvancedFilters()
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Réinitialiser les filtres avancés")
+                        }
+                    }
+                }
             }
             .padding(12)
 
@@ -7560,6 +7785,15 @@ struct QuotesTabView: View {
     @Binding var rootTab: RootTab
     @Binding var invoiceSelectedID: UUID?
     @State private var query = ""
+    @State private var exportMessage: String?
+    @State private var statusFilter: QuoteStatus? = nil
+    @State private var showAdvancedFilters = false
+    @State private var advField1: QuoteFilterField = .none
+    @State private var advValue1 = ""
+    @State private var advField2: QuoteFilterField = .none
+    @State private var advValue2 = ""
+    @State private var advField3: QuoteFilterField = .none
+    @State private var advValue3 = ""
 
     var filteredQuotes: [Quote] {
         var result = quoteStore.quotes
@@ -7569,6 +7803,12 @@ struct QuotesTabView: View {
                 return false
             }
         }
+        if let sf = statusFilter {
+            result = result.filter { $0.status == sf }
+        }
+        result = applyAdvancedFilter(result, field: advField1, value: advValue1)
+        result = applyAdvancedFilter(result, field: advField2, value: advValue2)
+        result = applyAdvancedFilter(result, field: advField3, value: advValue3)
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
             result = result.filter { quote in
@@ -7576,6 +7816,121 @@ struct QuotesTabView: View {
             }
         }
         return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private func applyAdvancedFilter(_ quotes: [Quote], field: QuoteFilterField, value: String) -> [Quote] {
+        let raw = value.trimmingCharacters(in: .whitespaces)
+        let v = raw.lowercased()
+        guard field != .none, !v.isEmpty else { return quotes }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "fr_FR_POSIX")
+        df.dateFormat = "yyyy-MM-dd"
+        func parseDate(_ s: String) -> Date? {
+            if let d = df.date(from: s) { return d }
+            df.dateFormat = "dd/MM/yyyy"
+            return df.date(from: s)
+        }
+        switch field {
+        case .number:
+            return quotes.filter { $0.number.lowercased().contains(v) }
+        case .buyerName:
+            return quotes.filter { $0.buyer.name.lowercased().contains(v) }
+        case .buyerSiren:
+            return quotes.filter { ($0.buyer.siren ?? "").lowercased().contains(v) }
+        case .buyerVat:
+            return quotes.filter { ($0.buyer.vatNumber ?? "").lowercased().contains(v) }
+        case .sellerName:
+            return quotes.filter { $0.seller.name.lowercased().contains(v) }
+        case .amountMin:
+            if let min = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return quotes.filter { $0.grandTotal >= min }
+            }
+            return quotes
+        case .amountMax:
+            if let max = Double(v.replacingOccurrences(of: ",", with: ".")) {
+                return quotes.filter { $0.grandTotal <= max }
+            }
+            return quotes
+        case .issueDateFrom:
+            if let d = parseDate(raw) { return quotes.filter { $0.issueDate >= d } }
+            return quotes
+        case .issueDateTo:
+            if let d = parseDate(raw) { return quotes.filter { $0.issueDate <= d } }
+            return quotes
+        case .validUntilFrom:
+            if let d = parseDate(raw) { return quotes.filter { $0.validUntil >= d } }
+            return quotes
+        case .status:
+            return quotes.filter { $0.status.rawValue.lowercased() == v || $0.status.label.lowercased().contains(v) }
+        case .none:
+            return quotes
+        }
+    }
+
+    @ViewBuilder
+    private func advancedFilterRow(field: Binding<QuoteFilterField>, value: Binding<String>, index: Int) -> some View {
+        let isDate = (field.wrappedValue == .issueDateFrom || field.wrappedValue == .issueDateTo || field.wrappedValue == .validUntilFrom)
+        let isAmount = (field.wrappedValue == .amountMin || field.wrappedValue == .amountMax)
+        HStack(spacing: 8) {
+            Picker("", selection: field) {
+                ForEach(QuoteFilterField.allCases, id: \.self) { f in
+                    Text(f.rawValue).tag(f)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+            if isDate {
+                let dateBinding = Binding<Date>(
+                    get: {
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        if let d = df.date(from: value.wrappedValue) { return d }
+                        df.dateFormat = "dd/MM/yyyy"
+                        return df.date(from: value.wrappedValue) ?? Date()
+                    },
+                    set: { newDate in
+                        let df = DateFormatter()
+                        df.locale = Locale(identifier: "fr_FR_POSIX")
+                        df.dateFormat = "yyyy-MM-dd"
+                        value.wrappedValue = df.string(from: newDate)
+                    }
+                )
+                DatePicker("", selection: dateBinding, displayedComponents: .date)
+                    .labelsHidden()
+                    .frame(width: 130)
+            } else if isAmount {
+                TextField("Valeur", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 130)
+            } else {
+                TextField("Recherche", text: value)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+            }
+            if !value.wrappedValue.isEmpty {
+                Button { value.wrappedValue = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var activeAdvancedFilterCount: Int {
+        var n = 0
+        if advField1 != .none && !advValue1.isEmpty { n += 1 }
+        if advField2 != .none && !advValue2.isEmpty { n += 1 }
+        if advField3 != .none && !advValue3.isEmpty { n += 1 }
+        return n
+    }
+
+    private func resetAdvancedFilters() {
+        advField1 = .none; advValue1 = ""
+        advField2 = .none; advValue2 = ""
+        advField3 = .none; advValue3 = ""
     }
 
     private func defaultCompanyID() -> UUID? {
@@ -7602,7 +7957,26 @@ struct QuotesTabView: View {
                     Button { newQuote() } label: { Label("Nouveau devis", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Devis").font(.title2.bold())
+                    Picker("Statut", selection: $statusFilter) {
+                        Text("Tous statuts").tag(QuoteStatus?.none)
+                        ForEach(QuoteStatus.allCases, id: \.self) { s in
+                            Label(s.label, systemImage: s.systemImage).tag(QuoteStatus?.some(s))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 200)
                     Spacer()
+                    Menu {
+                        ForEach(QuickExport.QuoteFormat.allCases, id: \.self) { f in
+                            Button(f.rawValue) { exportMessage = QuickExport.run(quotes: filteredQuotes, format: f) }
+                        }
+                    } label: { Label("Exporter", systemImage: "square.and.arrow.up") }
+                        .buttonStyle(.bordered)
+                        .help("Exporte les devis actuellement filtrés (\(filteredQuotes.count))")
+                }
+                if let m = exportMessage, !m.isEmpty {
+                    Text(m).font(.caption).foregroundStyle(.secondary)
+                        .onChange(of: query) { _ in exportMessage = nil }
                 }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -7616,6 +7990,40 @@ struct QuotesTabView: View {
                     }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
+                DisclosureGroup(isExpanded: $showAdvancedFilters) {
+                    HStack(alignment: .center, spacing: 12) {
+                        advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
+                        if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
+                        }
+                        if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
+                            advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.caption)
+                        Text("Filtres avancés")
+                            .font(.caption.bold())
+                        Text("(\(activeAdvancedFilterCount))")
+                            .font(.caption.bold())
+                            .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
+                        if activeAdvancedFilterCount > 0 {
+                            Button {
+                                resetAdvancedFilters()
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Réinitialiser les filtres avancés")
+                        }
+                    }
+                }
             }
             .padding(12)
 
