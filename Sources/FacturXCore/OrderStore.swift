@@ -143,7 +143,7 @@ public final class OrderStore: ObservableObject {
         }()
         let buyer = InvoiceParty(name: "", street: "", postcode: "", city: "")
         return SalesOrder(
-            number: nextNumber(),
+            number: nextNumber(companyID: companyID),
             buyer: buyer,
             seller: seller,
             lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
@@ -151,7 +151,7 @@ public final class OrderStore: ObservableObject {
         )
     }
 
-    public func nextNumber(prefix: String = "") -> String {
+    private func headKey(prefix: String) -> String {
         let sep = numberUseSeparator ? "-" : ""
         let year = String(Calendar.current.component(.year, from: Date()))
         var built: [String] = []
@@ -164,28 +164,32 @@ public final class OrderStore: ObservableObject {
             built.append(year)
             built.append(sep)
         }
-        let headKey = built.joined()
+        return built.joined()
+    }
+
+    /// Une commande sans `companyID` n'est comptée que dans le chrono sans-société
+    /// (`companyID == nil`), pour ne pas mélanger les périmètres — même règle que
+    /// pour `InvoiceStore.matchesScope`.
+    private func matchesScope(_ order: SalesOrder, companyID: UUID?) -> Bool {
+        if order.companyID == companyID { return true }
+        if order.companyID == nil && companyID == nil { return true }
+        return false
+    }
+
+    /// `companyID` scope désormais le compteur, comme pour les factures et les devis —
+    /// avant, une seule séquence de commandes était partagée par toutes les sociétés,
+    /// ce qui n'avait pas de sens dès qu'un compte gère plusieurs sociétés émettrices.
+    public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
+        let headKey = self.headKey(prefix: prefix)
         let paddedStart = max(1, numberStart)
-        let existing = orders.filter { $0.number.hasPrefix(headKey) }.count
+        let existing = orders.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }.count
         let seq = paddedStart + existing
         let chrono = String(format: "%04d", seq)
         return headKey + chrono
     }
 
-    public func previewNextNumber(prefix: String = "") -> String {
-        let sep = numberUseSeparator ? "-" : ""
-        let year = String(Calendar.current.component(.year, from: Date()))
-        var built: [String] = []
-        let textPrefix = prefix.isEmpty ? (numberPrefix.trimmingCharacters(in: .whitespaces)) : prefix.trimmingCharacters(in: .whitespaces)
-        if !textPrefix.isEmpty {
-            built.append(textPrefix)
-            built.append(sep)
-        }
-        if numberIncludeYear {
-            built.append(year)
-            built.append(sep)
-        }
-        let headKey = built.joined()
+    public func previewNextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
+        let headKey = self.headKey(prefix: prefix)
         let chrono = String(format: "%04d", max(1, numberStart))
         return headKey + chrono
     }

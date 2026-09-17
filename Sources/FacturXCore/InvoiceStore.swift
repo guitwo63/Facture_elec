@@ -1,5 +1,36 @@
 import Foundation
 
+/// Format de numérotation des factures : préfixe/année/séparateur/numéro de
+/// début. Une société sans réglage propre (`InvoiceStore.numberFormatOverrides`)
+/// utilise les 4 propriétés `number*` de `InvoiceStore` comme format par défaut
+/// — ce qui préserve exactement le comportement d'avant l'ajout des réglages
+/// par société (une seule société ⇒ rien ne change).
+public struct InvoiceNumberingFormat: Codable, Hashable {
+    public var prefix: String
+    public var includeYear: Bool
+    public var start: Int
+    public var useSeparator: Bool
+
+    public init(prefix: String = "", includeYear: Bool = true, start: Int = 1, useSeparator: Bool = true) {
+        self.prefix = prefix
+        self.includeYear = includeYear
+        self.start = start
+        self.useSeparator = useSeparator
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case prefix, includeYear, start, useSeparator
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        prefix = try c.decodeIfPresent(String.self, forKey: .prefix) ?? ""
+        includeYear = try c.decodeIfPresent(Bool.self, forKey: .includeYear) ?? true
+        start = try c.decodeIfPresent(Int.self, forKey: .start) ?? 1
+        useSeparator = try c.decodeIfPresent(Bool.self, forKey: .useSeparator) ?? true
+    }
+}
+
 public final class InvoiceStore: ObservableObject {
     public static let shared = InvoiceStore()
 
@@ -10,6 +41,9 @@ public final class InvoiceStore: ObservableObject {
     @Published public var numberIncludeYear: Bool = true
     @Published public var numberStart: Int = 1
     @Published public var numberUseSeparator: Bool = true
+    /// Format de numérotation propre à une société (BT-31-like scoping) : une société absente
+    /// de ce dictionnaire utilise le format par défaut (`number*` ci-dessus).
+    @Published public var numberFormatOverrides: [UUID: InvoiceNumberingFormat] = [:]
     public weak var audit: AuditStore?
     public var actorName: String = "system"
 
@@ -22,6 +56,7 @@ public final class InvoiceStore: ObservableObject {
     private var numYearKey: String { env.key("facturx.number.includeyear.v1") }
     private var numStartKey: String { env.key("facturx.number.start.v1") }
     private var numSepKey: String { env.key("facturx.number.useseparator.v1") }
+    private var numOverridesKey: String { env.key("facturx.number.overrides.bysociety.v1") }
 
     public init() {
         self.invoices = []
@@ -44,6 +79,10 @@ public final class InvoiceStore: ObservableObject {
         numberIncludeYear = defaults.object(forKey: numYearKey) as? Bool ?? true
         numberStart = defaults.object(forKey: numStartKey) as? Int ?? 1
         numberUseSeparator = defaults.object(forKey: numSepKey) as? Bool ?? true
+        if let data = defaults.data(forKey: numOverridesKey),
+           let decoded = try? JSONDecoder().decode([UUID: InvoiceNumberingFormat].self, from: data) {
+            numberFormatOverrides = decoded
+        }
     }
 
     public func save() {
@@ -62,6 +101,16 @@ public final class InvoiceStore: ObservableObject {
         defaults.set(numberIncludeYear, forKey: numYearKey)
         defaults.set(numberStart, forKey: numStartKey)
         defaults.set(numberUseSeparator, forKey: numSepKey)
+        if let data = try? JSONEncoder().encode(numberFormatOverrides) {
+            defaults.set(data, forKey: numOverridesKey)
+        }
+    }
+
+    /// Format effectif pour une société : son réglage propre s'il existe, sinon le
+    /// format par défaut. `companyID == nil` renvoie toujours le format par défaut.
+    public func numberingFormat(for companyID: UUID?) -> InvoiceNumberingFormat {
+        if let cid = companyID, let override = numberFormatOverrides[cid] { return override }
+        return InvoiceNumberingFormat(prefix: numberPrefix, includeYear: numberIncludeYear, start: numberStart, useSeparator: numberUseSeparator)
     }
 
     public func resolveDefaultSeller(from directory: PartyDirectory) -> InvoiceParty? {
@@ -215,16 +264,17 @@ public final class InvoiceStore: ObservableObject {
         return final
     }
 
-    private func headKey(prefix: String) -> String {
-        let sep = numberUseSeparator ? "-" : ""
+    private func headKey(prefix: String, companyID: UUID?) -> String {
+        let format = numberingFormat(for: companyID)
+        let sep = format.useSeparator ? "-" : ""
         let year = String(Calendar.current.component(.year, from: Date()))
         var built: [String] = []
-        let textPrefix = prefix.isEmpty ? (numberPrefix.trimmingCharacters(in: .whitespaces)) : prefix.trimmingCharacters(in: .whitespaces)
+        let textPrefix = prefix.isEmpty ? format.prefix.trimmingCharacters(in: .whitespaces) : prefix.trimmingCharacters(in: .whitespaces)
         if !textPrefix.isEmpty {
             built.append(textPrefix)
             built.append(sep)
         }
-        if numberIncludeYear {
+        if format.includeYear {
             built.append(year)
             built.append(sep)
         }
@@ -241,8 +291,8 @@ public final class InvoiceStore: ObservableObject {
     }
 
     public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
-        let headKey = self.headKey(prefix: prefix)
-        let paddedStart = max(1, numberStart)
+        let headKey = self.headKey(prefix: prefix, companyID: companyID)
+        let paddedStart = max(1, numberingFormat(for: companyID).start)
         let existing = invoices.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }.count
         let seq = paddedStart + existing
         let chrono = String(format: "%04d", seq)
@@ -250,8 +300,8 @@ public final class InvoiceStore: ObservableObject {
     }
 
     public func previewNextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
-        let headKey = self.headKey(prefix: prefix)
-        let chrono = String(format: "%04d", max(1, numberStart))
+        let headKey = self.headKey(prefix: prefix, companyID: companyID)
+        let chrono = String(format: "%04d", max(1, numberingFormat(for: companyID).start))
         return headKey + chrono
     }
 
