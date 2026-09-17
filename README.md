@@ -71,6 +71,17 @@ swift test
 
 Dans Xcode : `Product > Run` (⌘R). L'app ouvre une fenêtre à deux colonnes : liste des factures à gauche, éditeur à droite. Bouton **« Générer le Factur-X »** → boîte de dialogue d'enregistrement → fichier `.pdf` hybride.
 
+## Distribution (.app / .dmg)
+
+```bash
+scripts/package-mac.sh              # build natif (arch de la machine)
+scripts/package-mac.sh --universal  # build universel arm64 + x86_64
+```
+
+Génère `dist/Factur-X.app` et `dist/Factur-X-<version>.dmg`. L'app est signée en local ("ad hoc", gratuit, sans compte Apple Developer) — nécessaire pour qu'elle se lance sur Apple Silicon, mais pas suffisant pour éviter l'avertissement Gatekeeper. Sur un autre Mac, au premier lancement : clic droit sur l'app > **Ouvrir** (sinon Réglages Système > Confidentialité et sécurité > « Ouvrir quand même »).
+
+Pour un `.dmg` qui s'ouvre sans cet avertissement, il faut un compte Apple Developer (99$/an) et signer avec un certificat Developer ID + notariser (`xcrun notarytool`) — non fait ici.
+
 ## Utilisation
 
 1. Renseignez l'émetteur (vous) et le destinataire.
