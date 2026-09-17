@@ -138,6 +138,7 @@ struct FacturXMacApp: App {
     @StateObject private var kindColors = KindColorStore.shared
     @StateObject private var statusStore = OrderStatusStore.shared
     @StateObject private var invoiceStatusStore = InvoiceStatusStore.shared
+    @StateObject private var paymentTermsStore = PaymentTermsPresetStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -160,6 +161,7 @@ struct FacturXMacApp: App {
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
                 .environmentObject(invoiceStatusStore)
+                .environmentObject(paymentTermsStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -5155,6 +5157,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     case invoiceStatuses
     case orderStatuses
     case quoteStatuses
+    case paymentTerms
     case tags
     case kindColors
     case currencies
@@ -5169,6 +5172,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .invoiceStatuses: return "Statuts des factures"
         case .orderStatuses: return "Statuts des commandes"
         case .quoteStatuses: return "Statuts des devis"
+        case .paymentTerms: return "Conditions de paiement"
         case .tags: return "Tags des tiers"
         case .kindColors: return "Couleurs des types de tiers"
         case .currencies: return "Devises"
@@ -5183,6 +5187,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .invoiceStatuses: return "doc.text.fill"
         case .orderStatuses: return "list.bullet.rectangle"
         case .quoteStatuses: return "doc.text.below.ecg"
+        case .paymentTerms: return "banknote"
         case .tags: return "tag"
         case .kindColors: return "paintpalette"
         case .currencies: return "dollarsign.circle"
@@ -5194,7 +5199,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .tags, .kindColors: return true
+        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors: return true
         default: return false
         }
     }
@@ -5206,12 +5211,14 @@ struct ValueTablesView: View {
     @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
+    @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
     @State private var selectedTable: ValueTable = .orderStatuses
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
     @State private var editingInvoiceStatus: InvoiceStatusOverride?
     @State private var editingQuoteStatus: QuoteStatusOverride?
     @State private var editingTag: PartyTag?
+    @State private var editingPaymentTerm: PaymentTermsPreset?
     @State private var editingKind: DirectoryEntryKind?
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
@@ -5259,6 +5266,9 @@ struct ValueTablesView: View {
         }
         .sheet(item: $editingTag) { tag in
             TagEditorSheet(tag: tag) { updated in tagStore.upsert(updated) }
+        }
+        .sheet(item: $editingPaymentTerm) { preset in
+            PaymentTermsPresetEditorSheet(preset: preset) { updated in paymentTermsStore.upsert(updated) }
         }
         .sheet(item: $editingKind) { kind in
             KindColorEditorSheet(kind: kind, hex: kindColors.hexColor(for: kind)) { newHex in
@@ -5312,6 +5322,7 @@ struct ValueTablesView: View {
         case .invoiceStatuses: invoiceStatusesPanel
         case .orderStatuses: orderStatusesPanel
         case .quoteStatuses: quoteStatusesPanel
+        case .paymentTerms: paymentTermsPanel
         case .tags: tagsPanel
         case .kindColors: kindColorsPanel
         case .currencies: refPanel(NormRefs.currencies)
@@ -5564,6 +5575,63 @@ struct ValueTablesView: View {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return statusStore.overrides }
         return statusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    private var filteredPaymentTerms: [PaymentTermsPreset] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return paymentTermsStore.presets }
+        return paymentTermsStore.presets.filter { $0.label.lowercased().contains(q) || $0.text.lowercased().contains(q) }
+    }
+
+    private var paymentTermsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Conditions de paiement").font(.title3.bold())
+                Spacer()
+                Button {
+                    paymentTermsStore.reset()
+                } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
+                    .buttonStyle(.bordered)
+                Button {
+                    let preset = PaymentTermsPreset(label: "Nouveau préréglage", text: "")
+                    paymentTermsStore.append(preset)
+                    editingPaymentTerm = preset
+                } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredPaymentTerms) { preset in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(preset.label).font(.body)
+                                Text(preset.text.isEmpty ? "(texte vide)" : preset.text)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                editingPaymentTerm = preset
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce préréglage")
+                            Button(role: .destructive) {
+                                if let idx = paymentTermsStore.presets.firstIndex(where: { $0.id == preset.id }) {
+                                    paymentTermsStore.remove(at: idx)
+                                }
+                            } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Supprimer ce préréglage")
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+                    }
+                }
+                .padding(12)
+            }
+        }
     }
 
     private var tagsPanel: some View {
@@ -5957,6 +6025,53 @@ struct InvoiceStatusEditorSheet: View {
         }
         .padding()
         .frame(width: 460, height: 460)
+    }
+}
+
+struct PaymentTermsPresetEditorSheet: View {
+    var preset: PaymentTermsPreset
+    let onSave: (PaymentTermsPreset) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var text: String
+
+    init(preset: PaymentTermsPreset, onSave: @escaping (PaymentTermsPreset) -> Void) {
+        self.preset = preset
+        self.onSave = onSave
+        _label = State(initialValue: preset.label)
+        _text = State(initialValue: preset.text)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le préréglage").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé affiché dans le menu", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Texte").frame(width: 100, alignment: .leading)
+                    TextField("Texte inséré dans les conditions de paiement", text: $text).textFieldStyle(.roundedBorder)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    onSave(PaymentTermsPreset(id: preset.id, label: label, text: text))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty || text.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 420, height: 260)
     }
 }
 
@@ -6474,12 +6589,15 @@ struct PartyEditorView: View {
     @State private var dinumLoading = false
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
+    @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
 
-    private var paymentTermsPresetBinding: Binding<PaymentTermsPreset> {
+    /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
+    private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
-            get: { PaymentTermsPreset.matching(party.paymentTerms) },
-            set: { newPreset in
-                if let text = newPreset.text { party.paymentTerms = text }
+            get: { paymentTermsStore.matchingPresetID(for: party.paymentTerms) },
+            set: { newID in
+                guard let id = newID, let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                party.paymentTerms = preset.text
             }
         )
     }
@@ -6750,12 +6868,13 @@ struct PartyEditorView: View {
                         }
                         TextField("BIC", text: Binding($party.bic, replacingNilWith: ""))
                             .textCase(.uppercase)
-                        Picker("Conditions de paiement", selection: paymentTermsPresetBinding) {
-                            ForEach(PaymentTermsPreset.allCases) { preset in
-                                Text(preset.label).tag(preset)
+                        Picker("Conditions de paiement", selection: paymentTermsPresetIDBinding) {
+                            ForEach(paymentTermsStore.presets) { preset in
+                                Text(preset.label).tag(Optional(preset.id))
                             }
+                            Text("Personnalisé").tag(String?.none)
                         }
-                        if paymentTermsPresetBinding.wrappedValue == .personnalise {
+                        if paymentTermsPresetIDBinding.wrappedValue == nil {
                             TextField("Texte libre", text: Binding($party.paymentTerms, replacingNilWith: ""))
                         }
                     }
