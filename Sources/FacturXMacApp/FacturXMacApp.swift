@@ -7458,16 +7458,7 @@ struct QuoteEditorView: View {
 
             Form {
                 Section("Client") {
-                    TextField("Nom", text: $quote.buyer.name).disabled(isLocked)
-                    TextField("Adresse", text: $quote.buyer.street).disabled(isLocked)
-                    HStack {
-                        TextField("Code postal", text: $quote.buyer.postcode).disabled(isLocked)
-                        TextField("Ville", text: $quote.buyer.city).disabled(isLocked)
-                    }
-                    TextField("Email de contact", text: Binding(
-                        get: { quote.buyer.contactEmail ?? "" },
-                        set: { quote.buyer.contactEmail = $0.isEmpty ? nil : $0 }
-                    )).disabled(isLocked)
+                    PartySection(party: $quote.buyer, role: .buyer, locked: isLocked)
                 }
                 Section("Validité") {
                     DatePicker("Valable jusqu'au", selection: $quote.validUntil, displayedComponents: .date)
