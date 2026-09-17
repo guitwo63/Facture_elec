@@ -124,6 +124,7 @@ struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
     @StateObject private var orderStore = OrderStore.shared
     @StateObject private var quoteStore = QuoteStore.shared
+    @StateObject private var quoteStatusStore = QuoteStatusStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
@@ -144,6 +145,7 @@ struct FacturXMacApp: App {
                 .environmentObject(store)
                 .environmentObject(orderStore)
                 .environmentObject(quoteStore)
+                .environmentObject(quoteStatusStore)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
@@ -383,6 +385,7 @@ struct RootView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
@@ -426,6 +429,7 @@ struct RootView: View {
         store.load()
         orderStore.load()
         quoteStore.load()
+        quoteStatusStore.load()
         directory.load()
         tagStore.load()
         kindColors.load()
@@ -5096,6 +5100,7 @@ extension DirectoryEntryKind: Identifiable {
 enum ValueTable: String, CaseIterable, Identifiable {
     case invoiceStatuses
     case orderStatuses
+    case quoteStatuses
     case tags
     case kindColors
     case currencies
@@ -5109,6 +5114,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         switch self {
         case .invoiceStatuses: return "Statuts des factures"
         case .orderStatuses: return "Statuts des commandes"
+        case .quoteStatuses: return "Statuts des devis"
         case .tags: return "Tags des tiers"
         case .kindColors: return "Couleurs des types de tiers"
         case .currencies: return "Devises"
@@ -5122,6 +5128,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         switch self {
         case .invoiceStatuses: return "doc.text.fill"
         case .orderStatuses: return "list.bullet.rectangle"
+        case .quoteStatuses: return "doc.text.below.ecg"
         case .tags: return "tag"
         case .kindColors: return "paintpalette"
         case .currencies: return "dollarsign.circle"
@@ -5133,7 +5140,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .tags, .kindColors: return true
+        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .tags, .kindColors: return true
         default: return false
         }
     }
@@ -5142,12 +5149,14 @@ enum ValueTable: String, CaseIterable, Identifiable {
 struct ValueTablesView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @State private var selectedTable: ValueTable = .orderStatuses
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
     @State private var editingInvoiceStatus: InvoiceStatusOverride?
+    @State private var editingQuoteStatus: QuoteStatusOverride?
     @State private var editingTag: PartyTag?
     @State private var editingKind: DirectoryEntryKind?
     @State private var newTagName = ""
@@ -5183,6 +5192,14 @@ struct ValueTablesView: View {
                 if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     invoiceStatusStore.overrides[i] = updated
                     invoiceStatusStore.save()
+                }
+            }
+        }
+        .sheet(item: $editingQuoteStatus) { override in
+            QuoteStatusEditorSheet(override: override) { updated in
+                if let i = quoteStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    quoteStatusStore.overrides[i] = updated
+                    quoteStatusStore.save()
                 }
             }
         }
@@ -5240,6 +5257,7 @@ struct ValueTablesView: View {
         switch selectedTable {
         case .invoiceStatuses: invoiceStatusesPanel
         case .orderStatuses: orderStatusesPanel
+        case .quoteStatuses: quoteStatusesPanel
         case .tags: tagsPanel
         case .kindColors: kindColorsPanel
         case .currencies: refPanel(NormRefs.currencies)
@@ -5424,6 +5442,68 @@ struct ValueTablesView: View {
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    /// Contrairement aux commandes/factures, un devis n'a pas de statuts imposés
+    /// par un tiers externe : pas de bouton « nouvelle valeur » ni de suppression,
+    /// seuls les 5 statuts standard existent et restent tous éditables.
+    private var quoteStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des devis").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredQuoteStatuses) { override in
+                        quoteStatusRow(override)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func quoteStatusRow(_ override: QuoteStatusOverride) -> some View {
+        let transitionLabels: [String] = override.transitionCodes.compactMap { code in
+            quoteStatusStore.overrides.first { $0.id == code }?.label
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: override.systemImage)
+                    .frame(width: 22)
+                    .foregroundStyle(Color(hex: override.hexColor))
+                Text(override.label).font(.body)
+                Spacer()
+                Button {
+                    editingQuoteStatus = override
+                } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Modifier ce statut")
+            }
+            if !transitionLabels.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Transitions : " + transitionLabels.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    private var filteredQuoteStatuses: [QuoteStatusOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return quoteStatusStore.overrides }
+        return quoteStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
 
     private var filteredStatuses: [OrderStatusOverride] {
@@ -5636,6 +5716,93 @@ struct OrderStatusEditorSheet: View {
                 Button("Enregistrer") {
                     let ordered = statusStore.overrides.map { $0.id }.filter { transitionCodes.contains($0) }
                     onSave(OrderStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, transitionCodes: ordered))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding()
+        .frame(width: 460, height: 460)
+    }
+}
+
+struct QuoteStatusEditorSheet: View {
+    var override: QuoteStatusOverride
+    let onSave: (QuoteStatusOverride) -> Void
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var systemImage: String
+    @State private var hexColor: String
+    @State private var transitionCodes: Set<String>
+
+    private var possibleTargets: [QuoteStatusOverride] {
+        quoteStatusStore.overrides.filter { $0.id != override.id }
+    }
+
+    init(override: QuoteStatusOverride, onSave: @escaping (QuoteStatusOverride) -> Void) {
+        self.override = override
+        self.onSave = onSave
+        _label = State(initialValue: override.label)
+        _systemImage = State(initialValue: override.systemImage)
+        _hexColor = State(initialValue: override.hexColor)
+        _transitionCodes = State(initialValue: Set(override.transitionCodes))
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le statut").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Icône SF").frame(width: 100, alignment: .leading)
+                    TextField("Icône SF", text: $systemImage).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            if !possibleTargets.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transitions autorisées vers…").font(.subheadline.bold())
+                    Text("Statuts accessibles depuis « \(label) » via les boutons d'action du devis.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(possibleTargets) { target in
+                                Toggle(isOn: Binding(
+                                    get: { transitionCodes.contains(target.id) },
+                                    set: { isOn in
+                                        if isOn { transitionCodes.insert(target.id) }
+                                        else { transitionCodes.remove(target.id) }
+                                    }
+                                )) {
+                                    Label(target.label, systemImage: target.systemImage)
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 140)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    let ordered = quoteStatusStore.overrides.map { $0.id }.filter { transitionCodes.contains($0) }
+                    onSave(QuoteStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, transitionCodes: ordered))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -7051,6 +7218,7 @@ struct OrdersTabView: View {
 
 struct QuotesTabView: View {
     @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
@@ -7140,11 +7308,12 @@ struct QuotesTabView: View {
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     HStack(spacing: 6) {
-                                        Image(systemName: quote.status.systemImage)
-                                            .foregroundColor(Color(hex: quote.status.hexColor))
+                                        let qs = quoteStatusStore.override(for: quote.status)
+                                        Image(systemName: qs.systemImage)
+                                            .foregroundColor(Color(hex: qs.hexColor))
                                             .font(.caption2)
-                                        Text(quote.status.label).font(.caption2)
-                                            .foregroundColor(Color(hex: quote.status.hexColor))
+                                        Text(qs.label).font(.caption2)
+                                            .foregroundColor(Color(hex: qs.hexColor))
                                         if quote.isExpiredByDate {
                                             Label("Validité dépassée", systemImage: "exclamationmark.triangle.fill")
                                                 .font(.caption2).foregroundStyle(.orange)
@@ -7212,6 +7381,7 @@ struct QuoteEditorView: View {
     @Binding var rootTab: RootTab
     @Binding var invoiceSelectedID: UUID?
     @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var store: InvoiceStore
 
     private var isLocked: Bool { quote.status.locksQuote }
@@ -7222,14 +7392,15 @@ struct QuoteEditorView: View {
                 Text(quote.number).font(.title2.bold())
                 Text(quote.issueDate, format: .dateTime.day().month().year())
                     .font(.callout).foregroundStyle(.secondary)
+                let currentStatus = quoteStatusStore.override(for: quote.status)
                 HStack(spacing: 4) {
-                    Image(systemName: quote.status.systemImage)
-                    Text(quote.status.label)
+                    Image(systemName: currentStatus.systemImage)
+                    Text(currentStatus.label)
                 }
                 .font(.caption.bold())
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Capsule().fill(Color(hex: quote.status.hexColor)))
+                .background(Capsule().fill(Color(hex: currentStatus.hexColor)))
                 if quote.isExpiredByDate {
                     Label("Validité dépassée", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.bold())
@@ -7247,15 +7418,16 @@ struct QuoteEditorView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
-                    ForEach(quote.status.allowedTransitions(), id: \.self) { s in
+                    ForEach(quoteStatusStore.allowedTransitions(from: quote.status), id: \.self) { s in
+                        let so = quoteStatusStore.override(for: s)
                         Button {
                             quote.status = s
                             quoteStore.upsert(quote)
                         } label: {
-                            Label(s.label, systemImage: s.systemImage)
+                            Label(so.label, systemImage: so.systemImage)
                         }
-                        .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: s.hexColor)))
-                        .help("Passer au statut « \(s.label) »")
+                        .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: so.hexColor)))
+                        .help("Passer au statut « \(so.label) »")
                     }
                     if quote.status == .accepted {
                         Button {
