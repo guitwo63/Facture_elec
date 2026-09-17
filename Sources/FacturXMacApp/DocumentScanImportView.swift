@@ -253,7 +253,7 @@ struct DocumentScanImportView: View {
             ?? auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID)?.party
             ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         var order = SalesOrder(
-            number: orderStore.nextNumber(),
+            number: orderStore.nextNumber(companyID: companyID),
             issueDate: date,
             buyer: scannedParty,
             seller: ourCompany,

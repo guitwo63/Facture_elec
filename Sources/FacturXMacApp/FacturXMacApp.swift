@@ -4723,6 +4723,7 @@ struct ApplicationSettingsView: View {
     @State private var smtpTesting = false
     @State private var tagsExpanded = false
     @State private var numberingExpanded = false
+    @State private var numberingCompanyID: UUID?
     @State private var editingSociety: DirectoryEntry?
     @State private var creatingSociety = false
     @State private var newTagName = ""
@@ -5135,38 +5136,57 @@ struct ApplicationSettingsView: View {
 
                 DisclosureGroup(isExpanded: $numberingExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini. Le compteur est indépendant par société émettrice.")
+                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini. Le compteur est toujours indépendant par société émettrice ; le format (préfixe, année, séparateur) peut l'être aussi si une société a besoin d'une numérotation différente — sinon toutes les sociétés partagent le format par défaut.")
                             .font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            Text("Préfixe texte").font(.caption)
-                            TextField("ex. FAC", text: $store.numberPrefix)
-                                .frame(width: 140)
-                        }
-                        Toggle("Inclure l'année", isOn: $store.numberIncludeYear)
-                        HStack {
-                            Text("Numéro de début").font(.caption)
-                            Stepper(value: $store.numberStart, in: 1...999999) {
-                                Text("\(store.numberStart)")
+                        let societies = auth.visibleSocieties(for: auth.currentUser)
+                        if !societies.isEmpty {
+                            Picker("Société", selection: $numberingCompanyID) {
+                                Text("Toutes (format par défaut)").tag(UUID?.none)
+                                ForEach(societies) { c in
+                                    Text(c.displayName).tag(UUID?.some(c.id))
+                                }
+                            }
+                            if let cid = numberingCompanyID {
+                                if store.numberFormatOverrides[cid] == nil {
+                                    HStack(spacing: 6) {
+                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                        Button("Personnaliser pour cette société") {
+                                            store.numberFormatOverrides[cid] = store.numberingFormat(for: nil)
+                                            store.save()
+                                        }.buttonStyle(.link).font(.caption2)
+                                    }
+                                } else {
+                                    Button("Revenir au format par défaut", role: .destructive) {
+                                        store.numberFormatOverrides.removeValue(forKey: cid)
+                                        store.save()
+                                    }.buttonStyle(.link).font(.caption2)
+                                }
                             }
                         }
-                        Toggle("Séparer par un \"-\"", isOn: $store.numberUseSeparator)
+                        HStack {
+                            Text("Préfixe texte").font(.caption)
+                            TextField("ex. FAC", text: activeNumberingFormatBinding.prefix)
+                                .frame(width: 140)
+                        }
+                        Toggle("Inclure l'année", isOn: activeNumberingFormatBinding.includeYear)
+                        HStack {
+                            Text("Numéro de début").font(.caption)
+                            Stepper(value: activeNumberingFormatBinding.start, in: 1...999999) {
+                                Text("\(activeNumberingFormatBinding.wrappedValue.start)")
+                            }
+                        }
+                        Toggle("Séparer par un \"-\"", isOn: activeNumberingFormatBinding.useSeparator)
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                            Text(store.previewNextNumber(companyID: previewCompanyID())).monospaced().font(.caption.bold())
+                            Text(store.previewNextNumber(companyID: numberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
                             Spacer()
-                            Button("Appliquer") { store.save() }
-                                .buttonStyle(.borderedProminent)
                         }
                     }.padding(8)
                 } label: {
                     Label("Numérotation des factures", systemImage: "number")
                         .font(.headline)
                 }
-                .onChange(of: store.numberPrefix) { _ in store.save() }
-                .onChange(of: store.numberIncludeYear) { _ in store.save() }
-                .onChange(of: store.numberStart) { _ in store.save() }
-                .onChange(of: store.numberUseSeparator) { _ in store.save() }
 
                 Divider()
                 HStack {
@@ -5205,6 +5225,29 @@ struct ApplicationSettingsView: View {
         let visible = auth.visibleSocieties(for: auth.currentUser)
         if visible.count == 1 { return visible.first?.id }
         return nil
+    }
+
+    /// Le format en cours d'édition : celui de la société sélectionnée (créé à la volée à
+    /// partir du défaut si elle n'a pas encore de réglage propre), ou le format par défaut
+    /// si "Toutes" est sélectionné. Écrire dedans met à jour la bonne cible chez `store`.
+    private var activeNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
+        Binding(
+            get: {
+                guard let cid = numberingCompanyID else { return store.numberingFormat(for: nil) }
+                return store.numberFormatOverrides[cid] ?? store.numberingFormat(for: nil)
+            },
+            set: { newValue in
+                if let cid = numberingCompanyID {
+                    store.numberFormatOverrides[cid] = newValue
+                } else {
+                    store.numberPrefix = newValue.prefix
+                    store.numberIncludeYear = newValue.includeYear
+                    store.numberStart = newValue.start
+                    store.numberUseSeparator = newValue.useSeparator
+                }
+                store.save()
+            }
+        )
     }
 }
 
