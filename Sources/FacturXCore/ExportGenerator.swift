@@ -71,7 +71,7 @@ public struct ExportGenerator {
         rows.append([
             "Numéro", "Type", "Statut", "Date", "Livraison souhaitée", "Devise",
             "Acheteur (nom)", "Acheteur (SIREN)", "Acheteur (TVA)",
-            "Client (nom)", "Client (SIREN)", "Client (TVA)",
+            "Société émettrice (nom)", "Société émettrice (SIREN)", "Société émettrice (TVA)",
             "Réf. devis", "Réf. contrat", "Réf. commande cadre",
             "Réf. acheteur", "Total HT", "Total TVA", "Total TTC", "Notes"
         ])
@@ -143,7 +143,7 @@ public struct ExportGenerator {
                     csv(order.number),
                     csv(order.type.label),
                     csv(df.string(from: order.issueDate)),
-                    csv(order.seller.name),
+                    csv(order.buyer.name),
                     csv(line.name),
                     String(format: "%g", line.quantity),
                     csv(line.unit),

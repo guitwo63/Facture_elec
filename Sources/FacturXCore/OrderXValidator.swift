@@ -24,15 +24,15 @@ public struct OrderXValidator {
         }
 
         if order.seller.name.trimmingCharacters(in: .whitespaces).isEmpty {
-            errors.append("Le nom du client est obligatoire.")
+            errors.append("Le nom de la société émettrice est obligatoire.")
         }
         if order.seller.country.trimmingCharacters(in: .whitespaces).isEmpty {
-            errors.append("Le pays du client est obligatoire (code ISO à 2 lettres, ex. FR).")
+            errors.append("Le pays de la société émettrice est obligatoire (code ISO à 2 lettres, ex. FR).")
         }
         let sellerHasEndpoint = (order.seller.endpointID?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         let sellerHasSiren = (order.seller.siren?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         if !sellerHasEndpoint && !sellerHasSiren {
-            errors.append("Le client doit avoir un SIREN ou un identifiant électronique.")
+            errors.append("La société émettrice doit avoir un SIREN ou un identifiant électronique.")
         }
 
         if order.lines.isEmpty {
