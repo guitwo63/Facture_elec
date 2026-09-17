@@ -616,6 +616,16 @@ public struct Invoice: Codable, Hashable, Identifiable {
         (grandTotal - prepaidAmount).rounded(toPlaces: 2)
     }
 
+    /// Aucun champ dédié : l'échéance est simplement dépassée et la facture non réglée.
+    public var isOverdue: Bool {
+        status != .paid && status != .cancelled && dueDate < Date()
+    }
+
+    public var overdueDays: Int {
+        guard isOverdue else { return 0 }
+        return Calendar.current.dateComponents([.day], from: dueDate, to: Date()).day ?? 0
+    }
+
     public var lineTotal: Double {
         lines.reduce(0) { $0 + $1.lineTotal }.rounded(toPlaces: 2)
     }

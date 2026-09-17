@@ -1,4 +1,7 @@
 import SwiftUI
+import AppKit
+import CoreImage
+import UniformTypeIdentifiers
 import FacturXCore
 
 private struct EnvironmentModeButton: View {
@@ -43,6 +46,10 @@ struct LoginView: View {
     @State private var newPassword = ""
     @State private var newPasswordConfirm = ""
     @State private var newPasswordError: String?
+    @State private var pendingTwoFactorUserID: UUID?
+    @State private var twoFactorCode = ""
+    @State private var twoFactorError: String?
+    @State private var twoFactorAttempting = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -152,6 +159,63 @@ struct LoginView: View {
                 }
             }.padding(40)
         }
+        .sheet(isPresented: Binding(
+            get: { pendingTwoFactorUserID != nil },
+            set: { if !$0 { pendingTwoFactorUserID = nil } }
+        )) {
+            VStack(spacing: 16) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 36)).foregroundStyle(Color.accentColor)
+                Text("Double authentification").font(.title3.bold())
+                Text("Entrez le code à 6 chiffres de votre application d'authentification, ou un de vos codes de récupération.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 280)
+                TextField("Code", text: $twoFactorCode)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+                    .multilineTextAlignment(.center)
+                    .submitLabel(.go)
+                    .onSubmit { completeTwoFactor() }
+                if let err = twoFactorError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+                HStack {
+                    Button("Annuler") {
+                        pendingTwoFactorUserID = nil
+                        twoFactorCode = ""
+                        twoFactorError = nil
+                    }.keyboardShortcut(.cancelAction)
+                    Button {
+                        completeTwoFactor()
+                    } label: {
+                        HStack {
+                            if twoFactorAttempting { ProgressView().controlSize(.small) }
+                            Text("Valider")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(twoFactorCode.trimmingCharacters(in: .whitespaces).isEmpty || twoFactorAttempting)
+                }
+            }.padding(30).frame(width: 320)
+        }
+    }
+
+    private func completeTwoFactor() {
+        guard let userID = pendingTwoFactorUserID else { return }
+        twoFactorAttempting = true
+        twoFactorError = nil
+        do {
+            let user = try auth.completeTwoFactorLogin(userID: userID, code: twoFactorCode)
+            pendingTwoFactorUserID = nil
+            twoFactorCode = ""
+            if user.mustChangePassword && !auth.testBypassSecurity {
+                mustChangePasswordUser = user
+            }
+        } catch {
+            twoFactorError = error.localizedDescription
+        }
+        twoFactorAttempting = false
     }
 
     private func attemptLogin() {
@@ -162,6 +226,10 @@ struct LoginView: View {
             if user.mustChangePassword && !auth.testBypassSecurity {
                 mustChangePasswordUser = user
             }
+        } catch AuthError.twoFactorRequired(let userID) {
+            pendingTwoFactorUserID = userID
+            twoFactorCode = ""
+            twoFactorError = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -482,6 +550,20 @@ struct UserDetailCard: View {
                         Text("Les mots de passe ne correspondent pas.").font(.caption).foregroundStyle(.red)
                     }
                 }
+                if user.totpEnabled {
+                    Divider()
+                    Text("Double authentification").font(.headline)
+                    HStack {
+                        Label("Activée sur ce compte", systemImage: "checkmark.shield.fill")
+                            .font(.caption).foregroundStyle(.green)
+                        Spacer()
+                        Button(role: .destructive) {
+                            auth.disableTwoFactor(for: user, actor: auth.currentUser?.username ?? "admin")
+                        } label: { Label("Désactiver (perte d'accès)", systemImage: "shield.slash") }
+                            .buttonStyle(.bordered)
+                            .help("Chemin de secours si l'utilisateur a perdu l'accès à son application d'authentification")
+                    }
+                }
             }
             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -664,11 +746,15 @@ struct ProfileSettingsView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var twoFactorSettings: TwoFactorSettings
     @State private var newPw = ""
     @State private var confirmPw = ""
     @State private var saved = false
     @State private var error: String?
     @State private var showSellerPicker = false
+    @State private var showTwoFactorEnrollment = false
+    @State private var recoveryCodesToShow: [String]?
+    @State private var confirmDisableTwoFactor = false
 
     var body: some View {
         ScrollView {
@@ -775,6 +861,51 @@ struct ProfileSettingsView: View {
                             }
                         }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    if twoFactorSettings.enabledSolutionWide {
+                        GroupBox {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Double authentification (2FA)").font(.headline)
+                                if user.totpEnabled {
+                                    Label("Activée sur ce compte", systemImage: "checkmark.shield.fill")
+                                        .font(.caption).foregroundStyle(.green)
+                                    Button(role: .destructive) {
+                                        confirmDisableTwoFactor = true
+                                    } label: { Label("Désactiver", systemImage: "shield.slash") }
+                                        .buttonStyle(.bordered)
+                                } else {
+                                    Text("Protège votre compte avec un code à 6 chiffres généré par une application d'authentification (Google Authenticator, Authy…), en plus de votre mot de passe.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Button {
+                                        showTwoFactorEnrollment = true
+                                    } label: { Label("Activer la 2FA", systemImage: "lock.shield") }
+                                        .buttonStyle(.bordered)
+                                }
+                            }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .alert("Désactiver la double authentification ?", isPresented: $confirmDisableTwoFactor) {
+                            Button("Annuler", role: .cancel) { }
+                            Button("Désactiver", role: .destructive) {
+                                auth.disableTwoFactor(for: user, actor: user.username)
+                            }
+                        } message: {
+                            Text("Vous devrez la reconfigurer entièrement (nouveau QR code, nouveaux codes de récupération) si vous voulez la réactiver.")
+                        }
+                        .sheet(isPresented: $showTwoFactorEnrollment) {
+                            TwoFactorEnrollmentSheet(user: user) { codes in
+                                showTwoFactorEnrollment = false
+                                recoveryCodesToShow = codes
+                            }
+                        }
+                        .sheet(isPresented: Binding(
+                            get: { recoveryCodesToShow != nil },
+                            set: { if !$0 { recoveryCodesToShow = nil } }
+                        )) {
+                            if let codes = recoveryCodesToShow {
+                                RecoveryCodesSheet(codes: codes) { recoveryCodesToShow = nil }
+                            }
+                        }
+                    }
                 } else {
                     Text("Aucun utilisateur connecté.").foregroundStyle(.secondary)
                 }
@@ -797,6 +928,111 @@ struct ProfileSettingsView: View {
     }
 }
 
+enum QRCodeRenderer {
+    static func image(for string: String, scale: CGFloat = 8) -> NSImage? {
+        guard !string.isEmpty, let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(string.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let rep = NSCIImageRep(ciImage: scaled)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+        return image
+    }
+}
+
+struct TwoFactorEnrollmentSheet: View {
+    let user: User
+    var onEnrolled: ([String]) -> Void
+    @EnvironmentObject var auth: AuthStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var secret = ""
+    @State private var provisioningURI = ""
+    @State private var code = ""
+    @State private var error: String?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Activer la double authentification").font(.title3.bold())
+            Text("Scannez ce QR code avec votre application d'authentification (Google Authenticator, Authy…), ou saisissez la clé manuellement, puis entrez le code affiché pour confirmer.")
+                .font(.caption).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+            if let qr = QRCodeRenderer.image(for: provisioningURI) {
+                Image(nsImage: qr)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: 180, height: 180)
+            }
+            VStack(spacing: 4) {
+                Text("Clé manuelle").font(.caption.bold())
+                Text(secret)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+            TextField("Code à 6 chiffres", text: $code)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 160)
+                .multilineTextAlignment(.center)
+                .onSubmit { confirm() }
+            if let error {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Button("Annuler") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Activer") { confirm() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(code.trimmingCharacters(in: .whitespaces).count != 6)
+            }
+        }
+        .padding(30)
+        .frame(width: 360)
+        .onAppear {
+            let enrollment = auth.beginEnrollTwoFactor(for: user)
+            secret = enrollment.secret
+            provisioningURI = enrollment.provisioningURI
+        }
+    }
+
+    private func confirm() {
+        error = nil
+        do {
+            let codes = try auth.confirmEnrollTwoFactor(for: user, secret: secret, code: code)
+            onEnrolled(codes)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+struct RecoveryCodesSheet: View {
+    let codes: [String]
+    var onDone: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Codes de récupération").font(.title3.bold())
+            Text("Conservez ces codes en lieu sûr (gestionnaire de mots de passe, coffre-fort…). Chacun ne peut être utilisé qu'une seule fois pour vous connecter si vous perdez l'accès à votre application d'authentification. Ils ne seront plus jamais affichés après fermeture de cette fenêtre.")
+                .font(.caption).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                ForEach(codes, id: \.self) { code in
+                    Text(code)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+            Button("J'ai noté mes codes") { onDone() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(30)
+        .frame(width: 340)
+    }
+}
+
 struct DataAdminView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var orderStore: OrderStore
@@ -808,6 +1044,7 @@ struct DataAdminView: View {
         case invoices = "Factures"
         case orders = "Commandes"
         case parties = "Tiers"
+        case portability = "Export / Import"
         var id: String { rawValue }
     }
 
@@ -831,6 +1068,7 @@ struct DataAdminView: View {
                     case .invoices: DataInvoicesPanel()
                     case .orders: DataOrdersPanel()
                     case .parties: DataPartiesPanel()
+                    case .portability: DataPortabilityPanel()
                     }
                 }
                 .frame(minWidth: 360)
@@ -1046,6 +1284,177 @@ struct DataPartiesPanel: View {
                 }
                 .padding(10)
             }
+        }
+    }
+}
+
+struct DataPortabilityPanel: View {
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var orderStatusStore: OrderStatusStore
+    @EnvironmentObject var tagStore: TagStore
+    @EnvironmentObject var kindColorStore: KindColorStore
+    @State private var message: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Export / Import par module (JSON)").font(.headline)
+                    Text("Contrairement aux exports CSV (pensés pour un tableur), ce format structuré conserve toutes les données — lignes, statuts, champs optionnels — et permet donc un import fidèle, pas seulement une extraction pour lecture externe.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                moduleRow(title: "Factures", count: store.invoices.count,
+                          onExport: { exportJSON(store.invoices, suggestedName: "factures.json") },
+                          onImport: importInvoices)
+                moduleRow(title: "Commandes", count: orderStore.orders.count,
+                          onExport: { exportJSON(orderStore.orders, suggestedName: "commandes.json") },
+                          onImport: importOrders)
+                moduleRow(title: "Tiers (annuaire)", count: directory.entries.count,
+                          onExport: { exportJSON(directory.entries, suggestedName: "annuaire.json") },
+                          onImport: importParties)
+                moduleRow(title: "Devis", count: quoteStore.quotes.count,
+                          onExport: { exportJSON(quoteStore.quotes, suggestedName: "devis.json") },
+                          onImport: importQuotes)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Configuration").font(.headline)
+                    Text("Numérotation, statuts personnalisés, tags, couleurs — sans identifiants ni clés API, qui restent propres à chaque poste et à chaque environnement.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Exporter la configuration") { exportConfiguration() }.buttonStyle(.bordered)
+                    Button("Importer la configuration") { importConfiguration() }.buttonStyle(.bordered)
+                    Spacer()
+                }
+
+                if let m = message {
+                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func moduleRow(title: String, count: Int, onExport: @escaping () -> Void, onImport: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title).font(.body.weight(.semibold))
+            Text("(\(count))").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Exporter") { onExport() }.buttonStyle(.bordered)
+            Button("Importer") { onImport() }.buttonStyle(.bordered)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.3)))
+    }
+
+    private func exportJSON<T: Encodable>(_ items: [T], suggestedName: String) {
+        do {
+            let data = try DataPortability.exportJSON(items)
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = suggestedName
+            panel.allowedContentTypes = [.json]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try data.write(to: url)
+            message = "Export réussi : \(url.lastPathComponent)"
+        } catch {
+            message = "Échec de l'export : \(error.localizedDescription)"
+        }
+    }
+
+    private func pickJSONFile() -> Data? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    private func importInvoices() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(Invoice.self, from: data)
+            imported.forEach(store.upsert)
+            message = "\(imported.count) facture(s) importée(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func importOrders() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(SalesOrder.self, from: data)
+            imported.forEach(orderStore.upsert)
+            message = "\(imported.count) commande(s) importée(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func importParties() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(DirectoryEntry.self, from: data)
+            imported.forEach(directory.upsert)
+            message = "\(imported.count) tiers importé(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func importQuotes() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(Quote.self, from: data)
+            imported.forEach(quoteStore.upsert)
+            message = "\(imported.count) devis importé(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func exportConfiguration() {
+        let bundle = AppConfigurationBundle.capture(
+            invoiceStore: store, orderStore: orderStore,
+            invoiceStatusStore: invoiceStatusStore, orderStatusStore: orderStatusStore,
+            tagStore: tagStore, kindColorStore: kindColorStore
+        )
+        do {
+            let data = try DataPortability.exportJSON([bundle])
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "configuration.json"
+            panel.allowedContentTypes = [.json]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try data.write(to: url)
+            message = "Configuration exportée : \(url.lastPathComponent)"
+        } catch {
+            message = "Échec de l'export : \(error.localizedDescription)"
+        }
+    }
+
+    private func importConfiguration() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            guard let bundle = try DataPortability.importJSON(AppConfigurationBundle.self, from: data).first else {
+                message = "Échec de l'import : fichier vide."
+                return
+            }
+            bundle.apply(
+                invoiceStore: store, orderStore: orderStore,
+                invoiceStatusStore: invoiceStatusStore, orderStatusStore: orderStatusStore,
+                tagStore: tagStore, kindColorStore: kindColorStore
+            )
+            message = "Configuration importée."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
         }
     }
 }

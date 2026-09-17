@@ -52,3 +52,33 @@ Si tu valides la direction TOTP, une implémentation ultérieure devrait couvrir
 - Option admin : pouvoir désactiver la 2FA d'un utilisateur qui a perdu l'accès (nécessite un chemin de secours humain, comme pour tout système de 2FA).
 
 Cette portée n'est **pas implémentée dans cette PR** — à valider et à planifier séparément.
+
+## 5. Mise à jour — implémentation (chantier A, second volet)
+
+L'option B (TOTP) recommandée ci-dessus a été implémentée :
+- `TOTPService` (`Sources/FacturXCore/TOTPService.swift`) : génération/vérification RFC 6238 (HMAC-SHA1, fenêtre de tolérance ±1 pas), génération de secret et d'URI `otpauth://` pour QR code, 100% local, aucune dépendance externe.
+- `User.totpEnabled` / `totpSecret` / codes de récupération (10 codes à usage unique, hachés comme les mots de passe) — champs optionnels avec migration silencieuse pour les données existantes.
+- **Paramètre solution (global)** : `TwoFactorSettings.enabledSolutionWide`, réglable par un administrateur dans Réglages > Application > Sécurité. Désactivé, aucun utilisateur ne peut activer ni utiliser la 2FA, même déjà configurée.
+- Écran de configuration dans le profil (QR code + clé manuelle + confirmation + affichage unique des codes de récupération), second facteur demandé à la connexion si activé, et un chemin de secours admin (désactivation depuis la gestion utilisateurs) pour un utilisateur ayant perdu son application TOTP.
+- Option A (email) et Option C (clé matérielle) restent non implémentées, conformément à la recommandation ci-dessus.
+
+## 6. Approfondissement — options A (email) et C (clé matérielle), après TOTP
+
+Étude uniquement, comme demandé — aucune implémentation dans cette PR. Ce qui a changé depuis la section 1 : le SMTP (chantier « alertes email ») est maintenant implémenté (`SMTPService`), donc l'option A n'est plus bloquée par une dépendance manquante — elle mérite une vraie spécification plutôt que d'être reléguée à « plus tard ».
+
+### A. Code par e-mail — proposition concrète, maintenant réalisable
+
+- **Positionnement** : pas seulement un secours pour TOTP, mais une **deuxième méthode de 2FA à part entière**, au choix de l'utilisateur — certains n'installeront jamais d'application d'authentification, l'email reste plus universellement accepté dans un cabinet comptable.
+- **Adresse d'envoi** : aucun nouveau champ nécessaire — `User.username` est déjà validé comme adresse email (`EmailValidator.isValid`, obligatoire à la création du compte), donc directement réutilisable comme destinataire.
+- **Flux** : après mot de passe valide, si la méthode choisie est « email », générer un code à 6 chiffres, l'envoyer via `SMTPService.send(...)`, le garder **en mémoire seulement** (jamais persisté) avec une expiration courte (5 minutes) et un nombre d'essais limité (3), le vérifier comme le fait déjà `AuthStore.completeTwoFactorLogin` pour le code TOTP.
+- **Limite de sécurité déjà identifiée, toujours valable** : si la boîte mail est configurée sur le même Mac (Mail.app avec session déjà ouverte), la protection contre un vol de l'appareil déjà déverrouillé est nulle — mais ce n'est pas le scénario principal visé par une 2FA. Contre un mot de passe seul compromis à distance (le cas le plus fréquent : réutilisation de mot de passe, hameçonnage), la protection reste réelle tant que la messagerie elle-même exige une authentification séparée.
+- **Complexité** : faible maintenant que `SMTPService` existe — essentiellement une génération de code + une fenêtre d'expiration + un écran de saisie, sur le même schéma que le flux TOTP déjà en place.
+- **Recommandation** : implémentable directement dans un prochain chantier si validé, en étendant `TwoFactorSettings`/`AuthStore` pour accepter une méthode par utilisateur (TOTP ou email) plutôt qu'un simple booléen global.
+
+### C. Clé de sécurité matérielle — verdict inchangé, raisonnement précisé
+
+Reconsidéré spécifiquement pour vérifier si quelque chose a changé côté plateforme : non. Deux voies existent techniquement pour parler à une clé FIDO2 (YubiKey…) depuis une app macOS, aucune ne convient à cette architecture :
+1. **WebAuthn via `AuthenticationServices`** (`ASAuthorizationSecurityKeyPublicKeyCredentialProvider`) : c'est l'API supportée par Apple, mais elle reste structurellement liée au modèle WebAuthn — un **relying party identifier**, en pratique un nom de domaine vérifiable. Une app locale sans domaine ne peut pas s'en servir correctement ; ce serait un prérequis du chantier « mode web » (`docs/web-mode-proposal.md`), pas quelque chose d'ajoutable isolément.
+2. **CTAP direct** (parler au protocole bas niveau de la clé sans passer par WebAuthn, en USB/NFC/Bluetooth via IOKit) : techniquement envisageable, mais Apple n'expose pas d'API publique supportée pour ça sur macOS — il faudrait réimplémenter un client FIDO2 depuis les échanges USB HID bruts, un projet à part entière, disproportionné par rapport au gain pour cette app.
+
+**Verdict inchangé : hors de portée tant que l'app reste 100% locale sans domaine.** À reconsidérer uniquement si le chantier mode web se concrétise.

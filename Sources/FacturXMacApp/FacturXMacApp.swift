@@ -123,10 +123,16 @@ struct LabeledInfoField<Content: View>: View {
 struct FacturXMacApp: App {
     @StateObject private var store = InvoiceStore.shared
     @StateObject private var orderStore = OrderStore.shared
+    @StateObject private var quoteStore = QuoteStore.shared
+    @StateObject private var quoteStatusStore = QuoteStatusStore.shared
     @StateObject private var directory = PartyDirectory.shared
     @StateObject private var chorusSettings = ChorusProSettings.shared
     @StateObject private var superPDPSettings = SuperPDPSettings.shared
     @StateObject private var smtpSettings = SMTPSettings.shared
+    @StateObject private var twoFactorSettings = TwoFactorSettings.shared
+    @StateObject private var pcloudSettings = PCloudSettings.shared
+    @StateObject private var moduleStore = ModuleStore.shared
+    @StateObject private var backupStrategyStore = BackupStrategyStore.shared
     @StateObject private var appEnv = AppEnvironment.shared
     @StateObject private var tagStore = TagStore.shared
     @StateObject private var kindColors = KindColorStore.shared
@@ -140,10 +146,16 @@ struct FacturXMacApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(orderStore)
+                .environmentObject(quoteStore)
+                .environmentObject(quoteStatusStore)
                 .environmentObject(directory)
                 .environmentObject(chorusSettings)
                 .environmentObject(superPDPSettings)
                 .environmentObject(smtpSettings)
+                .environmentObject(twoFactorSettings)
+                .environmentObject(pcloudSettings)
+                .environmentObject(moduleStore)
+                .environmentObject(backupStrategyStore)
                 .environmentObject(tagStore)
                 .environmentObject(kindColors)
                 .environmentObject(statusStore)
@@ -156,9 +168,11 @@ struct FacturXMacApp: App {
                     auth.testBypassSecurity = true
                     store.audit = AuditStore.shared
                     orderStore.audit = AuditStore.shared
+                    quoteStore.audit = AuditStore.shared
                     directory.audit = AuditStore.shared
                     store.actorName = auth.currentUser?.username ?? "system"
                     orderStore.actorName = auth.currentUser?.username ?? "system"
+                    quoteStore.actorName = auth.currentUser?.username ?? "system"
                     directory.actorName = auth.currentUser?.username ?? "system"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
@@ -216,17 +230,161 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum RootTab: String, CaseIterable, Identifiable {
     case directory = "Annuaire"
-    case orders = "Commandes"
+    case quotes = "Devis"
+    case orders = "Ventes"
     case invoices = "Factures"
+    case dashboard = "Tableau de bord"
     var id: String { rawValue }
 
-    static func visible(for role: UserRole?) -> [RootTab] {
+    var systemImage: String {
+        switch self {
+        case .directory: return "person.crop.rectangle.stack"
+        case .quotes: return "doc.text.below.ecg"
+        case .orders: return "cart.fill"
+        case .invoices: return "doc.text.fill"
+        case .dashboard: return "gauge"
+        }
+    }
+
+    static func visible(for role: UserRole?, modules: ModuleSettings = ModuleStore.shared.settings) -> [RootTab] {
+        var result: [RootTab]
         switch role {
         case .acheteur:
-            return [.orders]
+            result = [.orders]
         default:
-            return allCases
+            result = allCases
         }
+        if !modules.ordersEnabled { result.removeAll { $0 == .orders } }
+        if !modules.quotesEnabled { result.removeAll { $0 == .quotes } }
+        return result
+    }
+}
+
+/// Vue agrégée en lecture sur InvoiceStore existant : aucun nouveau modèle,
+/// aucune donnée stockée séparément — tout est recalculé à l'affichage.
+struct TreasuryDashboardView: View {
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
+
+    private struct ClientBalance: Identifiable {
+        let id: String
+        let name: String
+        let outstanding: Double
+        let overdue: Double
+    }
+
+    private var scopedInvoices: [Invoice] {
+        var result = store.invoices
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { inv in
+                if let cid = inv.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result
+    }
+
+    /// Exclut les factures annulées : elles ne représentent plus un CA réel.
+    private var activeInvoices: [Invoice] {
+        scopedInvoices.filter { $0.status != .cancelled }
+    }
+
+    /// Sous-ensemble réellement envoyé au client : un brouillon ou une facture
+    /// validée mais non envoyée (statut « Validée (non envoyée) ») n'engage
+    /// rien et ne doit pas gonfler artificiellement les indicateurs.
+    private var sentInvoices: [Invoice] {
+        activeInvoices.filter { $0.status != .draft && $0.status != .issued }
+    }
+
+    private func signedAmount(_ inv: Invoice) -> Double {
+        inv.type.isCreditNote ? -inv.grandTotal : inv.grandTotal
+    }
+
+    private var currentMonthInvoices: [Invoice] {
+        sentInvoices.filter { Calendar.current.isDate($0.issueDate, equalTo: Date(), toGranularity: .month) }
+    }
+
+    private var caFactureMois: Double {
+        currentMonthInvoices.reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var encaisse: Double {
+        sentInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var enRetard: Double {
+        sentInvoices.filter(\.isOverdue).reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var enAttente: Double {
+        sentInvoices.filter { $0.status != .paid && !$0.isOverdue }.reduce(0) { $0 + signedAmount($1) }
+    }
+
+    private var byClient: [ClientBalance] {
+        var byName: [String: (outstanding: Double, overdue: Double)] = [:]
+        for inv in sentInvoices where inv.status != .paid {
+            let name = inv.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client sans nom" : inv.buyer.name
+            var entry = byName[name] ?? (outstanding: 0, overdue: 0)
+            entry.outstanding += signedAmount(inv)
+            if inv.isOverdue { entry.overdue += signedAmount(inv) }
+            byName[name] = entry
+        }
+        return byName.map { ClientBalance(id: $0.key, name: $0.key, outstanding: $0.value.outstanding, overdue: $0.value.overdue) }
+            .sorted { $0.outstanding > $1.outstanding }
+    }
+
+    private var currency: String { scopedInvoices.first?.currency ?? "EUR" }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Tableau de bord").font(.title2.bold())
+                HStack(spacing: 16) {
+                    kpiCard("CA facturé (mois)", caFactureMois, color: .blue, icon: "chart.line.uptrend.xyaxis")
+                    kpiCard("Encaissé", encaisse, color: .green, icon: "checkmark.circle.fill")
+                    kpiCard("En attente", enAttente, color: .orange, icon: "hourglass")
+                    kpiCard("En retard", enRetard, color: .red, icon: "exclamationmark.triangle.fill")
+                }
+                GroupBox("Par client — montant dû") {
+                    if byClient.isEmpty {
+                        Text("Aucun montant en attente.").foregroundStyle(.secondary).padding()
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(byClient) { c in
+                                HStack {
+                                    Text(c.name).font(.body)
+                                    Spacer()
+                                    if c.overdue < 0 {
+                                        Label(String(format: "%.2f %@ en retard", abs(c.overdue), currency), systemImage: "exclamationmark.triangle.fill")
+                                            .font(.caption).foregroundStyle(.red)
+                                    }
+                                    Text(String(format: "%.2f %@", c.outstanding, currency))
+                                        .font(.body.bold()).monospacedDigit()
+                                }
+                                .padding(.vertical, 6).padding(.horizontal, 8)
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func kpiCard(_ title: String, _ amount: Double, color: Color, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).foregroundStyle(color)
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(String(format: "%.2f %@", amount, currency))
+                .font(.title2.bold())
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.12)))
     }
 }
 
@@ -234,6 +392,8 @@ struct RootView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var tagStore: TagStore
@@ -243,12 +403,20 @@ struct RootView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var twoFactorSettings: TwoFactorSettings
+    @EnvironmentObject var pcloudSettings: PCloudSettings
+    @EnvironmentObject var moduleStore: ModuleStore
+    @EnvironmentObject var backupStrategyStore: BackupStrategyStore
     @State private var tab: RootTab = .invoices
+    @State private var didAttemptAutoBackup = false
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
+    @State private var selectedQuoteID: UUID?
     @State private var showSettings = false
     @State private var showUserManagement = false
     @State private var showEnvConfirm = false
+    @State private var showSetupWizard = false
+    @State private var setupWizardSkippedThisSession = false
 
     var body: some View {
         Group {
@@ -271,6 +439,8 @@ struct RootView: View {
     private func reloadAllStores() {
         store.load()
         orderStore.load()
+        quoteStore.load()
+        quoteStatusStore.load()
         directory.load()
         tagStore.load()
         kindColors.load()
@@ -280,12 +450,18 @@ struct RootView: View {
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
         smtpSettings.credentials = reloadSMTPCredentials()
+        twoFactorSettings.load()
+        pcloudSettings.load()
+        moduleStore.load()
+        backupStrategyStore.load()
         store.audit = AuditStore.shared
         orderStore.audit = AuditStore.shared
+        quoteStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
         auth.reloadEnvironment()
         store.actorName = auth.currentUser?.username ?? "system"
         orderStore.actorName = auth.currentUser?.username ?? "system"
+        quoteStore.actorName = auth.currentUser?.username ?? "system"
         directory.actorName = auth.currentUser?.username ?? "system"
         selectedID = nil
         selectedOrderID = nil
@@ -333,10 +509,12 @@ struct RootView: View {
             .background(appEnv.isTest ? Color.orange.opacity(0.12) : Color.green.opacity(0.12))
             HStack {
                 Picker("", selection: $tab) {
-                    ForEach(RootTab.visible(for: auth.currentUser?.role)) { Text($0.rawValue).tag($0) }
+                    ForEach(RootTab.visible(for: auth.currentUser?.role, modules: moduleStore.settings)) {
+                        Label($0.rawValue, systemImage: $0.systemImage).tag($0)
+                    }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 300)
+                .frame(width: 460)
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {
@@ -382,8 +560,12 @@ struct RootView: View {
                 InvoicesTabView(selectedID: $selectedID)
             case .orders:
                 OrdersTabView(selectedID: $selectedOrderID)
+            case .quotes:
+                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID)
             case .directory:
                 DirectoryView()
+            case .dashboard:
+                TreasuryDashboardView()
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
@@ -443,12 +625,51 @@ struct RootView: View {
             selectedOrderID = draft.id
         }
         .onAppear {
-            if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur).contains(tab) {
+            if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur, modules: moduleStore.settings).contains(tab) {
                 tab = .orders
             }
             syncAuditActor()
+            maybeShowSetupWizard()
+            runAutoBackupIfNeeded()
         }
-        .onChange(of: auth.currentUser) { _ in syncAuditActor() }
+        .onChange(of: auth.currentUser) { _ in
+            syncAuditActor()
+            maybeShowSetupWizard()
+        }
+        .sheet(isPresented: $showSetupWizard) {
+            SetupWizardView {
+                showSetupWizard = false
+                setupWizardSkippedThisSession = true
+            }
+        }
+    }
+
+    private func maybeShowSetupWizard() {
+        guard !setupWizardSkippedThisSession else { return }
+        guard auth.currentUser?.isAdmin == true else { return }
+        guard !directory.entries.contains(where: { $0.kind == .societe }) else { return }
+        showSetupWizard = true
+    }
+
+    /// Stratégie de lancement (chantier « sauvegardes ») : au premier affichage
+    /// post-connexion, si l'utilisateur l'a activé, lance une sauvegarde en
+    /// tâche de fond — silencieuse pour ne pas interrompre l'ouverture de
+    /// l'app, mais tracée dans le journal d'audit dans les deux cas.
+    private func runAutoBackupIfNeeded() {
+        guard !didAttemptAutoBackup else { return }
+        didAttemptAutoBackup = true
+        guard backupStrategyStore.settings.autoBackupOnLaunch, pcloudSettings.credentials.isConfigured else { return }
+        let credentials = pcloudSettings.credentials
+        let strategy = backupStrategyStore.settings
+        let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
+        Task {
+            do {
+                let summary = try await BackupRunner.run(bundle: bundle, pcloudCredentials: credentials, strategy: strategy)
+                store.audit?.record(actor: "system", action: "backup_auto_launch_success", target: "", details: summary)
+            } catch {
+                store.audit?.record(actor: "system", action: "backup_auto_launch_failed", target: "", details: error.localizedDescription)
+            }
+        }
     }
 
     private func syncAuditActor() {
@@ -792,11 +1013,13 @@ struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var moduleStore: ModuleStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
     @State private var statusFilter: InvoiceStatus? = nil
     @State private var showOrderPicker = false
+    @State private var showQuickInvoiceWizard = false
     @State private var exportMessage: String?
     @State private var showAdvancedFilters = false
     @State private var advField1: InvoiceFilterField = .none
@@ -850,10 +1073,17 @@ struct InvoicesTabView: View {
                     } label: { Label("Nouvelle facture", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Factures").font(.title2.bold())
+                    if moduleStore.settings.ordersEnabled {
+                        Button {
+                            showOrderPicker = true
+                        } label: { Label("Depuis une commande", systemImage: "cart") }
+                            .buttonStyle(.bordered)
+                    }
                     Button {
-                        showOrderPicker = true
-                    } label: { Label("Depuis une commande", systemImage: "cart") }
+                        showQuickInvoiceWizard = true
+                    } label: { Label("Facture guidée", systemImage: "wand.and.stars") }
                         .buttonStyle(.bordered)
+                        .help("Créer une facture en quelques étapes avec le minimum d'informations")
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
                             Text(f.rawValue).tag(f)
@@ -968,6 +1198,10 @@ struct InvoicesTabView: View {
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
                                 Text(invoice.type == .creditNote ? "Avoir" : invoice.type.isInternalCreditNote ? "Avoir interne" : "Facture")
                                     .font(.caption2).foregroundStyle(invoice.type.isCreditNote ? Color.orange : Color.accentColor)
+                                if invoice.isOverdue {
+                                    Label("En retard", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption2).foregroundStyle(.red)
+                                }
                                 Spacer()
                             }
                             Text("\(invoice.buyer.name.isEmpty ? "Sans client" : invoice.buyer.name)")
@@ -1023,6 +1257,15 @@ struct InvoicesTabView: View {
                     showOrderPicker = false
                 },
                 onCancel: { showOrderPicker = false }
+            )
+        }
+        .sheet(isPresented: $showQuickInvoiceWizard) {
+            SalesInvoiceWizardView(
+                onCreated: { invoiceID in
+                    selectedID = invoiceID
+                    showQuickInvoiceWizard = false
+                },
+                onCancel: { showQuickInvoiceWizard = false }
             )
         }
         .onChange(of: filteredInvoices) { newList in
@@ -1312,6 +1555,8 @@ struct InvoiceEditorView: View {
     @State private var showValidation = false
     @State private var isManuallyLocked = false
     @State private var showUnlockAlert = false
+    @State private var adminConfirmedEdit = false
+    @State private var showAdminEditConfirm = false
     @State private var showPrecedingInvoicePicker = false
     @State private var showMandatoryDetails = false
     @State private var superPDPSubmitting = false
@@ -1331,10 +1576,19 @@ struct InvoiceEditorView: View {
     @State private var pdpValidating = false
     @State private var pdpValidationReport: SuperPDPValidationReport?
     @State private var showPDPValidationPanel = false
+    @State private var sendingReminder = false
+    @State private var reminderMessage: String?
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
     private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
-    private var fieldLocked: Bool { isLocked && !isAdmin }
+    /// Un admin peut modifier une facture verrouillée par son statut (payée,
+    /// acceptée, annulée), mais seulement après confirmation explicite — jamais
+    /// en silence, pour éviter une incohérence comptable accidentelle.
+    private var fieldLocked: Bool {
+        guard isLocked else { return false }
+        if statusLocked { return !(isAdmin && adminConfirmedEdit) }
+        return !isAdmin
+    }
     private var sellerLogo: Data? {
         guard let cid = invoice.companyID else { return nil }
         return PartyDirectory.shared.entries.first(where: { $0.id == cid })?.logoData
@@ -1388,6 +1642,13 @@ struct InvoiceEditorView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(Color(hex: invoice.status.hexColor)))
+                if invoice.isOverdue {
+                    Label("En retard (\(invoice.overdueDays) j)", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.red))
+                }
                 if superPDPSettings.credentials.usePDP {
                     Button {
                         fetchPDPEvents()
@@ -1407,9 +1668,9 @@ struct InvoiceEditorView: View {
                         .foregroundStyle(statusLocked ? Color(hex: invoice.status.hexColor) : .secondary)
                         .padding(.horizontal, 6)
                         .overlay(Capsule().stroke(.secondary, lineWidth: 0.5))
-                    if isAdmin {
-                        Text("(admin : modification autorisée)")
-                            .font(.caption2).foregroundStyle(.secondary)
+                    if isAdmin && statusLocked && adminConfirmedEdit {
+                        Label("Modification admin activée", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2.bold()).foregroundStyle(.red)
                     }
                 }
                 Spacer()
@@ -1422,7 +1683,15 @@ struct InvoiceEditorView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
-            .padding(12)
+            .padding(.horizontal, 12).padding(.top, 12)
+            HStack(spacing: 6) {
+                Text("Conditions de paiement :").font(.caption).foregroundStyle(.secondary)
+                TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                    .textFieldStyle(.plain)
+                    .font(.caption)
+                    .disabled(fieldLocked)
+            }
+            .padding(.horizontal, 12).padding(.bottom, 12).padding(.top, 4)
             Divider()
 
             // MARK: Barre d'actions (fixe), sous-groupée : cycle de vie · utilitaires · admin
@@ -1437,6 +1706,12 @@ struct InvoiceEditorView: View {
                         }
                         .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
                         .help("Repasser en édition (la facture n'est plus protégée)")
+                    } else if statusLocked && isAdmin && !adminConfirmedEdit {
+                        Button { showAdminEditConfirm = true } label: {
+                            Label("Modifier quand même", systemImage: "exclamationmark.triangle")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                        .help("Facture « \(invoice.status.label) » : la modifier peut créer une incohérence comptable ou avec SUPER PDP — confirmation requise")
                     } else if !isLocked && validation?.isValid == true {
                         Button { isManuallyLocked = true } label: {
                             Label("Verrouiller", systemImage: "lock")
@@ -1538,6 +1813,37 @@ struct InvoiceEditorView: View {
                     }
                 }
 
+                if invoice.isOverdue {
+                    Divider().frame(height: 20)
+                    HStack(spacing: 8) {
+                        Menu {
+                            ForEach(PaymentReminderLevel.allCases) { level in
+                                Button {
+                                    sendReminder(level: level)
+                                } label: { Label(level.label, systemImage: level.systemImage) }
+                            }
+                        } label: {
+                            if sendingReminder {
+                                HStack(spacing: 4) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Envoi…")
+                                }
+                            } else {
+                                Label("Relance", systemImage: "exclamationmark.bubble")
+                            }
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .red))
+                        .disabled(sendingReminder
+                                  || (invoice.buyer.contactEmail ?? "").isEmpty
+                                  || !smtpSettings.credentials.isConfigured)
+                        .help((invoice.buyer.contactEmail ?? "").isEmpty
+                              ? "Aucune adresse email cliente renseignée"
+                              : !smtpSettings.credentials.isConfigured
+                              ? "Configurez l'envoi d'email (Réglages) pour envoyer une relance"
+                              : "Envoyer un email de relance au client")
+                    }
+                }
+
                 if isAdmin {
                     let forceable = InvoiceStatus.allCases.filter { $0 != invoice.status && !configuredTransitions.contains($0) }
                     if !forceable.isEmpty || superPDPSettings.credentials.usePDP {
@@ -1577,7 +1883,7 @@ struct InvoiceEditorView: View {
             .padding(12)
             }
             Divider()
-            if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil {
+            if hasMandatoryWarnings || showValidation || showPDPValidationPanel || exportError != nil || exportedURL != nil || duplicatedNumber != nil || superPDPMessage != nil || superPDPSubmission != nil || reminderMessage != nil {
                 VStack(alignment: .leading, spacing: 8) {
                 if let err = exportError {
                     Text("Erreur : \(err)").foregroundStyle(.red).font(.caption)
@@ -1595,6 +1901,10 @@ struct InvoiceEditorView: View {
                 if let n = duplicatedNumber {
                     Text("Facture dupliquée : \(n) (disponible dans la liste)").font(.caption).foregroundStyle(.green)
                         .onChange(of: invoice.number) { _ in duplicatedNumber = nil }
+                }
+                if let m = reminderMessage {
+                    Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .green)
+                        .onChange(of: invoice.number) { _ in reminderMessage = nil }
                 }
                 if let m = superPDPMessage {
                     HStack(spacing: 6) {
@@ -1895,7 +2205,11 @@ struct InvoiceEditorView: View {
                                 InfoBadge(text: "BT-85 — BIC hérité de l'émetteur (annuaire).")
                             }
                         }
-                        TextField("Conditions de paiement", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                        if (invoice.paymentIBAN ?? "").isEmpty && (invoice.paymentBIC ?? "").isEmpty {
+                            Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text("Conditions de paiement : modifiables en haut de l'écran.")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }.padding(8)
                 }.lockable(fieldLocked)
 
@@ -1924,6 +2238,23 @@ struct InvoiceEditorView: View {
             } message: {
                 Text("La facture était verrouillée en lecture seule après validation conforme. En la déverrouillant, vous reprenez l'édition ; pensez à valider de nouveau avant tout dépôt PDP.")
             }
+            .alert("Modifier une facture « \(invoice.status.label) » ?", isPresented: $showAdminEditConfirm) {
+                Button("Annuler", role: .cancel) { }
+                Button("Modifier quand même", role: .destructive) {
+                    adminConfirmedEdit = true
+                    store.audit?.record(
+                        actor: auth.currentUser?.username ?? "admin",
+                        action: "invoice_edit_unlocked_by_admin",
+                        target: invoice.number,
+                        details: "statut au moment du déverrouillage : \(invoice.status.label)",
+                        objectType: .invoice,
+                        objectCode: invoice.number
+                    )
+                }
+            } message: {
+                Text("Cette facture a le statut « \(invoice.status.label) ». La modifier peut créer une incohérence comptable ou avec SUPER PDP (facture déjà réglée ou acceptée). Cette action est tracée dans le journal d'audit. Continuer ?")
+            }
+            .onChange(of: invoice.number) { _ in adminConfirmedEdit = false }
             .sheet(isPresented: $showPrecedingInvoicePicker) {
                 InvoicePickerSheet(
                     invoices: linkableInvoices,
@@ -2257,6 +2588,30 @@ struct InvoiceEditorView: View {
                 pdpEvents = []
             }
             pdpEventsLoading = false
+        }
+    }
+
+    private func sendReminder(level: PaymentReminderLevel) {
+        guard let recipient = invoice.buyer.contactEmail, !recipient.isEmpty else {
+            reminderMessage = "Échec relance : aucune adresse email cliente renseignée."
+            return
+        }
+        let credentials = smtpSettings.credentials
+        guard credentials.isConfigured else {
+            reminderMessage = "Échec relance : envoi d'email non configuré (Réglages)."
+            return
+        }
+        let email = PaymentReminderComposer.compose(level: level, for: invoice)
+        sendingReminder = true
+        reminderMessage = nil
+        Task {
+            do {
+                try await SMTPService().send(to: recipient, subject: email.subject, body: email.body, credentials: credentials)
+                reminderMessage = "Relance « \(level.label) » envoyée à \(recipient)."
+            } catch {
+                reminderMessage = "Échec relance : \(error.localizedDescription)"
+            }
+            sendingReminder = false
         }
     }
 
@@ -3941,33 +4296,41 @@ struct ContactPickerSheet: View {
             } else {
                 List {
                     ForEach(drafts) { ct in
-                        Button {
-                            onPick(ct); dismiss()
-                        } label: {
-                            HStack(spacing: 8) {
-                                if ct.isDefault {
-                                    Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(Color.accentColor.opacity(0.2), in: Capsule())
+                        HStack(spacing: 8) {
+                            Button {
+                                onPick(ct); dismiss()
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if ct.isDefault {
+                                        Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Color.accentColor.opacity(0.2), in: Capsule())
+                                    }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
+                                            .font(.body.weight(.medium))
+                                        if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
+                                            Text(e).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+                                            Text(p).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        if !ct.isActive {
+                                            Text("inactif").font(.caption2)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                                 }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
-                                        .font(.body.weight(.medium))
-                                    if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
-                                        Text(e).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
-                                        Text(p).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    if !ct.isActive {
-                                        Text("inactif").font(.caption2)
-                                    }
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                .contentShape(Rectangle())
                             }
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            Button {
+                                editing = ct
+                                showEditor = true
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce contact")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -4270,12 +4633,15 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var twoFactorSettings: TwoFactorSettings
+    @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
+    @State private var twoFactorExpanded = false
     @State private var testMessage: String?
     @State private var testing = false
     @State private var superPDPTestMessage: String?
@@ -4283,11 +4649,13 @@ struct ApplicationSettingsView: View {
     @State private var pdpSessionMessage: String?
     @State private var pdpSessionChecking = false
     @State private var envExpanded = true
+    @State private var modulesExpanded = false
     @State private var societiesExpanded = false
     @State private var dinumExpanded = false
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = false
     @State private var smtpExpanded = false
+    @State private var pcloudExpanded = false
     @State private var smtpTestMessage: String?
     @State private var smtpTesting = false
     @State private var tagsExpanded = false
@@ -4327,6 +4695,20 @@ struct ApplicationSettingsView: View {
                     }.padding(8)
                 } label: {
                     Label("Environnement", systemImage: appEnv.isTest ? "flask" : "checkmark.seal.fill")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $modulesExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Désactive un module optionnel pour toute l'application — l'onglet correspondant disparaît, et les fonctionnalités qui en dépendent ailleurs (ex. créer une facture depuis une commande) se masquent automatiquement. Annuaire et Factures restent toujours actifs.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Devis", isOn: $moduleStore.settings.quotesEnabled)
+                            .onChange(of: moduleStore.settings.quotesEnabled) { _ in moduleStore.save() }
+                        Toggle("Ventes (commandes)", isOn: $moduleStore.settings.ordersEnabled)
+                            .onChange(of: moduleStore.settings.ordersEnabled) { _ in moduleStore.save() }
+                    }.padding(8)
+                } label: {
+                    Label("Modules", systemImage: "square.grid.2x2")
                         .font(.headline)
                 }
 
@@ -4615,6 +4997,28 @@ struct ApplicationSettingsView: View {
                         .font(.headline)
                 }
 
+                DisclosureGroup(isExpanded: $twoFactorExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Active la possibilité, pour chaque utilisateur, d'activer la double authentification (application TOTP — Google Authenticator, Authy…) sur son propre profil (onglet Profil). Ce réglage est global à l'application ; désactivé, aucun utilisateur ne peut activer ni utiliser la 2FA, même s'il l'avait configurée auparavant.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Autoriser la double authentification (2FA)", isOn: Binding(
+                            get: { twoFactorSettings.enabledSolutionWide },
+                            set: { twoFactorSettings.enabledSolutionWide = $0; twoFactorSettings.save() }
+                        ))
+                    }.padding(8)
+                } label: {
+                    Label("Sécurité — Double authentification", systemImage: "lock.shield")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $pcloudExpanded) {
+                    CloudBackupSettingsView()
+                        .padding(8)
+                } label: {
+                    Label("Sauvegarde cloud (pCloud)", systemImage: "icloud.and.arrow.up")
+                        .font(.headline)
+                }
+
                 DisclosureGroup(isExpanded: $tagsExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Définissez des tags personnalisés pour classifier vos tiers. Chaque tier peut porter plusieurs tags.")
@@ -4750,6 +5154,7 @@ extension DirectoryEntryKind: Identifiable {
 enum ValueTable: String, CaseIterable, Identifiable {
     case invoiceStatuses
     case orderStatuses
+    case quoteStatuses
     case tags
     case kindColors
     case currencies
@@ -4763,6 +5168,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         switch self {
         case .invoiceStatuses: return "Statuts des factures"
         case .orderStatuses: return "Statuts des commandes"
+        case .quoteStatuses: return "Statuts des devis"
         case .tags: return "Tags des tiers"
         case .kindColors: return "Couleurs des types de tiers"
         case .currencies: return "Devises"
@@ -4776,6 +5182,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         switch self {
         case .invoiceStatuses: return "doc.text.fill"
         case .orderStatuses: return "list.bullet.rectangle"
+        case .quoteStatuses: return "doc.text.below.ecg"
         case .tags: return "tag"
         case .kindColors: return "paintpalette"
         case .currencies: return "dollarsign.circle"
@@ -4787,7 +5194,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .tags, .kindColors: return true
+        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .tags, .kindColors: return true
         default: return false
         }
     }
@@ -4796,12 +5203,14 @@ enum ValueTable: String, CaseIterable, Identifiable {
 struct ValueTablesView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @State private var selectedTable: ValueTable = .orderStatuses
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
     @State private var editingInvoiceStatus: InvoiceStatusOverride?
+    @State private var editingQuoteStatus: QuoteStatusOverride?
     @State private var editingTag: PartyTag?
     @State private var editingKind: DirectoryEntryKind?
     @State private var newTagName = ""
@@ -4837,6 +5246,14 @@ struct ValueTablesView: View {
                 if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     invoiceStatusStore.overrides[i] = updated
                     invoiceStatusStore.save()
+                }
+            }
+        }
+        .sheet(item: $editingQuoteStatus) { override in
+            QuoteStatusEditorSheet(override: override) { updated in
+                if let i = quoteStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    quoteStatusStore.overrides[i] = updated
+                    quoteStatusStore.save()
                 }
             }
         }
@@ -4894,6 +5311,7 @@ struct ValueTablesView: View {
         switch selectedTable {
         case .invoiceStatuses: invoiceStatusesPanel
         case .orderStatuses: orderStatusesPanel
+        case .quoteStatuses: quoteStatusesPanel
         case .tags: tagsPanel
         case .kindColors: kindColorsPanel
         case .currencies: refPanel(NormRefs.currencies)
@@ -5078,6 +5496,68 @@ struct ValueTablesView: View {
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    /// Contrairement aux commandes/factures, un devis n'a pas de statuts imposés
+    /// par un tiers externe : pas de bouton « nouvelle valeur » ni de suppression,
+    /// seuls les 5 statuts standard existent et restent tous éditables.
+    private var quoteStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des devis").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredQuoteStatuses) { override in
+                        quoteStatusRow(override)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func quoteStatusRow(_ override: QuoteStatusOverride) -> some View {
+        let transitionLabels: [String] = override.transitionCodes.compactMap { code in
+            quoteStatusStore.overrides.first { $0.id == code }?.label
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: override.systemImage)
+                    .frame(width: 22)
+                    .foregroundStyle(Color(hex: override.hexColor))
+                Text(override.label).font(.body)
+                Spacer()
+                Button {
+                    editingQuoteStatus = override
+                } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Modifier ce statut")
+            }
+            if !transitionLabels.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Transitions : " + transitionLabels.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    private var filteredQuoteStatuses: [QuoteStatusOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return quoteStatusStore.overrides }
+        return quoteStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
 
     private var filteredStatuses: [OrderStatusOverride] {
@@ -5290,6 +5770,93 @@ struct OrderStatusEditorSheet: View {
                 Button("Enregistrer") {
                     let ordered = statusStore.overrides.map { $0.id }.filter { transitionCodes.contains($0) }
                     onSave(OrderStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, transitionCodes: ordered))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding()
+        .frame(width: 460, height: 460)
+    }
+}
+
+struct QuoteStatusEditorSheet: View {
+    var override: QuoteStatusOverride
+    let onSave: (QuoteStatusOverride) -> Void
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var systemImage: String
+    @State private var hexColor: String
+    @State private var transitionCodes: Set<String>
+
+    private var possibleTargets: [QuoteStatusOverride] {
+        quoteStatusStore.overrides.filter { $0.id != override.id }
+    }
+
+    init(override: QuoteStatusOverride, onSave: @escaping (QuoteStatusOverride) -> Void) {
+        self.override = override
+        self.onSave = onSave
+        _label = State(initialValue: override.label)
+        _systemImage = State(initialValue: override.systemImage)
+        _hexColor = State(initialValue: override.hexColor)
+        _transitionCodes = State(initialValue: Set(override.transitionCodes))
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le statut").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Icône SF").frame(width: 100, alignment: .leading)
+                    TextField("Icône SF", text: $systemImage).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                }
+            }
+            if !possibleTargets.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transitions autorisées vers…").font(.subheadline.bold())
+                    Text("Statuts accessibles depuis « \(label) » via les boutons d'action du devis.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(possibleTargets) { target in
+                                Toggle(isOn: Binding(
+                                    get: { transitionCodes.contains(target.id) },
+                                    set: { isOn in
+                                        if isOn { transitionCodes.insert(target.id) }
+                                        else { transitionCodes.remove(target.id) }
+                                    }
+                                )) {
+                                    Label(target.label, systemImage: target.systemImage)
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 140)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    let ordered = quoteStatusStore.overrides.map { $0.id }.filter { transitionCodes.contains($0) }
+                    onSave(QuoteStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, transitionCodes: ordered))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -6519,6 +7086,7 @@ struct OrdersTabView: View {
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
+    @State private var showScanImport = false
 
     var filteredOrders: [SalesOrder] {
         var result = orderStore.orders
@@ -6548,7 +7116,12 @@ struct OrdersTabView: View {
                         selectedID = draft.id
                     } label: { Label("Nouvelle commande", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
-                    Text("Commandes").font(.title2.bold())
+                    Button {
+                        showScanImport = true
+                    } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
+                        .buttonStyle(.bordered)
+                        .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
+                    Text("Ventes").font(.title2.bold())
                     Spacer()
                     Menu {
                         ForEach(QuickExport.OrderFormat.allCases, id: \.self) { f in
@@ -6652,6 +7225,15 @@ struct OrdersTabView: View {
                 }
             }
         }
+        .sheet(isPresented: $showScanImport) {
+            DocumentScanImportView(
+                onCreated: { orderID in
+                    selectedID = orderID
+                    showScanImport = false
+                },
+                onCancel: { showScanImport = false }
+            )
+        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -6685,6 +7267,302 @@ struct OrdersTabView: View {
                 }
             }
         )
+    }
+}
+
+struct QuotesTabView: View {
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var directory: PartyDirectory
+    @Binding var selectedID: UUID?
+    @Binding var rootTab: RootTab
+    @Binding var invoiceSelectedID: UUID?
+    @State private var query = ""
+
+    var filteredQuotes: [Quote] {
+        var result = quoteStore.quotes
+        if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
+            result = result.filter { quote in
+                if let cid = quote.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            result = result.filter { quote in
+                quote.number.lowercased().contains(q) || quote.buyer.name.lowercased().contains(q)
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    private func defaultCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        if let preferred = auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID),
+           visible.contains(where: { $0.id == preferred.id }) {
+            return preferred.id
+        }
+        return visible.first?.id
+    }
+
+    private func newQuote() {
+        let seller = store.resolveDefaultSeller(from: directory) ?? store.myCompany
+        let draft = quoteStore.newDraft(seller: seller, companyID: defaultCompanyID())
+        quoteStore.upsert(draft)
+        selectedID = draft.id
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                HStack {
+                    Button { newQuote() } label: { Label("Nouveau devis", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                    Text("Devis").font(.title2.bold())
+                    Spacer()
+                }
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Rechercher (numéro, client…)", text: $query)
+                        .textFieldStyle(.plain)
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+            }
+            .padding(12)
+
+            Divider()
+
+            HSplitView {
+                if filteredQuotes.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.below.ecg").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Aucun devis.")
+                            .foregroundStyle(.secondary)
+                        Button("Nouveau devis") { newQuote() }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(filteredQuotes) { quote in
+                                VStack(alignment: .leading) {
+                                    HStack {
+                                        Text(quote.number).font(.headline)
+                                        Spacer()
+                                        Text(quote.issueDate, format: .dateTime.day().month().year())
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    HStack(spacing: 6) {
+                                        let qs = quoteStatusStore.override(for: quote.status)
+                                        Image(systemName: qs.systemImage)
+                                            .foregroundColor(Color(hex: qs.hexColor))
+                                            .font(.caption2)
+                                        Text(qs.label).font(.caption2)
+                                            .foregroundColor(Color(hex: qs.hexColor))
+                                        if quote.isExpiredByDate {
+                                            Label("Validité dépassée", systemImage: "exclamationmark.triangle.fill")
+                                                .font(.caption2).foregroundStyle(.orange)
+                                        }
+                                        Spacer()
+                                    }
+                                    Text("\(quote.buyer.name.isEmpty ? "Sans client" : quote.buyer.name)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Text(String(format: "%.2f %@ TTC", quote.grandTotal, quote.currency))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 6).padding(.horizontal, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .background(selectedID == quote.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                                .onTapGesture { selectedID = quote.id }
+                                .contextMenu {
+                                    Button {
+                                        let copy = quoteStore.duplicate(from: quote)
+                                        quoteStore.upsert(copy)
+                                        selectedID = copy.id
+                                    } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        quoteStore.delete(quote)
+                                        if selectedID == quote.id { selectedID = nil }
+                                    } label: { Label("Supprimer", systemImage: "trash") }
+                                }
+                            }
+                        }
+                    }
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 300)
+                }
+
+                if let id = selectedID, quoteStore.quotes.contains(where: { $0.id == id }) {
+                    QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID)
+                        .frame(minWidth: 380)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Sélectionnez ou créez un devis")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+
+    private func binding(for id: UUID) -> Binding<Quote> {
+        Binding(
+            get: { quoteStore.quotes.first(where: { $0.id == id }) ?? Quote(number: "", seller: InvoiceParty(name: "", street: "", postcode: "", city: ""), buyer: InvoiceParty(name: "", street: "", postcode: "", city: "")) },
+            set: { newValue in
+                if let idx = quoteStore.quotes.firstIndex(where: { $0.id == id }) {
+                    quoteStore.quotes[idx] = newValue
+                    quoteStore.save()
+                }
+            }
+        )
+    }
+}
+
+struct QuoteEditorView: View {
+    @Binding var quote: Quote
+    @Binding var rootTab: RootTab
+    @Binding var invoiceSelectedID: UUID?
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var quoteStatusStore: QuoteStatusStore
+    @EnvironmentObject var store: InvoiceStore
+
+    private var isLocked: Bool { quote.status.locksQuote }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(quote.number).font(.title2.bold())
+                Text(quote.issueDate, format: .dateTime.day().month().year())
+                    .font(.callout).foregroundStyle(.secondary)
+                let currentStatus = quoteStatusStore.override(for: quote.status)
+                HStack(spacing: 4) {
+                    Image(systemName: currentStatus.systemImage)
+                    Text(currentStatus.label)
+                }
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color(hex: currentStatus.hexColor)))
+                if quote.isExpiredByDate {
+                    Label("Validité dépassée", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange))
+                }
+                Spacer()
+                Text(String(format: "%.2f %@ HT", quote.lineTotal, quote.currency))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .padding(12)
+
+            Divider()
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(quoteStatusStore.allowedTransitions(from: quote.status), id: \.self) { s in
+                        let so = quoteStatusStore.override(for: s)
+                        Button {
+                            quote.status = s
+                            quoteStore.upsert(quote)
+                        } label: {
+                            Label(so.label, systemImage: so.systemImage)
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: so.hexColor)))
+                        .help("Passer au statut « \(so.label) »")
+                    }
+                    if quote.status == .accepted {
+                        Button {
+                            let number = store.nextNumber(companyID: quote.companyID)
+                            let invoice = quote.toInvoice(number: number)
+                            store.upsert(invoice)
+                            quote.convertedInvoiceNumber = invoice.number
+                            quoteStore.upsert(quote)
+                            invoiceSelectedID = invoice.id
+                            rootTab = .invoices
+                        } label: {
+                            Label("Convertir en facture", systemImage: "arrow.right.doc.on.clipboard")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
+                        .help("Recopie les lignes du devis dans une nouvelle facture brouillon")
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+            }
+
+            if let n = quote.convertedInvoiceNumber {
+                Text("Converti en facture : \(n) (disponible dans l'onglet Factures)")
+                    .font(.caption).foregroundStyle(.green)
+                    .padding(.horizontal, 12)
+            }
+
+            Divider()
+
+            Form {
+                Section("Client") {
+                    PartySection(party: $quote.buyer, role: .buyer, locked: isLocked)
+                }
+                Section("Validité") {
+                    DatePicker("Valable jusqu'au", selection: $quote.validUntil, displayedComponents: .date)
+                        .disabled(isLocked)
+                }
+                Section("Lignes") {
+                    ForEach($quote.lines) { $line in
+                        HStack {
+                            TextField("Désignation", text: $line.name).disabled(isLocked)
+                            TextField("Qté", value: $line.quantity, format: .number).frame(width: 50).disabled(isLocked)
+                            TextField("Prix U.", value: $line.unitPrice, format: .number).frame(width: 70).disabled(isLocked)
+                            TextField("TVA %", value: $line.vatRate, format: .number).frame(width: 50).disabled(isLocked)
+                            Text(String(format: "%.2f", line.lineTotal)).foregroundStyle(.secondary).frame(width: 70)
+                        }
+                    }
+                    .onDelete { idx in quote.lines.remove(atOffsets: idx) }
+                    if !isLocked {
+                        Button {
+                            quote.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20))
+                        } label: { Label("Ajouter une ligne", systemImage: "plus") }
+                    }
+                }
+                Section("Notes") {
+                    TextEditor(text: Binding(get: { quote.notes ?? "" }, set: { quote.notes = $0.isEmpty ? nil : $0 }))
+                        .frame(height: 60)
+                        .disabled(isLocked)
+                }
+                Section {
+                    HStack {
+                        Text("Total HT")
+                        Spacer()
+                        Text(String(format: "%.2f %@", quote.lineTotal, quote.currency))
+                    }
+                    HStack {
+                        Text("TVA")
+                        Spacer()
+                        Text(String(format: "%.2f %@", quote.taxTotal, quote.currency))
+                    }
+                    HStack {
+                        Text("Total TTC").bold()
+                        Spacer()
+                        Text(String(format: "%.2f %@", quote.grandTotal, quote.currency)).bold()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .onChange(of: quote) { newValue in
+            quoteStore.upsert(newValue)
+        }
     }
 }
 
