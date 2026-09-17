@@ -607,13 +607,20 @@ struct UserEditorSheet: View {
     @State private var defaultSellerEntryID: UUID? = nil
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
             HStack {
                 Text(existing == nil ? "Nouvel utilisateur" : "Modifier l'utilisateur")
                     .font(.title3.bold())
                 Spacer()
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
             }
+            .padding()
+            Divider()
+            // Contenu dans un ScrollView : la liste des sociétés (Réglages > Application >
+            // Sociétés du périmètre) grandit avec l'annuaire — sans défilement, elle finissait
+            // par masquer le bas du formulaire (voire le bouton Enregistrer) une fois la fenêtre
+            // à taille fixe débordée.
+            ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Identifiant (e-mail)").frame(width: 140, alignment: .leading)
@@ -691,8 +698,11 @@ struct UserEditorSheet: View {
                     }
                 }
             }
+            .padding()
+            }
+            Divider()
             if let err = validationError {
-                Text(err).font(.caption).foregroundStyle(.red)
+                Text(err).font(.caption).foregroundStyle(.red).padding(.horizontal)
             }
             HStack {
                 Spacer()
@@ -704,9 +714,9 @@ struct UserEditorSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSave)
             }
+            .padding()
         }
-        .padding()
-        .frame(width: 580, height: 480)
+        .frame(width: 580, height: 520)
         .onAppear {
             if let u = existing {
                 username = u.username
