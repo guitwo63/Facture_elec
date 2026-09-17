@@ -8,12 +8,14 @@ import FacturXCore
 /// « Plus tard » et « Fermer » permettent de sortir à tout moment.
 struct SetupWizardView: View {
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var invoiceStore: InvoiceStore
     var onFinished: () -> Void
 
     @State private var step: WizardStep = .welcome
+    @State private var showInvoiceWizard = false
 
     enum WizardStep: Int, CaseIterable {
-        case welcome, society, integrations, done
+        case welcome, society, integrations, firstInvoice, done
     }
 
     private var hasSociety: Bool {
@@ -43,6 +45,7 @@ struct SetupWizardView: View {
                 case .welcome: welcomeStep
                 case .society: societyStep
                 case .integrations: integrationsStep
+                case .firstInvoice: firstInvoiceStep
                 case .done: doneStep
                 }
             }
@@ -54,7 +57,7 @@ struct SetupWizardView: View {
                     Button("Précédent") { back() }
                 }
                 Spacer()
-                if step == .society && !hasSociety {
+                if (step == .society && !hasSociety) || step == .firstInvoice {
                     Button("Plus tard") { forward() }
                 }
                 switch step {
@@ -66,6 +69,8 @@ struct SetupWizardView: View {
                         .disabled(!hasSociety)
                 case .integrations:
                     Button("Continuer") { forward() }.buttonStyle(.borderedProminent)
+                case .firstInvoice:
+                    Button("Continuer") { forward() }.buttonStyle(.borderedProminent)
                 case .done:
                     Button("Terminer") { onFinished() }.buttonStyle(.borderedProminent)
                 }
@@ -73,6 +78,12 @@ struct SetupWizardView: View {
             .padding()
         }
         .frame(width: 640, height: 560)
+        .sheet(isPresented: $showInvoiceWizard) {
+            SalesInvoiceWizardView(
+                onCreated: { _ in showInvoiceWizard = false },
+                onCancel: { showInvoiceWizard = false }
+            )
+        }
     }
 
     private func forward() {
@@ -139,6 +150,35 @@ struct SetupWizardView: View {
         }
     }
 
+    private var firstInvoiceStep: some View {
+        VStack(spacing: 16) {
+            if invoiceStore.invoices.isEmpty {
+                Image(systemName: "doc.badge.plus").font(.system(size: 48)).foregroundStyle(Color.accentColor)
+                Text("Créez votre première facture").font(.title2.bold())
+                Text("Un dernier pas concret avant de démarrer réellement : créez une facture de test en quelques étapes guidées (client, une prestation, échéance). Vous pourrez la modifier ou la supprimer ensuite, elle ne sera jamais envoyée automatiquement.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 440)
+                Button {
+                    showInvoiceWizard = true
+                } label: { Label("Créer ma première facture", systemImage: "wand.and.stars") }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 40)).foregroundStyle(.green)
+                Text("Première facture créée").font(.headline)
+                Text("Vous la retrouverez dans l'onglet Factures — modifiable comme n'importe quelle autre.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    showInvoiceWizard = true
+                } label: { Label("Créer une facture de plus", systemImage: "plus") }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func integrationRow(icon: String, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon).font(.title2).foregroundStyle(Color.accentColor).frame(width: 28)
@@ -153,10 +193,10 @@ struct SetupWizardView: View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.seal.fill").font(.system(size: 48)).foregroundStyle(.green)
             Text("Configuration terminée").font(.title2.bold())
-            Text("Vous pouvez maintenant créer vos premiers utilisateurs (icône utilisateurs dans la barre principale) et vos premières factures.")
+            Text("Vous pouvez maintenant créer vos utilisateurs (icône utilisateurs dans la barre principale). Pour revoir les réglages plus en détail (SUPER PDP, alertes email, numérotation…), un second assistant complet est accessible à tout moment dans Réglages > Application.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 440)
         }
         .padding()
     }
