@@ -195,16 +195,16 @@ struct DocumentScanImportView: View {
             errorMessage = "Renseignez au moins le nom du fournisseur."
             return
         }
-        var seller = matchedEntry?.party ?? InvoiceParty(name: trimmedName, street: "", postcode: "", city: "")
-        seller.name = trimmedName
-        let buyer = visibleCompanies.first(where: { $0.id == companyID })?.party
+        var scannedParty = matchedEntry?.party ?? InvoiceParty(name: trimmedName, street: "", postcode: "", city: "")
+        scannedParty.name = trimmedName
+        let ourCompany = visibleCompanies.first(where: { $0.id == companyID })?.party
             ?? auth.societyEntry(forID: auth.currentUser?.defaultSellerEntryID)?.party
             ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         var order = SalesOrder(
             number: orderStore.nextNumber(),
             issueDate: date,
-            buyer: buyer,
-            seller: seller,
+            buyer: scannedParty,
+            seller: ourCompany,
             lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
             companyID: companyID
         )
