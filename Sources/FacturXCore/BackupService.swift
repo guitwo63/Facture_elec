@@ -6,12 +6,19 @@ import Foundation
 /// à chaque poste et environnement, jamais à faire transiter vers un
 /// stockage cloud).
 public struct BackupBundle: Codable {
+    /// Sens de `SalesOrder.buyer`/`.seller` au moment de la capture : 1 = ancien
+    /// sens (`buyer` = notre société), 2 = sens actuel (`seller` = notre société,
+    /// comme Devis/Facture). Un fichier absent de ce champ (créé avant son
+    /// introduction) est donc traité comme version 1 — voir `BackupService.restore`.
+    public static let currentOrderPartySemanticsVersion = 2
+
     public var createdAt: Date
     public var appVersion: String
     public var invoices: [Invoice]
     public var orders: [SalesOrder]
     public var quotes: [Quote]
     public var parties: [DirectoryEntry]
+    public var orderPartySemanticsVersion: Int
 
     public init(
         createdAt: Date = Date(),
@@ -19,7 +26,8 @@ public struct BackupBundle: Codable {
         invoices: [Invoice],
         orders: [SalesOrder],
         quotes: [Quote] = [],
-        parties: [DirectoryEntry]
+        parties: [DirectoryEntry],
+        orderPartySemanticsVersion: Int = BackupBundle.currentOrderPartySemanticsVersion
     ) {
         self.createdAt = createdAt
         self.appVersion = appVersion
@@ -27,10 +35,11 @@ public struct BackupBundle: Codable {
         self.orders = orders
         self.quotes = quotes
         self.parties = parties
+        self.orderPartySemanticsVersion = orderPartySemanticsVersion
     }
 
     private enum CodingKeys: String, CodingKey {
-        case createdAt, appVersion, invoices, orders, quotes, parties
+        case createdAt, appVersion, invoices, orders, quotes, parties, orderPartySemanticsVersion
     }
 
     public init(from decoder: Decoder) throws {
@@ -41,6 +50,7 @@ public struct BackupBundle: Codable {
         orders = try c.decodeIfPresent([SalesOrder].self, forKey: .orders) ?? []
         quotes = try c.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
         parties = try c.decodeIfPresent([DirectoryEntry].self, forKey: .parties) ?? []
+        orderPartySemanticsVersion = try c.decodeIfPresent(Int.self, forKey: .orderPartySemanticsVersion) ?? 1
     }
 
     /// Nom de fichier suggéré, horodaté, pour éviter d'écraser une sauvegarde précédente.
@@ -77,7 +87,17 @@ public enum BackupService {
         directory: PartyDirectory
     ) {
         bundle.invoices.forEach(invoiceStore.upsert)
-        bundle.orders.forEach(orderStore.upsert)
+        let orders: [SalesOrder]
+        if bundle.orderPartySemanticsVersion < BackupBundle.currentOrderPartySemanticsVersion {
+            orders = bundle.orders.map { order in
+                var migrated = order
+                migrated.swapBuyerAndSeller()
+                return migrated
+            }
+        } else {
+            orders = bundle.orders
+        }
+        orders.forEach(orderStore.upsert)
         bundle.quotes.forEach(quoteStore.upsert)
         bundle.parties.forEach(directory.upsert)
     }
