@@ -2,10 +2,10 @@ import SwiftUI
 import FacturXCore
 
 /// Facture guidée : crée une facture de vente avec le minimum d'informations
-/// (émetteur, client, une prestation, échéance) puis ouvre le résultat dans
-/// l'éditeur complet pour tout complément. Une TPE facture rarement avec plus
-/// que ça au départ ; le reste (mentions légales, IBAN…) est déjà repris de
-/// la fiche société choisie.
+/// (émetteur, client, une ou plusieurs prestations, échéance) puis ouvre le
+/// résultat dans l'éditeur complet pour tout complément. Une TPE facture
+/// rarement avec plus que ça au départ ; le reste (mentions légales, IBAN…)
+/// est déjà repris de la fiche société choisie.
 struct SalesInvoiceWizardView: View {
     var onCreated: (UUID) -> Void
     var onCancel: () -> Void
@@ -18,10 +18,7 @@ struct SalesInvoiceWizardView: View {
     @State private var companyID: UUID?
     @State private var buyerEntry: DirectoryEntry?
     @State private var showBuyerPicker = false
-    @State private var lineDescription = ""
-    @State private var quantity: Double = 1
-    @State private var unitPrice: Double = 0
-    @State private var vatRate: Double = 20
+    @State private var lines: [InvoiceLine] = [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)]
     @State private var dueDate = Date().addingTimeInterval(30 * 86400)
     @State private var errorMessage: String?
 
@@ -33,9 +30,17 @@ struct SalesInvoiceWizardView: View {
         auth.visibleSocieties(for: auth.currentUser)
     }
 
-    private var lineTotal: Double { (quantity * unitPrice).rounded(toPlaces: 2) }
-    private var vatAmount: Double { (lineTotal * vatRate / 100).rounded(toPlaces: 2) }
+    private var lineTotal: Double { lines.reduce(0) { $0 + $1.lineTotal }.rounded(toPlaces: 2) }
+    private var vatAmount: Double {
+        lines.reduce(0) { $0 + ($1.lineTotal * $1.vatRate / 100) }.rounded(toPlaces: 2)
+    }
     private var grandTotal: Double { (lineTotal + vatAmount).rounded(toPlaces: 2) }
+
+    /// Une ligne blanche ajoutée puis jamais remplie ne doit pas bloquer la suite ;
+    /// elle sera simplement filtrée à la création (cf. validLines).
+    private var hasAtLeastOneValidLine: Bool {
+        lines.contains { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && $0.quantity > 0 }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,7 +58,7 @@ struct SalesInvoiceWizardView: View {
             Divider()
             footer
         }
-        .frame(width: 560, height: 520)
+        .frame(width: 600, height: 560)
         .onAppear {
             guard companyID == nil else { return }
             if visibleCompanies.count == 1 {
@@ -129,20 +134,35 @@ struct SalesInvoiceWizardView: View {
 
     private var lineStep: some View {
         Form {
-            Section("Prestation") {
-                TextField("Désignation", text: $lineDescription)
-                HStack {
-                    TextField("Quantité", value: $quantity, format: .number).frame(width: 80)
-                    TextField("Prix unitaire HT", value: $unitPrice, format: .number).frame(width: 110)
-                    Picker("TVA", selection: $vatRate) {
-                        Text("20 %").tag(20.0)
-                        Text("10 %").tag(10.0)
-                        Text("5,5 %").tag(5.5)
-                        Text("2,1 %").tag(2.1)
-                        Text("0 %").tag(0.0)
+            Section("Prestations") {
+                ForEach($lines) { $line in
+                    HStack {
+                        TextField("Désignation", text: $line.name)
+                        TextField("Qté", value: $line.quantity, format: .number).frame(width: 60)
+                        TextField("Prix U. HT", value: $line.unitPrice, format: .number).frame(width: 90)
+                        Picker("TVA", selection: $line.vatRate) {
+                            Text("20 %").tag(20.0)
+                            Text("10 %").tag(10.0)
+                            Text("5,5 %").tag(5.5)
+                            Text("2,1 %").tag(2.1)
+                            Text("0 %").tag(0.0)
+                        }
+                        .labelsHidden()
+                        .frame(width: 90)
+                        Text(String(format: "%.2f", line.lineTotal))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .frame(width: 60, alignment: .trailing)
+                        Button(role: .destructive) {
+                            lines.removeAll { $0.id == line.id }
+                        } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                            .disabled(lines.count <= 1)
                     }
-                    .frame(width: 110)
                 }
+                Button {
+                    lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: lines.last?.vatRate ?? 20))
+                } label: { Label("Ajouter une ligne", systemImage: "plus") }
+
                 HStack {
                     Text("Total HT").font(.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -162,7 +182,9 @@ struct SalesInvoiceWizardView: View {
                 if let b = buyerEntry {
                     LabeledContent("Client") { Text(b.displayName) }
                 }
-                LabeledContent("Prestation") { Text(lineDescription) }
+                ForEach(lines.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }) { line in
+                    LabeledContent(line.name) { Text(String(format: "%.2f EUR", line.lineTotal)) }
+                }
                 LabeledContent("Total HT") { Text(String(format: "%.2f EUR", lineTotal)) }
                 LabeledContent("TVA") { Text(String(format: "%.2f EUR", vatAmount)) }
                 LabeledContent("Total TTC") { Text(String(format: "%.2f EUR", grandTotal)).bold() }
@@ -193,7 +215,7 @@ struct SalesInvoiceWizardView: View {
             case .line:
                 Button("Continuer") { forward() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(lineDescription.trimmingCharacters(in: .whitespaces).isEmpty || quantity <= 0)
+                    .disabled(!hasAtLeastOneValidLine)
             case .review:
                 Button("Créer la facture") { createInvoice() }
                     .buttonStyle(.borderedProminent)
@@ -223,6 +245,11 @@ struct SalesInvoiceWizardView: View {
             errorMessage = "Sélectionnez un client."
             return
         }
+        let validLines = lines.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && $0.quantity > 0 }
+        guard !validLines.isEmpty else {
+            errorMessage = "Ajoutez au moins une prestation."
+            return
+        }
         var seller = companyEntry.party
         if let routing = companyEntry.defaultRoutingAddress, routing.isActive {
             let composed = routing.composedAddress.trimmingCharacters(in: .whitespaces)
@@ -243,7 +270,7 @@ struct SalesInvoiceWizardView: View {
             seller: seller,
             buyer: buyerDirEntry.party,
             companyID: cid,
-            lines: [InvoiceLine(name: lineDescription, quantity: quantity, unitPrice: unitPrice, vatRate: vatRate)],
+            lines: validLines,
             paymentIBAN: seller.iban,
             paymentBIC: seller.bic,
             paymentTerms: seller.paymentTerms
