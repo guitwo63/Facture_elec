@@ -506,6 +506,30 @@ struct RootView: View {
         return SMTPCredentials()
     }
 
+    private func moduleButton(_ t: RootTab) -> some View {
+        let isSelected = tab == t
+        return Button {
+            tab = t
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: t.systemImage).font(.title2)
+                Text(t.rawValue).font(.caption.weight(isSelected ? .semibold : .regular))
+            }
+            .frame(minWidth: 76)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+            )
+            // Sans ça, la zone transparente (module non sélectionné) n'est pas fiable
+            // au clic — d'où le "il faut 2 clics" : le premier tombait dans une zone
+            // que SwiftUI ne comptait pas comme cliquable faute de contenu opaque.
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+    }
+
     private var mainBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -520,13 +544,11 @@ struct RootView: View {
             .padding(.vertical, 4)
             .background(appEnv.isTest ? Color.orange.opacity(0.12) : Color.green.opacity(0.12))
             HStack {
-                Picker("", selection: $tab) {
-                    ForEach(RootTab.visible(for: auth.currentUser?.role, modules: moduleStore.settings)) {
-                        Label($0.rawValue, systemImage: $0.systemImage).tag($0)
+                HStack(spacing: 6) {
+                    ForEach(RootTab.visible(for: auth.currentUser?.role, modules: moduleStore.settings)) { t in
+                        moduleButton(t)
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 460)
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {
