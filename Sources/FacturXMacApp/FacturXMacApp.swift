@@ -267,9 +267,22 @@ enum RootTab: String, CaseIterable, Identifiable {
 
 /// Vue agrégée en lecture sur InvoiceStore existant : aucun nouveau modèle,
 /// aucune donnée stockée séparément — tout est recalculé à l'affichage.
+enum DashboardPeriod: String, CaseIterable, Identifiable, Hashable {
+    case month = "Ce mois-ci"
+    case quarter = "Ce trimestre"
+    case year = "Cette année"
+    case all = "Tout"
+    case custom = "Personnalisé"
+    var id: String { rawValue }
+}
+
 struct TreasuryDashboardView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
+
+    @State private var period: DashboardPeriod = .year
+    @State private var customFrom: Date = Calendar.current.dateInterval(of: .year, for: Date())?.start ?? Date()
+    @State private var customTo: Date = Date()
 
     private struct ClientBalance: Identifiable {
         let id: String
@@ -305,16 +318,50 @@ struct TreasuryDashboardView: View {
         inv.type.isCreditNote ? -inv.grandTotal : inv.grandTotal
     }
 
-    private var currentMonthInvoices: [Invoice] {
-        sentInvoices.filter { Calendar.current.isDate($0.issueDate, equalTo: Date(), toGranularity: .month) }
+    /// Bornes de la période sélectionnée. `nil` = pas de borne (période "Tout").
+    private var periodRange: ClosedRange<Date>? {
+        let cal = Calendar.current
+        let now = Date()
+        switch period {
+        case .all:
+            return nil
+        case .month:
+            guard let interval = cal.dateInterval(of: .month, for: now) else { return nil }
+            return interval.start...interval.end
+        case .quarter:
+            let month = cal.component(.month, from: now)
+            let quarterStartMonth = ((month - 1) / 3) * 3 + 1
+            var comps = cal.dateComponents([.year], from: now)
+            comps.month = quarterStartMonth
+            comps.day = 1
+            guard let start = cal.date(from: comps),
+                  let end = cal.date(byAdding: DateComponents(month: 3), to: start) else { return nil }
+            return start...end
+        case .year:
+            guard let interval = cal.dateInterval(of: .year, for: now) else { return nil }
+            return interval.start...interval.end
+        case .custom:
+            let start = min(customFrom, customTo)
+            let end = cal.date(byAdding: .day, value: 1, to: max(customFrom, customTo)) ?? customTo
+            return start...end
+        }
     }
 
-    private var caFactureMois: Double {
-        currentMonthInvoices.reduce(0) { $0 + signedAmount($1) }
+    /// Uniquement les KPI d'activité (CA facturé, Encaissé) sont scopés à la période — "En
+    /// attente"/"En retard"/"Validées non envoyées" restent des photos de l'état courant,
+    /// filtrer par période les masquerait à tort (une facture en retard depuis l'an dernier
+    /// reste un problème actuel, quelle que soit la période affichée).
+    private var periodInvoices: [Invoice] {
+        guard let range = periodRange else { return sentInvoices }
+        return sentInvoices.filter { range.contains($0.issueDate) }
+    }
+
+    private var caFacture: Double {
+        periodInvoices.reduce(0) { $0 + signedAmount($1) }
     }
 
     private var encaisse: Double {
-        sentInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
+        periodInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
     }
 
     private var enRetard: Double {
@@ -350,10 +397,29 @@ struct TreasuryDashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Tableau de bord").font(.title2.bold())
+                HStack {
+                    Text("Tableau de bord").font(.title2.bold())
+                    Spacer()
+                    Picker("Période", selection: $period) {
+                        ForEach(DashboardPeriod.allCases) { p in
+                            Text(p.rawValue).tag(p)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 420)
+                    .labelsHidden()
+                }
+                if period == .custom {
+                    HStack(spacing: 8) {
+                        Text("Du").font(.caption).foregroundStyle(.secondary)
+                        DatePicker("", selection: $customFrom, displayedComponents: .date).labelsHidden()
+                        Text("au").font(.caption).foregroundStyle(.secondary)
+                        DatePicker("", selection: $customTo, displayedComponents: .date).labelsHidden()
+                    }
+                }
                 HStack(spacing: 16) {
-                    kpiCard("CA facturé (mois)", caFactureMois, color: .blue, icon: "chart.line.uptrend.xyaxis")
-                    kpiCard("Encaissé", encaisse, color: .green, icon: "checkmark.circle.fill")
+                    kpiCard("CA facturé — \(period.rawValue)", caFacture, color: .blue, icon: "chart.line.uptrend.xyaxis")
+                    kpiCard("Encaissé — \(period.rawValue)", encaisse, color: .green, icon: "checkmark.circle.fill")
                     kpiCard("En attente", enAttente, color: .orange, icon: "hourglass")
                     kpiCard("En retard", enRetard, color: .red, icon: "exclamationmark.triangle.fill")
                     kpiCard("Validées, non envoyées", validatedNotSent, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
