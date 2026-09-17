@@ -4210,33 +4210,41 @@ struct ContactPickerSheet: View {
             } else {
                 List {
                     ForEach(drafts) { ct in
-                        Button {
-                            onPick(ct); dismiss()
-                        } label: {
-                            HStack(spacing: 8) {
-                                if ct.isDefault {
-                                    Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(Color.accentColor.opacity(0.2), in: Capsule())
+                        HStack(spacing: 8) {
+                            Button {
+                                onPick(ct); dismiss()
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if ct.isDefault {
+                                        Text("défaut").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Color.accentColor.opacity(0.2), in: Capsule())
+                                    }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
+                                            .font(.body.weight(.medium))
+                                        if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
+                                            Text(e).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+                                            Text(p).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        if !ct.isActive {
+                                            Text("inactif").font(.caption2)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                                 }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(ct.name.trimmingCharacters(in: .whitespaces).isEmpty ? "(sans nom)" : ct.name)
-                                        .font(.body.weight(.medium))
-                                    if let e = ct.email?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
-                                        Text(e).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    if let p = ct.phone?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
-                                        Text(p).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    if !ct.isActive {
-                                        Text("inactif").font(.caption2)
-                                    }
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                                .contentShape(Rectangle())
                             }
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            Button {
+                                editing = ct
+                                showEditor = true
+                            } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless)
+                                .help("Modifier ce contact")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
