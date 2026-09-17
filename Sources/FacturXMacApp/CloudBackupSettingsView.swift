@@ -87,6 +87,7 @@ struct CloudBackupSettingsView: View {
                 )
                 .help("Les sauvegardes plus anciennes sont supprimées automatiquement après chaque nouvelle sauvegarde réussie — sur pCloud et sur la copie locale si configurée.")
                 Toggle("Sauvegarder automatiquement au lancement de l'application", isOn: $backupStrategyStore.settings.autoBackupOnLaunch)
+                    .toggleStyle(.switch)
                     .disabled(!pcloudSettings.credentials.isConfigured)
                 HStack {
                     Text("Copie locale (emplacement différent, optionnel) :").font(.caption)

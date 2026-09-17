@@ -186,10 +186,12 @@ struct FullSettingsWizardView: View {
                 get: { moduleStore.settings.quotesEnabled },
                 set: { moduleStore.settings.quotesEnabled = $0; moduleStore.save() }
             ))
+            .toggleStyle(.switch)
             Toggle("Ventes (commandes)", isOn: Binding(
                 get: { moduleStore.settings.ordersEnabled },
                 set: { moduleStore.settings.ordersEnabled = $0; moduleStore.save() }
             ))
+            .toggleStyle(.switch)
         }
     }
 
@@ -261,6 +263,7 @@ struct FullSettingsWizardView: View {
             )) {
                 Text("Utiliser PDP").font(.body.weight(.semibold))
             }
+            .toggleStyle(.switch)
             if superPDPSettings.credentials.usePDP {
                 HStack {
                     Text("Client ID").frame(width: 100, alignment: .leading)
@@ -296,6 +299,7 @@ struct FullSettingsWizardView: View {
             )) {
                 Text("Activer les alertes email").font(.body.weight(.semibold))
             }
+            .toggleStyle(.switch)
             if smtpSettings.credentials.alertsEnabled {
                 HStack {
                     Text("Serveur").frame(width: 100, alignment: .leading)
@@ -339,6 +343,7 @@ struct FullSettingsWizardView: View {
                 get: { twoFactorSettings.enabledSolutionWide },
                 set: { twoFactorSettings.enabledSolutionWide = $0; twoFactorSettings.save() }
             ))
+            .toggleStyle(.switch)
         }
     }
 

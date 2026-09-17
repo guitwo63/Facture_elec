@@ -4857,8 +4857,10 @@ struct ApplicationSettingsView: View {
                         Text("Désactive un module optionnel pour toute l'application — l'onglet correspondant disparaît, et les fonctionnalités qui en dépendent ailleurs (ex. créer une facture depuis une commande) se masquent automatiquement. Annuaire et Factures restent toujours actifs.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Devis", isOn: $moduleStore.settings.quotesEnabled)
+                            .toggleStyle(.switch)
                             .onChange(of: moduleStore.settings.quotesEnabled) { _ in moduleStore.save() }
                         Toggle("Ventes (commandes)", isOn: $moduleStore.settings.ordersEnabled)
+                            .toggleStyle(.switch)
                             .onChange(of: moduleStore.settings.ordersEnabled) { _ in moduleStore.save() }
                     }.padding(8)
                 } label: {
@@ -5159,6 +5161,7 @@ struct ApplicationSettingsView: View {
                             get: { twoFactorSettings.enabledSolutionWide },
                             set: { twoFactorSettings.enabledSolutionWide = $0; twoFactorSettings.save() }
                         ))
+                        .toggleStyle(.switch)
                     }.padding(8)
                 } label: {
                     Label("Sécurité — Double authentification", systemImage: "lock.shield")
