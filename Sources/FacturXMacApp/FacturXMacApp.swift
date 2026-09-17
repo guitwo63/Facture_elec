@@ -4841,6 +4841,174 @@ struct SocietiesAdminView: View {
     }
 }
 
+/// Liste des emails automatiques, présentée sur le même schéma que
+/// `SocietiesAdminView` : une Table avec case d'activation en ligne, puis un
+/// bouton "Modifier" qui ouvre la fiche d'édition du modèle sélectionné.
+struct EmailTemplatesAdminView: View {
+    @EnvironmentObject var emailTemplateStore: EmailTemplateStore
+    /// String et non EmailTemplateKind : Table exige que `selection` corresponde au
+    /// type de `id` (String, via EmailTemplateKind.rawValue), pas au type de la ligne.
+    @State private var selectedKind: String?
+    @State private var editingKind: EmailTemplateKind?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Emails envoyés automatiquement au client ou au fournisseur pour accompagner un document (devis, commande, facture) — utilise le même serveur SMTP que les alertes ci-dessus.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle(isOn: Binding(
+                get: { emailTemplateStore.globalEnabled },
+                set: { emailTemplateStore.globalEnabled = $0; emailTemplateStore.save() }
+            )) {
+                Text("Activer l'envoi de ces emails").font(.body.weight(.semibold))
+            }
+            .toggleStyle(.switch)
+            .help("Désactivé, tous les boutons d'envoi disparaissent de l'application, quel que soit le réglage de chaque email ci-dessous.")
+
+            if !emailTemplateStore.globalEnabled {
+                Label("Tous les boutons d'envoi sont masqués tant que c'est désactivé.", systemImage: "eye.slash")
+                    .font(.caption).foregroundStyle(.orange)
+            } else {
+                Table(EmailTemplateKind.allCases, selection: Binding(
+                    get: { selectedKind },
+                    set: { selectedKind = $0 }
+                )) {
+                    TableColumn("Email") { kind in
+                        Label(kind.label, systemImage: kind.systemImage)
+                    }
+                    TableColumn("Activé") { kind in
+                        Toggle("", isOn: Binding(
+                            get: { emailTemplateStore.template(for: kind).enabled },
+                            set: { newValue in
+                                var t = emailTemplateStore.template(for: kind)
+                                t.enabled = newValue
+                                emailTemplateStore.upsert(t)
+                            }
+                        ))
+                        .toggleStyle(.checkbox)
+                        .labelsHidden()
+                    }
+                    .width(60)
+                    TableColumn("Sujet") { kind in
+                        Text(kind.hasEditableContent ? emailTemplateStore.template(for: kind).subject : "3 modèles selon le niveau d'urgence")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .frame(minHeight: 160)
+
+                if let kind = selectedKind.flatMap(EmailTemplateKind.init(rawValue:)) {
+                    HStack {
+                        if kind.hasEditableContent {
+                            Button {
+                                editingKind = kind
+                            } label: { Label("Modifier", systemImage: "pencil") }
+                                .buttonStyle(.bordered)
+                        } else {
+                            Text("La relance utilise 3 modèles distincts selon le niveau d'urgence (rappel amical, mise en demeure, majoration légale) — seule l'activation se règle ici, le contenu n'est pas modifiable.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+                }
+            }
+        }
+        .sheet(item: $editingKind) { kind in
+            EmailTemplateEditorSheet(kind: kind)
+        }
+    }
+}
+
+/// Édition du sujet/corps d'un email automatique. Les champs disponibles
+/// ({{numero}}, {{client}}…) sont insérables par un clic — pas besoin de
+/// connaître/taper la syntaxe des balises — plutôt qu'un champ de texte libre
+/// qui suppose que l'utilisateur connaît déjà les noms de variables.
+struct EmailTemplateEditorSheet: View {
+    let kind: EmailTemplateKind
+    @EnvironmentObject var emailTemplateStore: EmailTemplateStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var subject = ""
+    @State private var emailBody = ""
+
+    private enum Field: Hashable { case subject, body }
+    @FocusState private var focusedField: Field?
+
+    private static let availableFields: [(tag: String, label: String)] = [
+        ("numero", "Numéro"),
+        ("client", "Client"),
+        ("societe", "Société"),
+        ("montant", "Montant"),
+        ("date", "Date")
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label(kind.label, systemImage: kind.systemImage).font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Sujet").font(.caption.bold())
+                    TextField("Sujet", text: $subject)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .subject)
+                    Text("Corps").font(.caption.bold())
+                    TextEditor(text: $emailBody)
+                        .frame(height: 220)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+                        .focused($focusedField, equals: .body)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Insérer un champ (dans le sujet ou le corps, selon celui sélectionné) :")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            ForEach(Self.availableFields, id: \.tag) { field in
+                                Button {
+                                    insert(tag: field.tag)
+                                } label: {
+                                    Text(field.label).font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            Divider()
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    var t = emailTemplateStore.template(for: kind)
+                    t.subject = subject
+                    t.body = emailBody
+                    emailTemplateStore.upsert(t)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        }
+        .frame(width: 560, height: 520)
+        .onAppear {
+            let t = emailTemplateStore.template(for: kind)
+            subject = t.subject
+            emailBody = t.body
+        }
+    }
+
+    private func insert(tag: String) {
+        let placeholder = "{{\(tag)}}"
+        switch focusedField {
+        case .subject: subject += placeholder
+        case .body, .none: emailBody += placeholder
+        }
+    }
+}
+
 struct ApplicationSettingsView: View {
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
@@ -5224,29 +5392,8 @@ struct ApplicationSettingsView: View {
                 }
 
                 DisclosureGroup(isExpanded: $emailTemplatesExpanded) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Emails envoyés automatiquement au client ou au fournisseur pour accompagner un document (devis, commande, facture) — utilise le même serveur SMTP que les alertes ci-dessus.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Toggle(isOn: Binding(
-                            get: { emailTemplateStore.globalEnabled },
-                            set: { emailTemplateStore.globalEnabled = $0; emailTemplateStore.save() }
-                        )) {
-                            Text("Activer l'envoi de ces emails").font(.body.weight(.semibold))
-                        }
-                        .toggleStyle(.switch)
-                        .help("Désactivé, tous les boutons d'envoi disparaissent de l'application, quel que soit le réglage de chaque email ci-dessous.")
-                        if !emailTemplateStore.globalEnabled {
-                            Label("Tous les boutons d'envoi sont masqués tant que c'est désactivé.", systemImage: "eye.slash")
-                                .font(.caption).foregroundStyle(.orange)
-                        } else {
-                            Divider()
-                            Text(EmailTemplateKind.placeholderHelp)
-                                .font(.caption2).foregroundStyle(.tertiary)
-                            ForEach(EmailTemplateKind.allCases) { kind in
-                                emailTemplateRow(kind)
-                            }
-                        }
-                    }.padding(8)
+                    EmailTemplatesAdminView()
+                        .padding(8)
                 } label: {
                     Label("Emails automatiques (devis, commande, facture)", systemImage: "paperplane.fill")
                         .font(.headline)
@@ -5419,33 +5566,6 @@ struct ApplicationSettingsView: View {
         return nil
     }
 
-    @ViewBuilder
-    private func emailTemplateRow(_ kind: EmailTemplateKind) -> some View {
-        let binding = Binding<EmailTemplate>(
-            get: { emailTemplateStore.template(for: kind) },
-            set: { emailTemplateStore.upsert($0) }
-        )
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle(isOn: binding.enabled) {
-                Label(kind.label, systemImage: kind.systemImage).font(.body.weight(.semibold))
-            }
-            .toggleStyle(.switch)
-            if kind.hasEditableContent {
-                if binding.wrappedValue.enabled {
-                    TextField("Sujet", text: binding.subject)
-                        .textFieldStyle(.roundedBorder)
-                    TextEditor(text: binding.body)
-                        .font(.caption)
-                        .frame(height: 80)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-                }
-            } else {
-                Text("La relance utilise 3 modèles distincts selon le niveau d'urgence (rappel amical, mise en demeure, majoration légale), non modifiables ici — seule l'activation se règle à cet endroit.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            Divider()
-        }
-    }
 
     /// Le format en cours d'édition : celui de la société sélectionnée (créé à la volée à
     /// partir du défaut si elle n'a pas encore de réglage propre), ou le format par défaut
