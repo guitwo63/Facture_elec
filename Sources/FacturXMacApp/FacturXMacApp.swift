@@ -3173,11 +3173,23 @@ struct InvoiceEditorView: View {
         }
     }
 
+    /// Reconnaît à la fois les codes officiels `fr:2XX` (table SUPER PDP) et quelques mots
+    /// libres déjà tolérés avant cette évolution (le champ `status` de `GET /invoices/{id}`
+    /// n'est pas documenté aussi précisément que les codes de `invoice_events`).
     private static func mapPDPStatusToLocal(_ pdpStatus: String) -> InvoiceStatus? {
         let s = pdpStatus.lowercased()
         switch s {
-        case "accepted", "processed", "received": return .accepted
-        case "rejected": return .rejected
+        case "fr:200": return .sentToPDP
+        case "fr:201": return .sentToRecipient
+        case "fr:202": return .receivedByRecipient
+        case "fr:203": return .madeAvailable
+        case "fr:204": return .acknowledged
+        case "fr:208": return .onHold
+        case "fr:207", "accepted", "processed", "received": return .accepted
+        case "fr:206", "rejected": return .rejected
+        case "fr:213": return .rejectedByRecipient
+        case "fr:209": return .completed
+        case "fr:211": return .paymentSent
         case "fr:212", "encaissée", "encaissee", "paid": return .paid
         case "fr:320", "annulée", "annulee", "cancelled": return .cancelled
         default: return nil
@@ -3412,7 +3424,8 @@ struct InvoiceEditorView: View {
     private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         guard superPDPSettings.credentials.isConfigured else { return }
-        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode, statusCode != "200" else { return }
+        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode,
+              !InvoiceStatusStore.networkOnlyReformCodes.contains(statusCode) else { return }
         let detailLabel = newStatus.label
         if !force, let last = lastSentPDPStatusCode, last == statusCode {
             superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
