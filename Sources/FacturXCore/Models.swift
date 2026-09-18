@@ -219,6 +219,43 @@ public enum OptionalFieldCatalogue {
     }
 }
 
+/// Catégorie de TVA (BT-118/BT-151), liste UNTDID 5305 restreinte aux codes
+/// pertinents pour une facture française. Avant cette version, la catégorie
+/// était déduite uniquement du taux (0 % -> Z, sinon S) : impossible de
+/// distinguer une autoliquidation, une exportation ou une exonération, qui
+/// affichent toutes un taux à 0 % mais nécessitent un code et (sauf Z/S) un
+/// motif d'exonération (BT-120) différents.
+public enum VATCategory: String, Codable, CaseIterable {
+    case standard = "S"
+    case zeroRated = "Z"
+    case exempt = "E"
+    case reverseCharge = "AE"
+    case intraCommunity = "K"
+    case export = "G"
+    case outOfScope = "O"
+
+    public var label: String {
+        switch self {
+        case .standard: return "Taux normal"
+        case .zeroRated: return "Taux zéro"
+        case .exempt: return "Exonérée"
+        case .reverseCharge: return "Autoliquidation"
+        case .intraCommunity: return "Livraison intracommunautaire"
+        case .export: return "Exportation hors UE"
+        case .outOfScope: return "Hors champ de TVA"
+        }
+    }
+
+    /// BR-E-05/BR-AE-05/BR-G-05/BR-K-05/BR-O-05 (EN16931) : un motif
+    /// d'exonération (BT-120) est obligatoire pour ces catégories.
+    public var requiresExemptionReason: Bool {
+        switch self {
+        case .exempt, .reverseCharge, .intraCommunity, .export, .outOfScope: return true
+        case .standard, .zeroRated: return false
+        }
+    }
+}
+
 public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var id: UUID
     public var name: String
@@ -227,6 +264,8 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
     public var unit: String
     public var unitPrice: Double
     public var vatRate: Double
+    public var vatCategory: VATCategory
+    public var vatExemptionReason: String?
     public var orderReference: String?
     public var optionalFields: [OptionalField]
 
@@ -238,6 +277,8 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         unit: String = "C62",
         unitPrice: Double,
         vatRate: Double = 20.0,
+        vatCategory: VATCategory? = nil,
+        vatExemptionReason: String? = nil,
         orderReference: String? = nil,
         optionalFields: [OptionalField] = []
     ) {
@@ -248,12 +289,15 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         self.unit = unit
         self.unitPrice = unitPrice
         self.vatRate = vatRate
+        self.vatCategory = vatCategory ?? (vatRate == 0 ? .zeroRated : .standard)
+        self.vatExemptionReason = vatExemptionReason
         self.orderReference = orderReference
         self.optionalFields = optionalFields
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, description, quantity, unit, unitPrice, vatRate, orderReference, optionalFields
+        case id, name, description, quantity, unit, unitPrice, vatRate, vatCategory, vatExemptionReason
+        case orderReference, optionalFields
     }
 
     public init(from decoder: Decoder) throws {
@@ -265,6 +309,13 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         unit = try c.decodeIfPresent(String.self, forKey: .unit) ?? "C62"
         unitPrice = try c.decodeIfPresent(Double.self, forKey: .unitPrice) ?? 0
         vatRate = try c.decodeIfPresent(Double.self, forKey: .vatRate) ?? 20.0
+        if let rawCategory = try c.decodeIfPresent(String.self, forKey: .vatCategory),
+           let category = VATCategory(rawValue: rawCategory) {
+            vatCategory = category
+        } else {
+            vatCategory = vatRate == 0 ? .zeroRated : .standard
+        }
+        vatExemptionReason = try c.decodeIfPresent(String.self, forKey: .vatExemptionReason)
         orderReference = try c.decodeIfPresent(String.self, forKey: .orderReference)
         optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
     }
@@ -630,15 +681,26 @@ public struct Invoice: Codable, Hashable, Identifiable {
         lines.reduce(0) { $0 + $1.lineTotal }.rounded(toPlaces: 2)
     }
 
-    public var vatBreakdown: [(rate: Double, basis: Double, amount: Double)] {
-        var map: [Double: Double] = [:]
+    /// Un groupe par combinaison (taux, catégorie) : deux lignes à 0 % peuvent
+    /// relever de catégories différentes (zéro-rated, autoliquidation,
+    /// exportation…) et doivent apparaître comme des sous-totaux distincts
+    /// (BG-23), chacun avec son propre motif d'exonération le cas échéant.
+    public var vatBreakdown: [(rate: Double, category: VATCategory, exemptionReason: String?, basis: Double, amount: Double)] {
+        struct Key: Hashable { let rate: Double; let category: VATCategory }
+        var basisByKey: [Key: Double] = [:]
+        var reasonByKey: [Key: String] = [:]
         for line in lines {
-            map[line.vatRate, default: 0] += line.lineTotal
+            let key = Key(rate: line.vatRate, category: line.vatCategory)
+            basisByKey[key, default: 0] += line.lineTotal
+            if reasonByKey[key] == nil,
+               let reason = line.vatExemptionReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
+                reasonByKey[key] = reason
+            }
         }
-        return map.map { (rate, basis) in
+        return basisByKey.map { (key, basis) in
             let basisR = basis.rounded(toPlaces: 2)
-            let amount = (basisR * rate / 100).rounded(toPlaces: 2)
-            return (rate, basisR, amount)
+            let amount = (basisR * key.rate / 100).rounded(toPlaces: 2)
+            return (key.rate, key.category, reasonByKey[key], basisR, amount)
         }.sorted { $0.rate < $1.rate }
     }
 
@@ -648,11 +710,6 @@ public struct Invoice: Codable, Hashable, Identifiable {
 
     public var grandTotal: Double {
         (lineTotal + taxTotal).rounded(toPlaces: 2)
-    }
-
-    public func vatCategory(for rate: Double) -> String {
-        if rate == 0 { return "Z" }
-        return "S"
     }
 }
 

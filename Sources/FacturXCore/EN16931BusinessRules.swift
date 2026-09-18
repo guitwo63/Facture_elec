@@ -211,9 +211,14 @@ public enum EN16931BusinessRules {
 
         for (idx, line) in invoice.lines.enumerated() {
             let label = "Ligne \(idx + 1)"
-            if line.vatRate == 0 {
+            if line.vatRate == 0 && line.vatCategory == .zeroRated {
                 results.append(BusinessRuleResult(ruleId: "BR-CO-16", severity: .warning,
                     message: "BR-CO-16 : \(label) — taux nul (BT-151=Z) : vérifiez qu'il s'agit bien d'une exonération et non d'un oubli de taux."))
+            }
+            if line.vatCategory.requiresExemptionReason,
+               (line.vatExemptionReason ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-\(line.vatCategory.rawValue)-05", severity: .error,
+                    message: "BR-\(line.vatCategory.rawValue)-05 : \(label) — catégorie de TVA « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) : un motif d'exonération (BT-120) est obligatoire."))
             }
         }
 

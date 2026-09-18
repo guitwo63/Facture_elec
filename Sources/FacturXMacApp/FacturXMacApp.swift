@@ -2538,6 +2538,16 @@ struct InvoiceEditorView: View {
                                     DoubleField("TVA %", value: $line.vatRate, format: .number)
                                     InfoBadge(text: "BT-151 — Taux de TVA appliqué (%).")
                                 }
+                                HStack(spacing: 2) {
+                                    Picker("", selection: $line.vatCategory) {
+                                        ForEach(VATCategory.allCases, id: \.self) { cat in
+                                            Text(cat.rawValue).tag(cat)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 68)
+                                    InfoBadge(text: "BT-151 — Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
                                 Button {
@@ -2550,6 +2560,14 @@ struct InvoiceEditorView: View {
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
+                            }
+                            if line.vatCategory.requiresExemptionReason {
+                                HStack(spacing: 2) {
+                                    TextField("Motif d'exonération (BT-120)", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                                        .frame(minWidth: 320)
+                                    InfoBadge(text: "BT-120 — Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                                }
+                                .padding(.leading, 4)
                             }
                             OptionalFieldsSection(fields: $line.optionalFields, location: .line, locked: fieldLocked)
                                 .padding(.leading, 4)
@@ -9101,6 +9119,16 @@ struct OrderEditorView: View {
                                     DoubleField("TVA %", value: $line.vatRate, format: .number)
                                     InfoBadge(text: "Taux de TVA appliqué (%).")
                                 }
+                                HStack(spacing: 2) {
+                                    Picker("", selection: $line.vatCategory) {
+                                        ForEach(VATCategory.allCases, id: \.self) { cat in
+                                            Text(cat.rawValue).tag(cat)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 68)
+                                    InfoBadge(text: "Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
                                 Button {
@@ -9110,6 +9138,14 @@ struct OrderEditorView: View {
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
+                            }
+                            if line.vatCategory.requiresExemptionReason {
+                                HStack(spacing: 2) {
+                                    TextField("Motif d'exonération", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                                        .frame(minWidth: 320)
+                                    InfoBadge(text: "Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                                }
+                                .padding(.leading, 4)
                             }
                         }
                         Button {

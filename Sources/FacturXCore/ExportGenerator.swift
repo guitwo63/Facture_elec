@@ -121,7 +121,7 @@ public struct ExportGenerator {
                     csv(line.unit),
                     String(format: "%.2f", line.unitPrice),
                     String(format: "%g", line.vatRate),
-                    csv(inv.vatCategory(for: line.vatRate)),
+                    csv(line.vatCategory.rawValue),
                     String(format: "%.2f", line.lineTotal),
                     csv(orBlank(line.orderReference))
                 ])
@@ -149,7 +149,7 @@ public struct ExportGenerator {
                     csv(line.unit),
                     String(format: "%.2f", line.unitPrice),
                     String(format: "%g", line.vatRate),
-                    csv(order.vatCategory(for: line.vatRate)),
+                    csv(line.vatCategory.rawValue),
                     String(format: "%.2f", line.lineTotal)
                 ])
             }

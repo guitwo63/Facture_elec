@@ -230,15 +230,22 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         lines.reduce(0) { $0 + $1.lineTotal }.rounded(toPlaces: 2)
     }
 
-    public var vatBreakdown: [(rate: Double, basis: Double, amount: Double)] {
-        var map: [Double: Double] = [:]
+    public var vatBreakdown: [(rate: Double, category: VATCategory, exemptionReason: String?, basis: Double, amount: Double)] {
+        struct Key: Hashable { let rate: Double; let category: VATCategory }
+        var basisByKey: [Key: Double] = [:]
+        var reasonByKey: [Key: String] = [:]
         for line in lines {
-            map[line.vatRate, default: 0] += line.lineTotal
+            let key = Key(rate: line.vatRate, category: line.vatCategory)
+            basisByKey[key, default: 0] += line.lineTotal
+            if reasonByKey[key] == nil,
+               let reason = line.vatExemptionReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
+                reasonByKey[key] = reason
+            }
         }
-        return map.map { (rate, basis) in
+        return basisByKey.map { (key, basis) in
             let basisR = basis.rounded(toPlaces: 2)
-            let amount = (basisR * rate / 100).rounded(toPlaces: 2)
-            return (rate, basisR, amount)
+            let amount = (basisR * key.rate / 100).rounded(toPlaces: 2)
+            return (key.rate, key.category, reasonByKey[key], basisR, amount)
         }.sorted { $0.rate < $1.rate }
     }
 
@@ -248,11 +255,6 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
 
     public var grandTotal: Double {
         (lineTotal + taxTotal).rounded(toPlaces: 2)
-    }
-
-    public func vatCategory(for rate: Double) -> String {
-        if rate == 0 { return "Z" }
-        return "S"
     }
 
     public func toInvoice(number: String) -> Invoice {
