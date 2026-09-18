@@ -505,6 +505,7 @@ struct RootView: View {
     @EnvironmentObject var purchaseInvoiceStore: PurchaseInvoiceStore
     @EnvironmentObject var purchaseInvoiceStatusStore: PurchaseInvoiceStatusStore
     @StateObject private var pdpSync = PDPPeriodicSyncEngine()
+    @StateObject private var purchaseReceptionSync = PurchasePDPReceptionEngine()
     @State private var tab: RootTab = .invoices
     @State private var didAttemptAutoBackup = false
     @State private var selectedID: UUID?
@@ -582,6 +583,8 @@ struct RootView: View {
         // sens après une bascule — on relance avec ceux qui viennent d'être rechargés.
         pdpSync.stop()
         pdpSync.start(store: store) { superPDPSettings.credentials }
+        purchaseReceptionSync.stop()
+        purchaseReceptionSync.start(store: purchaseInvoiceStore) { superPDPSettings.credentials }
     }
 
     /// Migration Keychain one-shot par clé, jamais rejouée ensuite — voir le commentaire
@@ -805,7 +808,7 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showConnectionStatus) {
-            ConnectionStatusView(pdpSync: pdpSync)
+            ConnectionStatusView(pdpSync: pdpSync, purchaseReceptionSync: purchaseReceptionSync)
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
@@ -828,6 +831,7 @@ struct RootView: View {
             maybeShowSetupWizard()
             runAutoBackupIfNeeded()
             pdpSync.start(store: store) { superPDPSettings.credentials }
+            purchaseReceptionSync.start(store: purchaseInvoiceStore) { superPDPSettings.credentials }
         }
         .onChange(of: auth.currentUser) { _ in
             syncAuditActor()
@@ -910,13 +914,16 @@ struct RootView: View {
 /// Connexions > Alertes email).
 struct ConnectionStatusView: View {
     @ObservedObject var pdpSync: PDPPeriodicSyncEngine
+    @ObservedObject var purchaseReceptionSync: PurchasePDPReceptionEngine
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var pcloudSettings: PCloudSettings
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var purchaseInvoiceStore: PurchaseInvoiceStore
     @Environment(\.dismiss) private var dismiss
     @State private var syncingNow = false
+    @State private var syncingPurchasesNow = false
 
     @State private var pdpTesting = false
     @State private var pdpResult: String?
@@ -994,6 +1001,8 @@ struct ConnectionStatusView: View {
                     if superPDPSettings.credentials.usePDP {
                         Divider()
                         pdpSyncSection
+                        Divider()
+                        purchaseReceptionSection
                     }
                 }
                 .padding()
@@ -1046,6 +1055,45 @@ struct ConnectionStatusView: View {
             }
             .buttonStyle(.bordered)
             .disabled(syncingNow || !superPDPSettings.credentials.isConfigured)
+        }
+    }
+
+    /// Statut de la réception automatique des factures d'achat (module Achats) — pendant de
+    /// `pdpSyncSection` côté réception, même cadence partagée. Voir
+    /// `PurchasePDPReceptionEngine`.
+    private var purchaseReceptionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Réception des factures d'achat", systemImage: "tray.and.arrow.down").font(.headline)
+                Spacer()
+                if purchaseReceptionSync.isRunning {
+                    Label("Active", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
+                }
+            }
+            Text("Récupère automatiquement sur SUPER PDP les factures déposées par vos fournisseurs et les ajoute à Achats.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let lastRun = purchaseReceptionSync.lastRunAt {
+                Text("Dernière réception : \(lastRun.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let summary = purchaseReceptionSync.lastRunSummary {
+                Text(summary).font(.caption2).foregroundStyle(.secondary)
+            }
+            Button {
+                syncingPurchasesNow = true
+                Task {
+                    await purchaseReceptionSync.runOnce(store: purchaseInvoiceStore, credentials: superPDPSettings.credentials)
+                    syncingPurchasesNow = false
+                }
+            } label: {
+                if syncingPurchasesNow {
+                    HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Réception…") }
+                } else {
+                    Label("Recevoir maintenant", systemImage: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(syncingPurchasesNow || !superPDPSettings.credentials.isConfigured)
         }
     }
 
