@@ -556,45 +556,74 @@ struct RootView: View {
         selectedOrderID = nil
     }
 
+    /// Migration Keychain one-shot par clé, jamais rejouée ensuite — voir le commentaire
+    /// de `SMTPSettings.migrateFromKeychainOnce`. Utilisée ici pour les rechargements
+    /// déclenchés par une bascule d'environnement (test/production), qui ne passent pas
+    /// par `XSettings.init()` mais lisent UserDefaults directement.
+    private func keychainMigrationAlreadyDone(_ doneKey: String) -> Bool {
+        UserDefaults.standard.bool(forKey: doneKey)
+    }
+
+    private func markKeychainMigrationDone(_ doneKey: String) {
+        UserDefaults.standard.set(true, forKey: doneKey)
+    }
+
     private func reloadChorusCredentials() -> ChorusProCredentials {
         let k = appEnv.key("facturx.choruspro.credentials.v1")
+        var result = ChorusProCredentials(clientID: "", clientSecret: "")
         if let data = UserDefaults.standard.data(forKey: k),
-           var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
-            // Migration one-shot depuis le Keychain (retour arrière du stockage des secrets,
-            // voir `ChorusProSettings.init()`) : ne s'applique qu'aux champs encore vides.
-            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")), !migrated.isEmpty {
-                decoded.clientSecret = migrated
-            }
-            if decoded.techPassword.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")), !migrated.isEmpty {
-                decoded.techPassword = migrated
-            }
-            return decoded
+           let decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+            result = decoded
         }
-        return ChorusProCredentials(clientID: "", clientSecret: "")
+        let doneKey = appEnv.key("facturx.choruspro.keychainCleanupDone.v1")
+        if !keychainMigrationAlreadyDone(doneKey) {
+            if result.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")), !migrated.isEmpty {
+                result.clientSecret = migrated
+            }
+            if result.techPassword.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")), !migrated.isEmpty {
+                result.techPassword = migrated
+            }
+            KeychainStore.delete(forKey: appEnv.key("facturx.choruspro.clientSecret.v1"))
+            KeychainStore.delete(forKey: appEnv.key("facturx.choruspro.techPassword.v1"))
+            markKeychainMigrationDone(doneKey)
+        }
+        return result
     }
 
     private func reloadSuperPDPCredentials() -> SuperPDPCredentials {
         let k = appEnv.key("facturx.superpdp.credentials.v1")
+        var result = SuperPDPCredentials(clientID: "", clientSecret: "")
         if let data = UserDefaults.standard.data(forKey: k),
-           var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
-            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")), !migrated.isEmpty {
-                decoded.clientSecret = migrated
-            }
-            return decoded
+           let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+            result = decoded
         }
-        return SuperPDPCredentials(clientID: "", clientSecret: "")
+        let doneKey = appEnv.key("facturx.superpdp.keychainCleanupDone.v1")
+        if !keychainMigrationAlreadyDone(doneKey) {
+            if result.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")), !migrated.isEmpty {
+                result.clientSecret = migrated
+            }
+            KeychainStore.delete(forKey: appEnv.key("facturx.superpdp.clientSecret.v1"))
+            markKeychainMigrationDone(doneKey)
+        }
+        return result
     }
 
     private func reloadSMTPCredentials() -> SMTPCredentials {
         let k = appEnv.key("facturx.smtp.credentials.v1")
+        var result = SMTPCredentials()
         if let data = UserDefaults.standard.data(forKey: k),
-           var decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
-            if decoded.password.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")), !migrated.isEmpty {
-                decoded.password = migrated
-            }
-            return decoded
+           let decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+            result = decoded
         }
-        return SMTPCredentials()
+        let doneKey = appEnv.key("facturx.smtp.keychainCleanupDone.v1")
+        if !keychainMigrationAlreadyDone(doneKey) {
+            if result.password.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")), !migrated.isEmpty {
+                result.password = migrated
+            }
+            KeychainStore.delete(forKey: appEnv.key("facturx.smtp.password.v1"))
+            markKeychainMigrationDone(doneKey)
+        }
+        return result
     }
 
     private func moduleButton(_ t: RootTab) -> some View {

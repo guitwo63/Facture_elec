@@ -310,30 +310,48 @@ public final class ChorusProSettings: ObservableObject {
     private var storageKey: String { env.key("facturx.choruspro.credentials.v1") }
     private var clientSecretKeychainKey: String { env.key("facturx.choruspro.clientSecret.v1") }
     private var techPasswordKeychainKey: String { env.key("facturx.choruspro.techPassword.v1") }
+    private var keychainCleanupDoneKey: String { env.key("facturx.choruspro.keychainCleanupDone.v1") }
 
     /// Retour arrière volontaire — voir le commentaire équivalent dans `SMTPSettings.init()`
-    /// (signature ad hoc instable d'une build à l'autre, secrets Keychain inaccessibles
-    /// après mise à jour). Migration one-shot depuis le Keychain si les champs sont vides.
+    /// (signature ad hoc instable d'une build à l'autre : secrets Keychain inaccessibles
+    /// après mise à jour, et redemande d'autorisation à chaque lancement).
     public init() {
+        var decoded: ChorusProCredentials
         if let data = defaults.data(forKey: env.key("facturx.choruspro.credentials.v1")),
-           var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
-            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.choruspro.clientSecret.v1")), !migrated.isEmpty {
-                decoded.clientSecret = migrated
-            }
-            if decoded.techPassword.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.choruspro.techPassword.v1")), !migrated.isEmpty {
-                decoded.techPassword = migrated
-            }
-            credentials = decoded
+           let fromDisk = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+            decoded = fromDisk
         } else {
-            credentials = ChorusProCredentials(clientID: "", clientSecret: "")
+            decoded = ChorusProCredentials(clientID: "", clientSecret: "")
         }
+        Self.migrateFromKeychainOnce(
+            into: &decoded,
+            clientSecretKeychainKey: env.key("facturx.choruspro.clientSecret.v1"),
+            techPasswordKeychainKey: env.key("facturx.choruspro.techPassword.v1"),
+            keychainCleanupDoneKey: env.key("facturx.choruspro.keychainCleanupDone.v1"),
+            defaults: defaults
+        )
+        credentials = decoded
+    }
+
+    /// Ne touche au Keychain qu'une seule fois, jamais plus ensuite — voir le commentaire
+    /// équivalent dans `SMTPSettings.migrateFromKeychainOnce`. `static` car appelée depuis
+    /// `init()` avant que toutes les propriétés stockées ne soient initialisées.
+    private static func migrateFromKeychainOnce(into credentials: inout ChorusProCredentials, clientSecretKeychainKey: String, techPasswordKeychainKey: String, keychainCleanupDoneKey: String, defaults: UserDefaults) {
+        guard !defaults.bool(forKey: keychainCleanupDoneKey) else { return }
+        if credentials.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: clientSecretKeychainKey), !migrated.isEmpty {
+            credentials.clientSecret = migrated
+        }
+        if credentials.techPassword.isEmpty, let migrated = KeychainStore.get(forKey: techPasswordKeychainKey), !migrated.isEmpty {
+            credentials.techPassword = migrated
+        }
+        KeychainStore.delete(forKey: clientSecretKeychainKey)
+        KeychainStore.delete(forKey: techPasswordKeychainKey)
+        defaults.set(true, forKey: keychainCleanupDoneKey)
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
-        KeychainStore.delete(forKey: clientSecretKeychainKey)
-        KeychainStore.delete(forKey: techPasswordKeychainKey)
     }
 }
