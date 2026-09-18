@@ -141,6 +141,7 @@ struct FacturXMacApp: App {
     @StateObject private var invoiceStatusStore = InvoiceStatusStore.shared
     @StateObject private var paymentTermsStore = PaymentTermsPresetStore.shared
     @StateObject private var auditActionLabelStore = AuditActionLabelStore.shared
+    @StateObject private var superPDPStatusCodeStore = SuperPDPStatusCodeStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -166,6 +167,7 @@ struct FacturXMacApp: App {
                 .environmentObject(invoiceStatusStore)
                 .environmentObject(paymentTermsStore)
                 .environmentObject(auditActionLabelStore)
+                .environmentObject(superPDPStatusCodeStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -931,8 +933,9 @@ struct ConnectionStatusView: View {
     }
 
     /// Statut de la synchronisation périodique des statuts SUPER PDP (factures déposées,
-    /// pas encore à un statut terminal — voir `PDPPeriodicSyncEngine`). Le cycle tourne en
-    /// arrière-plan toutes les 15 minutes ; ce bouton permet de le déclencher sans attendre.
+    /// pas encore à un statut terminal — voir `PDPPeriodicSyncEngine`). Cadence réglable
+    /// dans Réglages > Application > SUPER PDP ; ce bouton permet de déclencher un cycle
+    /// sans attendre le prochain.
     private var pdpSyncSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -942,7 +945,7 @@ struct ConnectionStatusView: View {
                     Label("Active", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
                 }
             }
-            Text("Interroge périodiquement SUPER PDP pour les factures déposées non encore à un statut terminal, et applique tout avancement reçu.")
+            Text("Interroge SUPER PDP toutes les \(superPDPSettings.credentials.syncIntervalMinutes) min pour les factures déposées non encore à un statut terminal, et applique tout avancement reçu.")
                 .font(.caption).foregroundStyle(.secondary)
             if let lastRun = pdpSync.lastRunAt {
                 Text("Dernière synchronisation : \(lastRun.formatted(date: .abbreviated, time: .shortened))")
@@ -2316,16 +2319,26 @@ struct InvoiceEditorView: View {
                 }
                 if superPDPSettings.credentials.usePDP {
                     Button {
+                        // Rafraîchit le statut (auparavant un bouton "Statut PDP" séparé
+                        // dans la barre d'action) et ouvre l'historique en un seul clic :
+                        // consulter l'historique sans le statut à jour n'avait pas grand
+                        // sens, et inversement.
+                        refreshSuperPDPStatus()
                         fetchPDPEvents()
                     } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.callout)
+                        if superPDPSubmitting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.callout)
+                        }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                    .disabled(superPDPSubmitting
+                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
                               || !superPDPSettings.credentials.isConfigured)
-                    .help("Historique des événements de cycle de vie sur SUPER PDP")
+                    .help("Rafraîchir le statut et voir l'historique des événements SUPER PDP")
                 }
                 if isLocked {
                     Label(statusLocked ? "Verrouillée (statut)" : "Lecture seule", systemImage: "lock.fill")
@@ -2399,13 +2412,13 @@ struct InvoiceEditorView: View {
                     }
                     ForEach(configuredTransitions, id: \.self) { s in
                         Button {
-                            // « Transmise au PDP » ne doit jamais être qu'une étiquette : passer
+                            // « Envoyée / en cours » ne doit jamais être qu'une étiquette : passer
                             // ce statut sans réellement déposer laissait croire la facture
                             // transmise alors qu'elle ne l'était pas, tout en la verrouillant
                             // (statut verrouillant) — ce qui bloquait ensuite le vrai bouton
                             // "Super PDP" (dépôt), y compris pour un administrateur. Le seul
                             // chemin valide vers ce statut est donc le dépôt réel.
-                            if s == .sentToPDP, superPDPSettings.credentials.usePDP,
+                            if s == .sent, superPDPSettings.credentials.usePDP,
                                (invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty {
                                 depositToSuperPDP()
                             } else {
@@ -2468,25 +2481,6 @@ struct InvoiceEditorView: View {
                     }
                     .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
                     .help("Visualiser, exporter XML, générer le Factur-X, dupliquer, copie PDP…")
-                    if superPDPSettings.credentials.usePDP {
-                        Button {
-                            refreshSuperPDPStatus()
-                        } label: {
-                            if superPDPSubmitting {
-                                HStack(spacing: 4) {
-                                    ProgressView().controlSize(.small)
-                                    Text("Statut PDP…")
-                                }
-                            } else {
-                                Label("Statut PDP", systemImage: "antenna.radar")
-                            }
-                        }
-                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
-                        .disabled(superPDPSubmitting
-                                  || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                  || !superPDPSettings.credentials.isConfigured)
-                        .help("Interroger le statut de la facture sur SUPER PDP")
-                    }
                 }
 
                 if emailTemplateStore.globalEnabled {
@@ -3188,7 +3182,7 @@ struct InvoiceEditorView: View {
             superPDPMessage = "Facture déjà déposée sur SUPER PDP (id distant \(rid)). Ré-interrogez le statut plutôt que de redéposer."
             return
         }
-        if invoice.status == .accepted || invoice.status == .paid || invoice.status == .cancelled {
+        if invoice.status == .accepted || invoice.status == .partiallyPaid || invoice.status == .paid || invoice.status == .cancelled {
             superPDPMessage = "Dépôt refusé : la facture est déjà « \(invoice.status.label) ». Un dépôt n'est possible que depuis Brouillon / Validée / Transmise."
             return
         }
@@ -3215,7 +3209,7 @@ struct InvoiceEditorView: View {
                 if let rid = submission.remoteID, !rid.isEmpty {
                     invoice.superPDPRemoteID = rid
                     if invoice.status == .issued || invoice.status == .draft {
-                        invoice.status = .sentToPDP
+                        invoice.status = .sent
                     }
                     store.upsert(invoice)
                 }
@@ -3266,7 +3260,7 @@ struct InvoiceEditorView: View {
                     enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
                     lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
                 )
-                if let mapped = PDPStatusMapper.mapPDPStatusToLocal(updated.status) {
+                if let mapped = PDPStatusMapper.functionalTransition(for: updated.status) {
                     // Ne jamais rétrograder le statut local : on n'applique le statut PDP
                     // que s'il représente un avancement dans le cycle de vie (ou une annulation).
                     let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
@@ -3464,7 +3458,7 @@ struct InvoiceEditorView: View {
     private func sendInvoiceStatusAlertIfNeeded(_ newStatus: InvoiceStatus) {
         let smtp = smtpSettings.credentials
         guard smtp.alertsEnabled, smtp.alertOnInvoiceStatusChange, smtp.isConfigured,
-              [.accepted, .rejected, .paid, .cancelled].contains(newStatus),
+              [InvoiceStatus.accepted, .disputed, .refused, .partiallyPaid, .paid, .cancelled].contains(newStatus),
               let recipient = auth.currentUser?.username else { return }
         let invoiceNumber = invoice.number
         let label = newStatus.label
@@ -3481,8 +3475,9 @@ struct InvoiceEditorView: View {
     private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         guard superPDPSettings.credentials.isConfigured else { return }
-        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode,
-              !InvoiceStatusStore.networkOnlyReformCodes.contains(statusCode) else { return }
+        // "200" (sent) est posé par le dépôt lui-même (voir depositToSuperPDP) — jamais
+        // envoyé séparément comme événement de statut.
+        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode, statusCode != "200" else { return }
         let detailLabel = newStatus.label
         if !force, let last = lastSentPDPStatusCode, last == statusCode {
             superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
@@ -5956,6 +5951,18 @@ struct ApplicationSettingsView: View {
                             TextField("https://api.superpdp.tech", text: $superPDPSettings.credentials.apiBaseURL)
                         }
                         HStack {
+                            Text("Synchronisation").frame(width: 100, alignment: .leading)
+                            Stepper(
+                                value: $superPDPSettings.credentials.syncIntervalMinutes,
+                                in: SuperPDPCredentials.minSyncIntervalMinutes...120,
+                                step: 5
+                            ) {
+                                Text("Toutes les \(superPDPSettings.credentials.syncIntervalMinutes) min")
+                            }
+                            .onChange(of: superPDPSettings.credentials.syncIntervalMinutes) { _ in superPDPSettings.save() }
+                            .help("Cadence du cycle en arrière-plan qui interroge SUPER PDP pour les factures déposées et applique tout avancement de statut reçu.")
+                        }
+                        HStack {
                             Text("Mode SUPER PDP").font(.caption.bold())
                             Spacer()
                             Text(appEnv.isTest ? "TEST (bac à sable)" : "PRODUCTION")
@@ -6335,6 +6342,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     case countries
     case endpointSchemes
     case auditActionLabels
+    case superPDPStatusCodes
 
     var id: String { rawValue }
 
@@ -6351,6 +6359,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .countries: return "Pays"
         case .endpointSchemes: return "Schémas d'identifiant"
         case .auditActionLabels: return "Libellés du journal"
+        case .superPDPStatusCodes: return "Statuts SUPER PDP"
         }
     }
 
@@ -6367,12 +6376,13 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .countries: return "globe"
         case .endpointSchemes: return "number"
         case .auditActionLabels: return "list.bullet.clipboard"
+        case .superPDPStatusCodes: return "antenna.radar"
         }
     }
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels: return true
+        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels, .superPDPStatusCodes: return true
         default: return false
         }
     }
@@ -6386,7 +6396,10 @@ struct ValueTablesView: View {
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
     @EnvironmentObject var actionLabelStore: AuditActionLabelStore
+    @EnvironmentObject var superPDPStatusCodeStore: SuperPDPStatusCodeStore
     @State private var selectedTable: ValueTable = .orderStatuses
+    @State private var editingPDPStatusCode: PDPEventCodeOverride?
+    @State private var creatingPDPStatusCode = false
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
     @State private var editingInvoiceStatus: InvoiceStatusOverride?
@@ -6450,6 +6463,16 @@ struct ValueTablesView: View {
                 kindColors.save()
             }
         }
+        .sheet(item: $editingPDPStatusCode) { override in
+            PDPStatusCodeEditorSheet(existing: override) { updated in
+                superPDPStatusCodeStore.upsert(updated)
+            }
+        }
+        .sheet(isPresented: $creatingPDPStatusCode) {
+            PDPStatusCodeEditorSheet(existing: nil) { created in
+                superPDPStatusCodeStore.upsert(created)
+            }
+        }
     }
 
     private var filteredTables: [ValueTable] {
@@ -6504,6 +6527,7 @@ struct ValueTablesView: View {
         case .countries: refPanel(NormRefs.countries)
         case .endpointSchemes: refPanel(NormRefs.endpointSchemes)
         case .auditActionLabels: auditActionLabelsPanel
+        case .superPDPStatusCodes: superPDPStatusCodesPanel
         }
     }
 
@@ -6548,20 +6572,92 @@ struct ValueTablesView: View {
         }
     }
 
-    private var invoiceStatusesPanel: some View {
+    private var filteredPDPStatusCodes: [PDPEventCodeOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let sorted = superPDPStatusCodeStore.overrides.sorted { $0.id < $1.id }
+        guard !q.isEmpty else { return sorted }
+        return sorted.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    /// Table de paramétrage des codes d'événement SUPER PDP (fr:2XX) : libellé français et
+    /// règle de mise à jour (quel statut fonctionnel le code déclenche, s'il y en a un) —
+    /// voir `SuperPDPStatusCodeStore` et la passerelle `PDPStatusMapper.functionalTransition`
+    /// qui la consulte. Contrairement à la table des statuts de facture, "Nouvelle valeur"
+    /// a un sens ici : un code SUPER PDP pas encore connu de l'app (ex. une future version
+    /// de l'API) peut être ajouté dès que sa signification est publiée, sans mise à jour
+    /// de l'app.
+    private var superPDPStatusCodesPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Statuts des factures").font(.title3.bold())
+                Text("Statuts SUPER PDP").font(.title3.bold())
                 Spacer()
                 Button {
-                    let id = "custom-\(UUID().uuidString.prefix(8))"
-                    invoiceStatusStore.append(InvoiceStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
+                    creatingPDPStatusCode = true
                 } label: { Label("Nouvelle valeur", systemImage: "plus") }
                     .buttonStyle(.borderedProminent)
             }
             .padding(12)
             Divider()
-            Text("Personnalisez le libellé des statuts. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'équivalent envoyé/rapatrié vers la PDP ; les transitions affichent le cycle de vie normé.")
+            Text("Libellé et règle de mise à jour pour chaque code d'événement SUPER PDP (envoyé ou reçu). Une règle de mise à jour fait avancer le statut fonctionnel de la facture quand ce code est rencontré ; sans règle, le code reste visible dans le journal SUPER PDP de la facture sans effet sur son statut.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredPDPStatusCodes) { item in
+                        pdpStatusCodeRow(item)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func pdpStatusCodeRow(_ item: PDPEventCodeOverride) -> some View {
+        HStack(spacing: 10) {
+            Text(item.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+            Text(item.label).font(.body)
+                .frame(minWidth: 160, alignment: .leading)
+            if let raw = item.functionalTransition, let status = InvoiceStatus(rawValue: raw) {
+                Label(status.label, systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption2.bold())
+                    .foregroundStyle(Color(hex: status.hexColor))
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color(hex: status.hexColor).opacity(0.12)))
+                    .help("Fait passer la facture au statut « \(status.label) »")
+            } else {
+                Text("informatif seulement").font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Button {
+                editingPDPStatusCode = item
+            } label: { Image(systemName: "pencil") }
+                .buttonStyle(.borderless)
+                .help("Modifier")
+            if !item.isSystemDefined {
+                Button(role: .destructive) {
+                    superPDPStatusCodeStore.remove(item)
+                } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Supprimer ce code")
+            }
+        }
+        .padding(.vertical, 4).padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    private var invoiceStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des factures").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            // Pas de bouton "Nouvelle valeur" ici (contrairement aux autres tables) :
+            // `Invoice.status` est typé sur l'enum InvoiceStatus, un statut personnalisé ne
+            // pourrait donc jamais être assigné à une facture — il n'aurait fait que
+            // réapparaître comme entrée orpheline (voir InvoiceStatusStore.load()).
+            Text("Personnalisez le libellé des 9 statuts fonctionnels. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'équivalent envoyé à SUPER PDP ; les transitions affichent le cycle de vie normé.")
                 .font(.caption).foregroundStyle(.secondary).padding(12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -6643,21 +6739,15 @@ struct ValueTablesView: View {
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
     }
 
-    /// Sens de circulation du statut avec SUPER PDP : "Envoyé" pour un code que l'app peut
-    /// transmettre (bouton de transition, `notifyPDPStatusChange`) ; "Reçu" pour un code
-    /// réseau que seule SUPER PDP émet (`InvoiceStatusStore.networkOnlyReformCodes`),
-    /// jamais créé par l'app — visible uniquement en synchronisant le statut distant.
-    /// `sentToPDP` (fr:200) est un cas particulier : envoyé, mais implicitement par le
-    /// dépôt lui-même plutôt que par un événement de statut séparé.
+    /// Sens de circulation du statut fonctionnel avec SUPER PDP : chaque code renvoyé par
+    /// `InvoiceStatusStore.reformCode` est réellement envoyable (voir sa doc) — le détail
+    /// fin des événements réseau reçus (fr:200-204, fr:208, fr:209, fr:211, fr:220…) vit
+    /// dans le journal SUPER PDP de la facture, pas dans cette table. `sent` (fr:200) est
+    /// un cas particulier : envoyé, mais implicitement par le dépôt lui-même plutôt que
+    /// par un événement de statut séparé.
     private func pdpDirection(for override: InvoiceStatusOverride) -> (label: String, systemImage: String, color: Color, help: String)? {
-        guard let code = override.reformCode else { return nil }
-        if InvoiceStatusStore.networkOnlyReformCodes.contains(code) {
-            return (
-                "Reçu de SUPER PDP", "arrow.down.circle",
-                Color.blue,
-                "Rapporté automatiquement par SUPER PDP — l'app ne peut pas créer ce statut elle-même, il n'apparaît qu'en synchronisant le statut distant."
-            )
-        } else if override.id == InvoiceStatus.sentToPDP.rawValue {
+        guard override.reformCode != nil else { return nil }
+        if override.id == InvoiceStatus.sent.rawValue {
             return (
                 "Envoyé (via le dépôt)", "arrow.up.circle",
                 Color.orange,
@@ -7012,6 +7102,89 @@ struct ValueTablesView: View {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return refs }
         return refs.filter { $0.code.lowercased().contains(q) || $0.label.lowercased().contains(q) }
+    }
+}
+
+struct PDPStatusCodeEditorSheet: View {
+    var existing: PDPEventCodeOverride?
+    let onSave: (PDPEventCodeOverride) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var id: String
+    @State private var label: String
+    @State private var functionalTransition: InvoiceStatus?
+    @State private var errorMessage: String?
+
+    private var isNew: Bool { existing == nil }
+
+    init(existing: PDPEventCodeOverride?, onSave: @escaping (PDPEventCodeOverride) -> Void) {
+        self.existing = existing
+        self.onSave = onSave
+        _id = State(initialValue: existing?.id ?? "")
+        _label = State(initialValue: existing?.label ?? "")
+        _functionalTransition = State(initialValue: existing?.functionalTransition.flatMap { InvoiceStatus(rawValue: $0) })
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text(isNew ? "Nouveau code SUPER PDP" : "Modifier le code SUPER PDP").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Code").frame(width: 140, alignment: .leading)
+                    TextField("ex. fr:214", text: $id)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!isNew)
+                        .disableAutocorrection(true)
+                }
+                HStack {
+                    Text("Libellé").frame(width: 140, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Règle de mise à jour").frame(width: 140, alignment: .leading)
+                        Picker("", selection: $functionalTransition) {
+                            Text("Aucune (informatif seulement)").tag(InvoiceStatus?.none)
+                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                                Text(s.label).tag(InvoiceStatus?.some(s))
+                            }
+                        }
+                        .labelsHidden()
+                        Spacer()
+                    }
+                    Text("Si ce code est envoyé ou reçu pour une facture, le statut choisi ici s'applique — sauf s'il s'agirait d'une rétrogradation dans le cycle de vie.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if let err = errorMessage {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    let trimmedID = id.trimmingCharacters(in: .whitespaces)
+                    guard !trimmedID.isEmpty else {
+                        errorMessage = "Le code ne peut pas être vide."
+                        return
+                    }
+                    let trimmedLabel = label.trimmingCharacters(in: .whitespaces)
+                    onSave(PDPEventCodeOverride(
+                        id: trimmedID,
+                        label: trimmedLabel.isEmpty ? trimmedID : trimmedLabel,
+                        functionalTransition: functionalTransition?.rawValue,
+                        isSystemDefined: existing?.isSystemDefined ?? false
+                    ))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(id.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
     }
 }
 

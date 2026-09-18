@@ -7,17 +7,23 @@ public struct SuperPDPCredentials: Codable, Equatable {
     public var clientSecret: String
     public var apiBaseURL: String
     public var usePDP: Bool
+    /// Intervalle, en minutes, entre deux cycles de `PDPPeriodicSyncEngine` (synchronisation
+    /// périodique des statuts en arrière-plan). Modifiable dans Réglages > Application >
+    /// SUPER PDP.
+    public var syncIntervalMinutes: Int
 
     public init(
         clientID: String,
         clientSecret: String,
         apiBaseURL: String = SuperPDPCredentials.defaultProductionBase,
-        usePDP: Bool = true
+        usePDP: Bool = true,
+        syncIntervalMinutes: Int = 15
     ) {
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.apiBaseURL = apiBaseURL.isEmpty ? SuperPDPCredentials.defaultProductionBase : apiBaseURL
         self.usePDP = usePDP
+        self.syncIntervalMinutes = syncIntervalMinutes
     }
 
     /// SUPER PDP utilise une seule et même adresse d'API pour le bac à sable et la
@@ -25,6 +31,10 @@ public struct SuperPDPCredentials: Codable, Equatable {
     /// secret) utilisés, pas par l'URL. C'est pourquoi les credentials sont stockées
     /// séparément par environnement (test/production) au niveau de SuperPDPSettings.
     public static let defaultProductionBase = "https://api.superpdp.tech"
+    public static let defaultSyncIntervalMinutes = 15
+    /// Sous cette valeur, le cycle interrogerait l'API en pure perte sans réel bénéfice
+    /// pour l'utilisateur — borne basse imposée par l'UI (Réglages > Application > SUPER PDP).
+    public static let minSyncIntervalMinutes = 5
 
     public var resolvedBaseURL: String {
         let trimmed = apiBaseURL.trimmingCharacters(in: .whitespaces)
@@ -37,7 +47,7 @@ public struct SuperPDPCredentials: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case clientID, clientSecret, apiBaseURL, usePDP
+        case clientID, clientSecret, apiBaseURL, usePDP, syncIntervalMinutes
     }
 
     public init(from decoder: Decoder) throws {
@@ -46,6 +56,8 @@ public struct SuperPDPCredentials: Codable, Equatable {
         clientSecret = try c.decodeIfPresent(String.self, forKey: .clientSecret) ?? ""
         apiBaseURL = try c.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? SuperPDPCredentials.defaultProductionBase
         usePDP = try c.decodeIfPresent(Bool.self, forKey: .usePDP) ?? true
+        let decodedInterval = try c.decodeIfPresent(Int.self, forKey: .syncIntervalMinutes) ?? SuperPDPCredentials.defaultSyncIntervalMinutes
+        syncIntervalMinutes = max(SuperPDPCredentials.minSyncIntervalMinutes, decodedInterval)
     }
 }
 

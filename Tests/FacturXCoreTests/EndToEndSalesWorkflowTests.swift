@@ -173,7 +173,7 @@ final class EndToEndSalesWorkflowTests: XCTestCase {
         // que rien n'a été personnalisé — sinon réglages et code divergent en silence.
         let invoiceStatusStore = InvoiceStatusStore()
         var invoice = p.invoiceFromOrder
-        for next in [InvoiceStatus.issued, .sentToPDP, .accepted, .paid] {
+        for next in [InvoiceStatus.issued, .sent, .accepted, .paid] {
             XCTAssertEqual(invoiceStatusStore.allowedTransitions(from: invoice.status, isAdmin: false),
                            invoice.status.allowedTransitions())
             XCTAssertTrue(invoice.status.allowedTransitions().contains(next))

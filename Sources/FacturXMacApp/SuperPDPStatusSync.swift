@@ -1,30 +1,31 @@
 import Foundation
 import FacturXCore
 
-/// Reconnaît un statut SUPER PDP reçu (code officiel `fr:2XX`, ou quelques mots libres
-/// déjà tolérés avant l'ajout des codes détaillés — le champ `status` de
-/// `GET /invoices/{id}` n'est pas documenté aussi précisément que les codes de
-/// `invoice_events`) et le fait correspondre au statut local équivalent. Partagé entre
-/// le rafraîchissement manuel (bouton "Statut PDP" de la fiche facture) et la
-/// synchronisation périodique en arrière-plan.
+/// La passerelle entre le journal des événements SUPER PDP (codes `fr:2XX`, envoyés et
+/// reçus — voir la doc de `InvoiceStatus`) et le statut fonctionnel réduit de l'app.
+/// La règle par code (quel statut fonctionnel il déclenche, le cas échéant) vit dans
+/// `SuperPDPStatusCodeStore` (Réglages > Tables > Statuts SUPER PDP), pas ici : c'est cette
+/// table, éditable sans changement de code, qui fait foi. Un code absent de la table ou
+/// sans règle configurée reste purement informationnel (visible dans le journal SUPER PDP
+/// de la facture) sans jamais forcer de changement de statut — comportement sûr par
+/// défaut, pas une omission à corriger d'urgence.
+///
+/// Reconnaît aussi quelques mots libres tolérés avant l'introduction des codes détaillés
+/// (le champ `status` de `GET /invoices/{id}` n'est pas documenté aussi précisément que
+/// les codes de `invoice_events`) en repli si le code ne correspond à aucune entrée de la
+/// table. Partagé entre le rafraîchissement manuel (bouton "Statut PDP" de la fiche
+/// facture) et la synchronisation périodique en arrière-plan.
 enum PDPStatusMapper {
-    static func mapPDPStatusToLocal(_ pdpStatus: String) -> InvoiceStatus? {
+    static func functionalTransition(for pdpStatus: String) -> InvoiceStatus? {
+        if let configured = SuperPDPStatusCodeStore.shared.functionalTransition(for: pdpStatus) {
+            return configured
+        }
         let s = pdpStatus.lowercased()
         switch s {
-        case "fr:200": return .sentToPDP
-        case "fr:201": return .sentToRecipient
-        case "fr:202": return .receivedByRecipient
-        case "fr:203": return .madeAvailable
-        case "fr:204": return .acknowledged
-        case "fr:208": return .onHold
-        case "fr:207", "accepted", "processed", "received": return .accepted
-        case "fr:206", "rejected": return .rejected
-        case "fr:210": return .refused
-        case "fr:213": return .technicallyRejected
-        case "fr:209": return .completed
-        case "fr:211": return .paymentSent
-        case "fr:212", "encaissée", "encaissee", "paid": return .paid
-        case "fr:320", "annulée", "annulee", "cancelled": return .cancelled
+        case "accepted", "processed", "received": return .accepted
+        case "rejected": return .refused
+        case "paid", "encaissée", "encaissee": return .paid
+        case "cancelled", "annulée", "annulee": return .cancelled
         default: return nil
         }
     }
@@ -32,7 +33,7 @@ enum PDPStatusMapper {
     /// Statuts pour lesquels un dépôt SUPER PDP existant n'a plus rien à apprendre : la
     /// synchronisation périodique ignore ces factures pour ne pas interroger l'API en pure
     /// perte (voir aussi `Invoice.superPDPRemoteID`, requis pour même envisager une requête).
-    static let terminalStatuses: Set<InvoiceStatus> = [.paid, .cancelled, .rejected, .refused, .technicallyRejected]
+    static let terminalStatuses: Set<InvoiceStatus> = [.paid, .cancelled, .refused]
 }
 
 /// Interroge périodiquement SUPER PDP pour les factures déposées mais pas encore à un
@@ -47,17 +48,18 @@ final class PDPPeriodicSyncEngine: ObservableObject {
 
     private var task: Task<Void, Never>?
 
-    /// Entre deux cycles, en secondes. 15 minutes : assez réactif pour un usage
-    /// quotidien sans multiplier les appels à l'API SUPER PDP (quota, latence).
-    static let interval: TimeInterval = 15 * 60
-
     func start(store: InvoiceStore, credentials: @escaping () -> SuperPDPCredentials) {
         guard task == nil else { return }
         isRunning = true
         task = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.runOnce(store: store, credentials: credentials())
-                try? await Task.sleep(nanoseconds: UInt64(Self.interval * 1_000_000_000))
+                let current = credentials()
+                await self?.runOnce(store: store, credentials: current)
+                // Relu à chaque cycle (pas capturé une fois pour toutes) : un changement de
+                // `syncIntervalMinutes` dans Réglages > Application > SUPER PDP prend effet
+                // dès le prochain cycle, sans redémarrer le moteur.
+                let minutes = max(SuperPDPCredentials.minSyncIntervalMinutes, current.syncIntervalMinutes)
+                try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
             }
         }
     }
@@ -83,7 +85,7 @@ final class PDPPeriodicSyncEngine: ObservableObject {
             do {
                 let service = SuperPDPService()
                 let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: credentials)
-                guard let mapped = PDPStatusMapper.mapPDPStatusToLocal(updated.status) else { continue }
+                guard let mapped = PDPStatusMapper.functionalTransition(for: updated.status) else { continue }
                 let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
                 let isCancellation = mapped == .cancelled && invoice.status != .cancelled && invoice.status != .paid
                 guard (isAdvance || isCancellation) && mapped != invoice.status else { continue }

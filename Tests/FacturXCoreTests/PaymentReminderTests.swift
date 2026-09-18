@@ -15,7 +15,7 @@ final class PaymentReminderTests: XCTestCase {
     }
 
     func testOverdueRequiresPastDueDateAndUnpaidStatus() {
-        XCTAssertTrue(makeInvoice(status: .sentToPDP, dueDaysFromNow: -5).isOverdue)
+        XCTAssertTrue(makeInvoice(status: .sent, dueDaysFromNow: -5).isOverdue)
         XCTAssertFalse(makeInvoice(status: .paid, dueDaysFromNow: -5).isOverdue, "une facture payée n'est jamais en retard")
         XCTAssertFalse(makeInvoice(status: .cancelled, dueDaysFromNow: -5).isOverdue, "une facture annulée n'est jamais en retard")
         XCTAssertFalse(makeInvoice(status: .issued, dueDaysFromNow: 5).isOverdue, "échéance future : pas en retard")
@@ -27,12 +27,12 @@ final class PaymentReminderTests: XCTestCase {
     }
 
     func testOverdueDaysCountsElapsedDays() {
-        let inv = makeInvoice(status: .sentToPDP, dueDaysFromNow: -10)
+        let inv = makeInvoice(status: .sent, dueDaysFromNow: -10)
         XCTAssertEqual(inv.overdueDays, 10)
     }
 
     func testComposerFillsInInvoiceNumberAndAmountForEveryLevel() {
-        let inv = makeInvoice(status: .sentToPDP, dueDaysFromNow: -3)
+        let inv = makeInvoice(status: .sent, dueDaysFromNow: -3)
         for level in PaymentReminderLevel.allCases {
             let email = PaymentReminderComposer.compose(level: level, for: inv)
             XCTAssertTrue(email.subject.contains(inv.number))
@@ -43,14 +43,14 @@ final class PaymentReminderTests: XCTestCase {
     }
 
     func testLegalPenaltyLevelMentionsLegalNotes() {
-        let inv = makeInvoice(status: .sentToPDP, dueDaysFromNow: -20)
+        let inv = makeInvoice(status: .sent, dueDaysFromNow: -20)
         let email = PaymentReminderComposer.compose(level: .legalPenalty, for: inv)
         XCTAssertTrue(email.body.contains(inv.legalNotePMT))
         XCTAssertTrue(email.body.contains(inv.legalNotePMD))
     }
 
     func testFriendlyLevelDoesNotMentionLegalPenalties() {
-        let inv = makeInvoice(status: .sentToPDP, dueDaysFromNow: -3)
+        let inv = makeInvoice(status: .sent, dueDaysFromNow: -3)
         let email = PaymentReminderComposer.compose(level: .friendly, for: inv)
         XCTAssertFalse(email.body.contains(inv.legalNotePMT))
     }

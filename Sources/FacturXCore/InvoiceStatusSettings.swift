@@ -42,41 +42,31 @@ public final class InvoiceStatusStore: ObservableObject {
         }
     }
 
-    /// Code d'événement SUPER PDP associé à chaque statut standard (table officielle
-    /// "Meaning of fr:* statuses" de la doc SUPER PDP — https://superpdp.tech/openapi —
-    /// et Spécifications Externes AIFE chapitres 5-6). Non modifiable par l'utilisateur :
-    /// c'est cette table, et non la donnée persistée, qui fait foi (voir `load()`), pour
-    /// éviter qu'une valeur erronée reste bloquée en local. `accepted`/`rejected`/
-    /// `cancelled` gardent volontairement leurs codes déjà en usage avant cette évolution
-    /// (fr:207/fr:206/fr:320) — la correction vers les codes officiellement exacts
-    /// (fr:205 pour "Acceptée" ; pas d'équivalent réforme pour "Annulée" ; et `rejected`
-    /// recouvre déjà, une fois corrigé, le même sens que `technicallyRejected` — à
-    /// clarifier dans ce même chantier) est volontairement séparée de celui-ci.
+    /// Code d'événement SUPER PDP envoyé quand ce statut fonctionnel est atteint (table
+    /// officielle "Meaning of fr:* statuses" de la doc SUPER PDP —
+    /// https://superpdp.tech/openapi — et Spécifications Externes AIFE chapitres 5-6).
+    /// Non modifiable par l'utilisateur : c'est cette table, et non la donnée persistée,
+    /// qui fait foi (voir `load()`). Chaque code ici est bien dans l'énumération
+    /// `status_code_create` documentée par SUPER PDP (donc réellement envoyable) — c'est
+    /// le pendant "envoi" de `PDPStatusMapper.functionalTransition(for:)` (réception),
+    /// dans `SuperPDPStatusSync.swift`. `draft`/`issued`/`cancelled` n'ont pas de code :
+    /// purement locaux (aucun équivalent "Annulée" dans la table officielle — voir la doc
+    /// de l'enum `InvoiceStatus`).
     static func reformCode(for status: InvoiceStatus) -> String? {
         switch status {
-        case .sentToPDP: return "200"            // Déposée — jamais envoyé isolément, voir notifyPDPStatusChange
-        case .sentToRecipient: return "fr:201"   // Envoyée — réseau, non créable via l'API
-        case .receivedByRecipient: return "fr:202" // Reçue — réseau, non créable via l'API
-        case .madeAvailable: return "fr:203"     // Mise à disposition — réseau, non créable via l'API
-        case .acknowledged: return "fr:204"      // Accusé de réception
-        case .onHold: return "fr:208"            // En attente
-        case .accepted: return "fr:207"          // Accepté par le destinataire (code à corriger, voir doc de l'enum)
-        case .rejected: return "fr:206"          // Refusé par le destinataire (code à corriger, voir doc de l'enum)
-        case .refused: return "fr:210"           // Refusée par le destinataire (AIFE "REFUSEE")
-        case .technicallyRejected: return "fr:213" // Rejetée, validation technique — réseau, non créable via l'API
-        case .completed: return "fr:209"         // Complétée
-        case .paymentSent: return "fr:211"       // Paiement envoyé
-        case .paid: return "fr:212"              // Facture encaissée
-        case .cancelled: return "fr:320"         // Facture annulée (code invalide côté réforme, voir doc de l'enum)
+        case .sent: return "200"          // Déposée — jamais envoyé isolément, voir notifyPDPStatusChange
+        case .accepted: return "fr:205"   // Acceptée (AIFE "APPROUVEE")
+        case .disputed: return "fr:207"   // Contestée (AIFE "LITIGEE")
+        case .refused: return "fr:210"    // Refusée (AIFE "REFUSEE")
+        // Même code que .paid : la table officielle fr:2XX n'a qu'un événement générique
+        // "Paiement reçu" (AIFE distingue PAYEE_PARTIELLEMENT/PAYEE_TOTALEMENT côté
+        // fonctionnel, mais pas par un code réseau séparé). Le montant réel se distingue
+        // via les données déclarées (`reportedData`) jointes à l'envoi, pas par le code.
+        case .partiallyPaid: return "fr:212"
+        case .paid: return "fr:212"       // Paiement reçu (AIFE "ENCAISSEE")
         default: return nil
         }
     }
-
-    /// Codes réseau que SUPER PDP rapporte automatiquement (déposée exceptée, portée par
-    /// le dépôt lui-même) mais que l'API ne permet pas de créer via `POST /invoice_events`
-    /// (absents de l'énumération `status_code_create` documentée). Un statut associé à l'un
-    /// de ces codes n'est donc jamais envoyé manuellement — seulement reçu en synchronisation.
-    public static let networkOnlyReformCodes: Set<String> = ["200", "fr:200", "fr:201", "fr:202", "fr:203", "fr:213"]
 
     public init() {
         self.overrides = InvoiceStatusStore.defaults
@@ -97,9 +87,14 @@ public final class InvoiceStatusStore: ObservableObject {
             for s in InvoiceStatus.allCases {
                 byID[s.rawValue]?.reformCode = InvoiceStatusStore.reformCode(for: s)
             }
+            // Un id qui ne correspond à aucun cas actuel de l'enum — un ancien statut
+            // retiré d'une version précédente (ex. "sentToPDP"/"rejected" avant le passage
+            // au modèle réduit à 8 statuts) — ne doit jamais réapparaître : il ne peut de
+            // toute façon jamais être assigné à une facture (`Invoice.status` est typé sur
+            // l'enum actuel). Avant ce correctif, ces entrées orphelines étaient traitées
+            // comme des valeurs "personnalisées" et resurgissaient indéfiniment.
             overrides = InvoiceStatus.allCases.compactMap { byID[$0.rawValue] }
-            let standard = Set(InvoiceStatus.allCases.map { $0.rawValue })
-            overrides.append(contentsOf: decoded.filter { !standard.contains($0.id) })
+            save()
         }
     }
 
