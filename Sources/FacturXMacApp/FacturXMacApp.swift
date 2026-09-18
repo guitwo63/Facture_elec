@@ -714,7 +714,7 @@ struct RootView: View {
                         .foregroundStyle(allConnectionsConfigured ? Color.secondary : Color.orange)
                 }
                 .buttonStyle(.borderless)
-                .help("État des connexions distantes (SUPER PDP, pCloud)")
+                .help("État des connexions distantes activées")
                 Button {
                     showSettings = true
                 } label: {
@@ -855,10 +855,12 @@ struct RootView: View {
         }
     }
 
-    /// Configuration (pas connectivité live) des deux services distants — un simple repère
-    /// dans l'en-tête, le test réel se fait à la demande dans ConnectionStatusView.
+    /// Configuration (pas connectivité live) des services distants activés — un simple
+    /// repère dans l'en-tête, le test réel se fait à l'ouverture de ConnectionStatusView.
+    /// PDP ne compte que s'il est activé (`usePDP`) : désactivé, il n'y a rien à signaler.
     private var allConnectionsConfigured: Bool {
-        superPDPSettings.credentials.isConfigured && pcloudSettings.credentials.isConfigured
+        let pdpOK = !superPDPSettings.credentials.usePDP || superPDPSettings.credentials.isConfigured
+        return pdpOK && pcloudSettings.credentials.isConfigured
     }
 
     private func syncAuditActor() {
@@ -879,13 +881,17 @@ struct RootView: View {
     }
 }
 
-/// Témoin de configuration + test à la demande pour les deux services distants (SUPER PDP,
-/// pCloud). Pas de test automatique au chargement : uniquement sur clic, comme le
-/// "Tester la connexion" déjà en place côté pCloud (Réglages > Application > Sauvegardes).
+/// Témoin de configuration + test pour les services distants activés (SUPER PDP, pCloud,
+/// Chorus Pro/PISTE, SMTP — voir `visibleRows`, qui masque les non activés). Le test se
+/// lance automatiquement à l'ouverture pour les trois premiers (lecture seule côté API,
+/// sans risque à répéter) ; SMTP reste manuel, son test envoyant un vrai email (Réglages >
+/// Connexions > Alertes email).
 struct ConnectionStatusView: View {
     @ObservedObject var pdpSync: PDPPeriodicSyncEngine
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var pcloudSettings: PCloudSettings
+    @EnvironmentObject var chorusSettings: ChorusProSettings
+    @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var store: InvoiceStore
     @Environment(\.dismiss) private var dismiss
     @State private var syncingNow = false
@@ -897,6 +903,48 @@ struct ConnectionStatusView: View {
     @State private var pcloudTesting = false
     @State private var pcloudResult: String?
     @State private var pcloudOK: Bool?
+
+    @State private var chorusTesting = false
+    @State private var chorusResult: String?
+    @State private var chorusOK: Bool?
+
+    /// Seules les connexions réellement activées apparaissent : PDP se coupe entièrement
+    /// via son interrupteur (`usePDP`) ; les autres n'ont pas d'interrupteur dédié, alors
+    /// « activée » veut dire « des identifiants ont été saisis ».
+    private var visibleRows: [AnyView] {
+        var rows: [AnyView] = []
+        if superPDPSettings.credentials.usePDP {
+            rows.append(AnyView(connectionRow(
+                name: "SUPER PDP", systemImage: "checkmark.shield",
+                configured: superPDPSettings.credentials.isConfigured,
+                testing: pdpTesting, result: pdpResult, ok: pdpOK, test: testSuperPDP
+            )))
+        }
+        if pcloudSettings.credentials.isConfigured {
+            rows.append(AnyView(connectionRow(
+                name: "pCloud", systemImage: "icloud",
+                configured: true,
+                testing: pcloudTesting, result: pcloudResult, ok: pcloudOK, test: testPCloud
+            )))
+        }
+        if chorusSettings.credentials.isConfigured {
+            rows.append(AnyView(connectionRow(
+                name: "Chorus Pro (PISTE)", systemImage: "network",
+                configured: true,
+                testing: chorusTesting, result: chorusResult, ok: chorusOK, test: testChorusPro
+            )))
+        }
+        if smtpSettings.credentials.isConfigured {
+            // Pas de test au clic ici : contrairement aux autres, tester SMTP envoie un
+            // vrai email — l'automatiser à chaque ouverture du panneau serait intrusif.
+            // Le test réel ("Envoyer un test") reste dans Réglages > Connexions > SMTP.
+            rows.append(AnyView(connectionRow(
+                name: "Alertes email (SMTP)", systemImage: "envelope",
+                configured: true, testing: false, result: nil, ok: nil, test: nil
+            )))
+        }
+        return rows
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -912,24 +960,31 @@ struct ConnectionStatusView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    connectionRow(
-                        name: "SUPER PDP", systemImage: "checkmark.shield",
-                        configured: superPDPSettings.credentials.isConfigured,
-                        testing: pdpTesting, result: pdpResult, ok: pdpOK, test: testSuperPDP
-                    )
-                    Divider()
-                    connectionRow(
-                        name: "pCloud", systemImage: "icloud",
-                        configured: pcloudSettings.credentials.isConfigured,
-                        testing: pcloudTesting, result: pcloudResult, ok: pcloudOK, test: testPCloud
-                    )
-                    Divider()
-                    pdpSyncSection
+                    let rows = visibleRows
+                    if rows.isEmpty {
+                        Text("Aucune connexion externe activée.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { idx, row in
+                            row
+                            if idx < rows.count - 1 { Divider() }
+                        }
+                    }
+                    if superPDPSettings.credentials.usePDP {
+                        Divider()
+                        pdpSyncSection
+                    }
                 }
                 .padding()
             }
         }
-        .frame(width: 460, height: 420)
+        .frame(width: 460, height: 480)
+        // Lancé au clic sur l'icône "État des connexions" de la barre d'outils : consulter
+        // le statut sans avoir en plus à cliquer "Tester" sur chaque ligne une par une.
+        .task {
+            if superPDPSettings.credentials.usePDP && superPDPSettings.credentials.isConfigured { testSuperPDP() }
+            if pcloudSettings.credentials.isConfigured { testPCloud() }
+            if chorusSettings.credentials.isConfigured { testChorusPro() }
+        }
     }
 
     /// Statut de la synchronisation périodique des statuts SUPER PDP (factures déposées,
@@ -975,7 +1030,7 @@ struct ConnectionStatusView: View {
     @ViewBuilder
     private func connectionRow(
         name: String, systemImage: String, configured: Bool,
-        testing: Bool, result: String?, ok: Bool?, test: @escaping () -> Void
+        testing: Bool, result: String?, ok: Bool?, test: (() -> Void)?
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -987,17 +1042,19 @@ struct ConnectionStatusView: View {
                     Label("Non configuré", systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
                 }
             }
-            Button {
-                test()
-            } label: {
-                if testing {
-                    HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Test…") }
-                } else {
-                    Label("Tester la connexion", systemImage: "network")
+            if let test {
+                Button {
+                    test()
+                } label: {
+                    if testing {
+                        HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Test…") }
+                    } else {
+                        Label("Tester la connexion", systemImage: "network")
+                    }
                 }
+                .buttonStyle(.bordered)
+                .disabled(testing || !configured)
             }
-            .buttonStyle(.bordered)
-            .disabled(testing || !configured)
             if let result {
                 Text(result).font(.caption).foregroundStyle(ok == true ? .green : .red)
             }
@@ -1035,6 +1092,23 @@ struct ConnectionStatusView: View {
                 pcloudResult = "Échec : \(error.localizedDescription)"
             }
             pcloudTesting = false
+        }
+    }
+
+    private func testChorusPro() {
+        chorusTesting = true
+        chorusResult = nil
+        let credentials = chorusSettings.credentials
+        Task {
+            do {
+                _ = try await ChorusProService().fetchToken(credentials: credentials)
+                chorusOK = true
+                chorusResult = "Connexion réussie."
+            } catch {
+                chorusOK = false
+                chorusResult = "Échec : \(error.localizedDescription)"
+            }
+            chorusTesting = false
         }
     }
 }
@@ -1687,52 +1761,56 @@ struct InvoicesTabView: View {
                     Text(m).font(.caption).foregroundStyle(.secondary)
                         .onChange(of: query) { _ in exportMessage = nil }
                 }
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Rechercher (numéro, client, SIREN…)", text: $query)
-                        .textFieldStyle(.plain)
-                    if !query.isEmpty {
-                        Button { query = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Rechercher (numéro, client, SIREN…)", text: $query)
+                            .textFieldStyle(.plain)
+                        if !query.isEmpty {
+                            Button { query = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+                    Button {
+                        showAdvancedFilters.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: showAdvancedFilters ? "chevron.down" : "chevron.right")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.caption)
+                            Text("Filtres avancés")
+                                .font(.caption.bold())
+                            Text("(\(activeAdvancedFilterCount))")
+                                .font(.caption.bold())
+                                .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    if activeAdvancedFilterCount > 0 {
+                        Button {
+                            resetAdvancedFilters()
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.borderless)
+                        .help("Réinitialiser les filtres avancés")
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
-                DisclosureGroup(isExpanded: $showAdvancedFilters) {
+                if showAdvancedFilters {
                     HStack(alignment: .center, spacing: 12) {
                         advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
-                        if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
-                            advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
-                        }
-                        if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
-                            advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
-                        }
+                        advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
+                        advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
                         Spacer(minLength: 0)
                     }
                     .padding(.top, 4)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.caption)
-                        Text("Filtres avancés")
-                            .font(.caption.bold())
-                        Text("(\(activeAdvancedFilterCount))")
-                            .font(.caption.bold())
-                            .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
-                        if activeAdvancedFilterCount > 0 {
-                            Button {
-                                resetAdvancedFilters()
-                            } label: {
-                                Image(systemName: "xmark.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Réinitialiser les filtres avancés")
-                        }
-                    }
                 }
             }
             .padding(12)
@@ -5351,7 +5429,8 @@ struct SettingsTabView: View {
         if auth.currentUser?.isAdmin == true {
             items.append(contentsOf: [
                 TabItem(index: 1, label: "Tables", icon: "tablecells"),
-                TabItem(index: 2, label: "Application", icon: "gearshape.2")
+                TabItem(index: 2, label: "Application", icon: "gearshape.2"),
+                TabItem(index: 5, label: "Connexions", icon: "network")
             ])
         }
         // Le journal (historique des statuts) est utile à tous les rôles, pas
@@ -5384,6 +5463,8 @@ struct SettingsTabView: View {
                 AuditLogView()
             case 4:
                 DataAdminView()
+            case 5:
+                ConnectionsSettingsView()
             default:
                 ApplicationSettingsView()
             }
@@ -5724,9 +5805,6 @@ struct EmailTemplateEditorSheet: View {
 }
 
 struct ApplicationSettingsView: View {
-    @EnvironmentObject var chorusSettings: ChorusProSettings
-    @EnvironmentObject var superPDPSettings: SuperPDPSettings
-    @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @EnvironmentObject var twoFactorSettings: TwoFactorSettings
     @EnvironmentObject var moduleStore: ModuleStore
@@ -5737,23 +5815,10 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @State private var twoFactorExpanded = false
-    @State private var testMessage: String?
-    @State private var testing = false
-    @State private var superPDPTestMessage: String?
-    @State private var superPDPTesting = false
-    @State private var pdpSessionMessage: String?
-    @State private var pdpSessionChecking = false
     @State private var envExpanded = true
     @State private var modulesExpanded = false
     @State private var emailTemplatesExpanded = false
     @State private var societiesExpanded = false
-    @State private var dinumExpanded = false
-    @State private var pisteExpanded = false
-    @State private var superPDPExpanded = false
-    @State private var smtpExpanded = false
-    @State private var pcloudExpanded = false
-    @State private var smtpTestMessage: String?
-    @State private var smtpTesting = false
     @State private var tagsExpanded = false
     @State private var numberingExpanded = false
     @State private var numberingCompanyID: UUID?
@@ -5829,6 +5894,227 @@ struct ApplicationSettingsView: View {
                     Label("Sociétés du périmètre", systemImage: "building.2.fill")
                         .font(.headline)
                 }
+                DisclosureGroup(isExpanded: $emailTemplatesExpanded) {
+                    EmailTemplatesAdminView()
+                        .padding(8)
+                } label: {
+                    Label("Emails automatiques (devis, commande, facture)", systemImage: "paperplane.fill")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $twoFactorExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Active la possibilité, pour chaque utilisateur, d'activer la double authentification (application TOTP — Google Authenticator, Authy…) sur son propre profil (onglet Profil). Ce réglage est global à l'application ; désactivé, aucun utilisateur ne peut activer ni utiliser la 2FA, même s'il l'avait configurée auparavant.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Toggle("Autoriser la double authentification (2FA)", isOn: Binding(
+                            get: { twoFactorSettings.enabledSolutionWide },
+                            set: { twoFactorSettings.enabledSolutionWide = $0; twoFactorSettings.save() }
+                        ))
+                        .toggleStyle(.switch)
+                    }.padding(8)
+                } label: {
+                    Label("Sécurité — Double authentification", systemImage: "lock.shield")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $tagsExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Définissez des tags personnalisés pour classifier vos tiers. Chaque tier peut porter plusieurs tags.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if tagStore.tags.isEmpty {
+                            Text("Aucun tag défini.").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(tagStore.tags) { tag in
+                                HStack {
+                                    Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
+                                    TextField("Nom du tag", text: Binding(
+                                        get: { tag.name },
+                                        set: { newName in
+                                            var t = tag; t.name = newName; tagStore.upsert(t)
+                                        }
+                                    )).frame(maxWidth: 200)
+                                    ColorPicker("", selection: Binding(
+                                        get: { Color(hex: tag.hexColor) },
+                                        set: { newColor in
+                                            var t = tag; t.hexColor = hexString(from: newColor); tagStore.upsert(t)
+                                        }
+                                    )).labelsHidden().frame(width: 40)
+                                    Button(role: .destructive) {
+                                        tagStore.delete(tag)
+                                    } label: { Image(systemName: "trash") }
+                                        .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                        Divider()
+                        Text("Ajouter un tag").font(.caption.bold())
+                        HStack {
+                            ColorPicker("", selection: Binding(
+                                get: { Color(hex: newTagHex) },
+                                set: { newTagHex = hexString(from: $0) }
+                            )).labelsHidden().frame(width: 30)
+                            TextField("Nom du nouveau tag", text: $newTagName)
+                            Button {
+                                guard !newTagName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                                tagStore.upsert(PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex))
+                                newTagName = ""
+                                newTagHex = "555555"
+                            } label: { Label("Ajouter", systemImage: "plus.circle.fill") }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Tags personnalisés", systemImage: "tag")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $numberingExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini. Le compteur est toujours indépendant par société émettrice ; le format (préfixe, année, séparateur) peut l'être aussi si une société a besoin d'une numérotation différente — sinon toutes les sociétés partagent le format par défaut.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        let societies = auth.visibleSocieties(for: auth.currentUser)
+                        if !societies.isEmpty {
+                            Picker("Société", selection: $numberingCompanyID) {
+                                Text("Toutes (format par défaut)").tag(UUID?.none)
+                                ForEach(societies) { c in
+                                    Text(c.displayName).tag(UUID?.some(c.id))
+                                }
+                            }
+                            if let cid = numberingCompanyID {
+                                if store.numberFormatOverrides[cid] == nil {
+                                    HStack(spacing: 6) {
+                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                        Button("Personnaliser pour cette société") {
+                                            store.numberFormatOverrides[cid] = store.numberingFormat(for: nil)
+                                            store.save()
+                                        }.buttonStyle(.link).font(.caption2)
+                                    }
+                                } else {
+                                    Button("Revenir au format par défaut", role: .destructive) {
+                                        store.numberFormatOverrides.removeValue(forKey: cid)
+                                        store.save()
+                                    }.buttonStyle(.link).font(.caption2)
+                                }
+                            }
+                        }
+                        HStack {
+                            Text("Préfixe texte").font(.caption)
+                            TextField("ex. FAC", text: activeNumberingFormatBinding.prefix)
+                                .frame(width: 140)
+                        }
+                        Toggle("Inclure l'année", isOn: activeNumberingFormatBinding.includeYear)
+                            .toggleStyle(.switch)
+                        HStack {
+                            Text("Numéro de début").font(.caption)
+                            Stepper(value: activeNumberingFormatBinding.start, in: 1...999999) {
+                                Text("\(activeNumberingFormatBinding.wrappedValue.start)")
+                            }
+                        }
+                        Toggle("Séparer par un \"-\"", isOn: activeNumberingFormatBinding.useSeparator)
+                            .toggleStyle(.switch)
+                        Divider()
+                        HStack {
+                            Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
+                            Text(store.previewNextNumber(companyID: numberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
+                            Spacer()
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Numérotation des factures", systemImage: "number")
+                        .font(.headline)
+                }
+
+                Divider()
+                HStack {
+                    Text("Facture_elec v\(AppVersion.current) — © 2026 \(AppVersion.copyrightHolder) — \(AppVersion.licenseName)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Link(destination: AppVersion.repositoryURL) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "link")
+                            Text("GitHub")
+                        }
+                    }.font(.caption.weight(.semibold))
+                }
+
+                Spacer()
+            }.padding()
+        }
+        .sheet(item: $editingSociety) { entry in
+            DirectoryEditorView(entry: entry, onSave: { updated in
+                directory.upsert(updated)
+                editingSociety = nil
+            }, onDelete: { toDelete in
+                directory.delete(toDelete)
+                editingSociety = nil
+            })
+        }
+        .sheet(isPresented: $creatingSociety) {
+            DirectoryEditorView(initialKind: .societe) { newEntry in
+                directory.upsert(newEntry)
+                creatingSociety = false
+            }
+        }
+    }
+
+    private func previewCompanyID() -> UUID? {
+        let visible = auth.visibleSocieties(for: auth.currentUser)
+        if visible.count == 1 { return visible.first?.id }
+        return nil
+    }
+
+
+    /// Le format en cours d'édition : celui de la société sélectionnée (créé à la volée à
+    /// partir du défaut si elle n'a pas encore de réglage propre), ou le format par défaut
+    /// si "Toutes" est sélectionné. Écrire dedans met à jour la bonne cible chez `store`.
+    private var activeNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
+        Binding(
+            get: {
+                guard let cid = numberingCompanyID else { return store.numberingFormat(for: nil) }
+                return store.numberFormatOverrides[cid] ?? store.numberingFormat(for: nil)
+            },
+            set: { newValue in
+                if let cid = numberingCompanyID {
+                    store.numberFormatOverrides[cid] = newValue
+                } else {
+                    store.numberPrefix = newValue.prefix
+                    store.numberIncludeYear = newValue.includeYear
+                    store.numberStart = newValue.start
+                    store.numberUseSeparator = newValue.useSeparator
+                }
+                store.save()
+            }
+        )
+    }
+}
+
+/// Regroupe tout ce qui est lié à un service externe (annuaires, dépôt réglementaire,
+/// email, sauvegarde) — séparé d'`ApplicationSettingsView` pour ne pas noyer les réglages
+/// purement internes (environnement, modules, sociétés…) au milieu de champs
+/// d'identifiants. Même structure de section (DisclosureGroup) que le reste des réglages.
+struct ConnectionsSettingsView: View {
+    @EnvironmentObject var chorusSettings: ChorusProSettings
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var smtpSettings: SMTPSettings
+    @EnvironmentObject var appEnv: AppEnvironment
+    @EnvironmentObject var auth: AuthStore
+    @State private var dinumExpanded = false
+    @State private var pisteExpanded = false
+    @State private var superPDPExpanded = true
+    @State private var smtpExpanded = false
+    @State private var pcloudExpanded = false
+    @State private var testMessage: String?
+    @State private var testing = false
+    @State private var superPDPTestMessage: String?
+    @State private var superPDPTesting = false
+    @State private var pdpSessionMessage: String?
+    @State private var pdpSessionChecking = false
+    @State private var smtpTestMessage: String?
+    @State private var smtpTesting = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
                 DisclosureGroup(isExpanded: $dinumExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("L'API recherche-entreprises.api.gouv.fr (DINUM) pré-remplit la désignation et l'adresse postale d'un tiers à partir d'un SIREN, SIRET ou nom. Gratuite, publique, sans compte ni jeton. Ne donne pas l'adresse de routage PPF.")
@@ -6117,29 +6403,6 @@ struct ApplicationSettingsView: View {
                         .font(.headline)
                 }
 
-                DisclosureGroup(isExpanded: $emailTemplatesExpanded) {
-                    EmailTemplatesAdminView()
-                        .padding(8)
-                } label: {
-                    Label("Emails automatiques (devis, commande, facture)", systemImage: "paperplane.fill")
-                        .font(.headline)
-                }
-
-                DisclosureGroup(isExpanded: $twoFactorExpanded) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Active la possibilité, pour chaque utilisateur, d'activer la double authentification (application TOTP — Google Authenticator, Authy…) sur son propre profil (onglet Profil). Ce réglage est global à l'application ; désactivé, aucun utilisateur ne peut activer ni utiliser la 2FA, même s'il l'avait configurée auparavant.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Toggle("Autoriser la double authentification (2FA)", isOn: Binding(
-                            get: { twoFactorSettings.enabledSolutionWide },
-                            set: { twoFactorSettings.enabledSolutionWide = $0; twoFactorSettings.save() }
-                        ))
-                        .toggleStyle(.switch)
-                    }.padding(8)
-                } label: {
-                    Label("Sécurité — Double authentification", systemImage: "lock.shield")
-                        .font(.headline)
-                }
-
                 DisclosureGroup(isExpanded: $pcloudExpanded) {
                     CloudBackupSettingsView()
                         .padding(8)
@@ -6148,174 +6411,9 @@ struct ApplicationSettingsView: View {
                         .font(.headline)
                 }
 
-                DisclosureGroup(isExpanded: $tagsExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Définissez des tags personnalisés pour classifier vos tiers. Chaque tier peut porter plusieurs tags.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if tagStore.tags.isEmpty {
-                            Text("Aucun tag défini.").font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(tagStore.tags) { tag in
-                                HStack {
-                                    Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
-                                    TextField("Nom du tag", text: Binding(
-                                        get: { tag.name },
-                                        set: { newName in
-                                            var t = tag; t.name = newName; tagStore.upsert(t)
-                                        }
-                                    )).frame(maxWidth: 200)
-                                    ColorPicker("", selection: Binding(
-                                        get: { Color(hex: tag.hexColor) },
-                                        set: { newColor in
-                                            var t = tag; t.hexColor = hexString(from: newColor); tagStore.upsert(t)
-                                        }
-                                    )).labelsHidden().frame(width: 40)
-                                    Button(role: .destructive) {
-                                        tagStore.delete(tag)
-                                    } label: { Image(systemName: "trash") }
-                                        .buttonStyle(.borderless)
-                                }
-                            }
-                        }
-                        Divider()
-                        Text("Ajouter un tag").font(.caption.bold())
-                        HStack {
-                            ColorPicker("", selection: Binding(
-                                get: { Color(hex: newTagHex) },
-                                set: { newTagHex = hexString(from: $0) }
-                            )).labelsHidden().frame(width: 30)
-                            TextField("Nom du nouveau tag", text: $newTagName)
-                            Button {
-                                guard !newTagName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                                tagStore.upsert(PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex))
-                                newTagName = ""
-                                newTagHex = "555555"
-                            } label: { Label("Ajouter", systemImage: "plus.circle.fill") }
-                                .buttonStyle(.borderedProminent)
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Tags personnalisés", systemImage: "tag")
-                        .font(.headline)
-                }
-
-                DisclosureGroup(isExpanded: $numberingExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Personnalisez le format des numéros de facture. Le chrono s'incrémente automatiquement à chaque création et démarre au numéro de début défini. Le compteur est toujours indépendant par société émettrice ; le format (préfixe, année, séparateur) peut l'être aussi si une société a besoin d'une numérotation différente — sinon toutes les sociétés partagent le format par défaut.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        let societies = auth.visibleSocieties(for: auth.currentUser)
-                        if !societies.isEmpty {
-                            Picker("Société", selection: $numberingCompanyID) {
-                                Text("Toutes (format par défaut)").tag(UUID?.none)
-                                ForEach(societies) { c in
-                                    Text(c.displayName).tag(UUID?.some(c.id))
-                                }
-                            }
-                            if let cid = numberingCompanyID {
-                                if store.numberFormatOverrides[cid] == nil {
-                                    HStack(spacing: 6) {
-                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
-                                        Button("Personnaliser pour cette société") {
-                                            store.numberFormatOverrides[cid] = store.numberingFormat(for: nil)
-                                            store.save()
-                                        }.buttonStyle(.link).font(.caption2)
-                                    }
-                                } else {
-                                    Button("Revenir au format par défaut", role: .destructive) {
-                                        store.numberFormatOverrides.removeValue(forKey: cid)
-                                        store.save()
-                                    }.buttonStyle(.link).font(.caption2)
-                                }
-                            }
-                        }
-                        HStack {
-                            Text("Préfixe texte").font(.caption)
-                            TextField("ex. FAC", text: activeNumberingFormatBinding.prefix)
-                                .frame(width: 140)
-                        }
-                        Toggle("Inclure l'année", isOn: activeNumberingFormatBinding.includeYear)
-                            .toggleStyle(.switch)
-                        HStack {
-                            Text("Numéro de début").font(.caption)
-                            Stepper(value: activeNumberingFormatBinding.start, in: 1...999999) {
-                                Text("\(activeNumberingFormatBinding.wrappedValue.start)")
-                            }
-                        }
-                        Toggle("Séparer par un \"-\"", isOn: activeNumberingFormatBinding.useSeparator)
-                            .toggleStyle(.switch)
-                        Divider()
-                        HStack {
-                            Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                            Text(store.previewNextNumber(companyID: numberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
-                            Spacer()
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Numérotation des factures", systemImage: "number")
-                        .font(.headline)
-                }
-
-                Divider()
-                HStack {
-                    Text("Facture_elec v\(AppVersion.current) — © 2026 \(AppVersion.copyrightHolder) — \(AppVersion.licenseName)")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Link(destination: AppVersion.repositoryURL) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "link")
-                            Text("GitHub")
-                        }
-                    }.font(.caption.weight(.semibold))
-                }
-
                 Spacer()
             }.padding()
         }
-        .sheet(item: $editingSociety) { entry in
-            DirectoryEditorView(entry: entry, onSave: { updated in
-                directory.upsert(updated)
-                editingSociety = nil
-            }, onDelete: { toDelete in
-                directory.delete(toDelete)
-                editingSociety = nil
-            })
-        }
-        .sheet(isPresented: $creatingSociety) {
-            DirectoryEditorView(initialKind: .societe) { newEntry in
-                directory.upsert(newEntry)
-                creatingSociety = false
-            }
-        }
-    }
-
-    private func previewCompanyID() -> UUID? {
-        let visible = auth.visibleSocieties(for: auth.currentUser)
-        if visible.count == 1 { return visible.first?.id }
-        return nil
-    }
-
-
-    /// Le format en cours d'édition : celui de la société sélectionnée (créé à la volée à
-    /// partir du défaut si elle n'a pas encore de réglage propre), ou le format par défaut
-    /// si "Toutes" est sélectionné. Écrire dedans met à jour la bonne cible chez `store`.
-    private var activeNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
-        Binding(
-            get: {
-                guard let cid = numberingCompanyID else { return store.numberingFormat(for: nil) }
-                return store.numberFormatOverrides[cid] ?? store.numberingFormat(for: nil)
-            },
-            set: { newValue in
-                if let cid = numberingCompanyID {
-                    store.numberFormatOverrides[cid] = newValue
-                } else {
-                    store.numberPrefix = newValue.prefix
-                    store.numberIncludeYear = newValue.includeYear
-                    store.numberStart = newValue.start
-                    store.numberUseSeparator = newValue.useSeparator
-                }
-                store.save()
-            }
-        )
     }
 }
 
@@ -9115,52 +9213,56 @@ struct OrdersTabView: View {
                     Text(m).font(.caption).foregroundStyle(.secondary)
                         .onChange(of: query) { _ in exportMessage = nil }
                 }
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Rechercher (numéro, client…)", text: $query)
-                        .textFieldStyle(.plain)
-                    if !query.isEmpty {
-                        Button { query = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Rechercher (numéro, client…)", text: $query)
+                            .textFieldStyle(.plain)
+                        if !query.isEmpty {
+                            Button { query = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+                    Button {
+                        showAdvancedFilters.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: showAdvancedFilters ? "chevron.down" : "chevron.right")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.caption)
+                            Text("Filtres avancés")
+                                .font(.caption.bold())
+                            Text("(\(activeAdvancedFilterCount))")
+                                .font(.caption.bold())
+                                .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    if activeAdvancedFilterCount > 0 {
+                        Button {
+                            resetAdvancedFilters()
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.borderless)
+                        .help("Réinitialiser les filtres avancés")
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
-                DisclosureGroup(isExpanded: $showAdvancedFilters) {
+                if showAdvancedFilters {
                     HStack(alignment: .center, spacing: 12) {
                         advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
-                        if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
-                            advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
-                        }
-                        if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
-                            advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
-                        }
+                        advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
+                        advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
                         Spacer(minLength: 0)
                     }
                     .padding(.top, 4)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.caption)
-                        Text("Filtres avancés")
-                            .font(.caption.bold())
-                        Text("(\(activeAdvancedFilterCount))")
-                            .font(.caption.bold())
-                            .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
-                        if activeAdvancedFilterCount > 0 {
-                            Button {
-                                resetAdvancedFilters()
-                            } label: {
-                                Image(systemName: "xmark.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Réinitialiser les filtres avancés")
-                        }
-                    }
                 }
             }
             .padding(12)
@@ -9520,51 +9622,55 @@ struct QuotesTabView: View {
                     Text(m).font(.caption).foregroundStyle(.secondary)
                         .onChange(of: query) { _ in exportMessage = nil }
                 }
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Rechercher (numéro, client…)", text: $query)
-                        .textFieldStyle(.plain)
-                    if !query.isEmpty {
-                        Button { query = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Rechercher (numéro, client…)", text: $query)
+                            .textFieldStyle(.plain)
+                        if !query.isEmpty {
+                            Button { query = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    Button {
+                        showAdvancedFilters.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: showAdvancedFilters ? "chevron.down" : "chevron.right")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.caption)
+                            Text("Filtres avancés")
+                                .font(.caption.bold())
+                            Text("(\(activeAdvancedFilterCount))")
+                                .font(.caption.bold())
+                                .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    if activeAdvancedFilterCount > 0 {
+                        Button {
+                            resetAdvancedFilters()
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.borderless)
+                        .help("Réinitialiser les filtres avancés")
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                DisclosureGroup(isExpanded: $showAdvancedFilters) {
+                if showAdvancedFilters {
                     HStack(alignment: .center, spacing: 12) {
                         advancedFilterRow(field: $advField1, value: $advValue1, index: 1)
-                        if advField1 != .none || !advValue1.isEmpty || showAdvancedFilters {
-                            advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
-                        }
-                        if advField2 != .none || !advValue2.isEmpty || showAdvancedFilters {
-                            advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
-                        }
+                        advancedFilterRow(field: $advField2, value: $advValue2, index: 2)
+                        advancedFilterRow(field: $advField3, value: $advValue3, index: 3)
                         Spacer(minLength: 0)
                     }
                     .padding(.top, 4)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.caption)
-                        Text("Filtres avancés")
-                            .font(.caption.bold())
-                        Text("(\(activeAdvancedFilterCount))")
-                            .font(.caption.bold())
-                            .foregroundStyle(activeAdvancedFilterCount > 0 ? Color.accentColor : .secondary)
-                        if activeAdvancedFilterCount > 0 {
-                            Button {
-                                resetAdvancedFilters()
-                            } label: {
-                                Image(systemName: "xmark.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Réinitialiser les filtres avancés")
-                        }
-                    }
                 }
             }
             .padding(12)
