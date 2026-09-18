@@ -100,17 +100,24 @@ public struct PCloudService {
 
     public func login(credentials: PCloudCredentials) async throws -> String {
         guard credentials.isConfigured else { throw PCloudError.notConfigured }
-        guard var comps = URLComponents(string: "\(baseURL(credentials))/userinfo") else {
+        guard let url = URL(string: "\(baseURL(credentials))/userinfo") else {
             throw PCloudError.invalidResponse
         }
-        comps.queryItems = [
+        // Identifiant et mot de passe passent dans le corps POST (form-urlencoded),
+        // jamais dans l'URL : une URL en query string se retrouve dans les journaux
+        // serveur, le cache réseau et tout proxy/outil de debug local.
+        var bodyComponents = URLComponents()
+        bodyComponents.queryItems = [
             URLQueryItem(name: "username", value: credentials.username),
             URLQueryItem(name: "password", value: credentials.password),
             URLQueryItem(name: "getauth", value: "1"),
             URLQueryItem(name: "logout", value: "1")
         ]
-        guard let url = comps.url else { throw PCloudError.invalidResponse }
-        let (data, _) = try await perform(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyComponents.percentEncodedQuery?.data(using: .utf8)
+        let (data, _) = try await perform(request)
         let json = try decodeJSON(data)
         try checkResult(json)
         guard let auth = json["auth"] as? String else { throw PCloudError.invalidResponse }
