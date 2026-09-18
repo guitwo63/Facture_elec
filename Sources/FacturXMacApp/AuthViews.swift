@@ -237,6 +237,111 @@ struct LoginView: View {
     }
 }
 
+/// Écran plein cadre affiché à la place du reste de l'application tant que
+/// l'email du compte connecté n'est pas validé (voir `RootView.body`). Seule
+/// la saisie du code et son renvoi sont accessibles ; la déconnexion permet de
+/// changer de compte.
+struct EmailVerificationGateView: View {
+    let user: User
+    @EnvironmentObject var auth: AuthStore
+    @State private var code = ""
+    @State private var errorMessage: String?
+    @State private var infoMessage: String?
+    @State private var verifying = false
+    @State private var resending = false
+
+    /// Anti-spam simple côté UI : un nouvel envoi n'est proposé que 60 s après le
+    /// précédent (le compte lui-même n'a pas de limite côté serveur).
+    private var resendAvailable: Bool {
+        guard let sentAt = auth.users.first(where: { $0.id == user.id })?.emailVerificationSentAt else { return true }
+        return Date().timeIntervalSince(sentAt) > 60
+    }
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: "envelope.badge.shield.half.filled")
+                    .font(.system(size: 56))
+                    .foregroundStyle(Color.orange)
+                Text("Validez votre adresse email").font(.title.bold())
+                Text("Un code a été envoyé à \(user.username).\nSaisissez-le ci-dessous pour activer votre compte.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            VStack(spacing: 12) {
+                TextField("Code de validation", text: $code)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+                    .multilineTextAlignment(.center)
+                    .submitLabel(.go)
+                    .onSubmit { verify() }
+                if let err = errorMessage {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+                if let info = infoMessage {
+                    Text(info).font(.caption).foregroundStyle(.green)
+                }
+                Button {
+                    verify()
+                } label: {
+                    HStack {
+                        if verifying { ProgressView().controlSize(.small).tint(.white) }
+                        Label("Valider", systemImage: "checkmark.circle.fill")
+                    }
+                    .frame(width: 220)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || verifying)
+                Button {
+                    resend()
+                } label: {
+                    HStack {
+                        if resending { ProgressView().controlSize(.small) }
+                        Text("Renvoyer le code")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(resending || !resendAvailable)
+            }
+            Spacer()
+            Button("Se déconnecter", role: .destructive) { auth.logout() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private func verify() {
+        verifying = true
+        errorMessage = nil
+        infoMessage = nil
+        do {
+            try auth.verifyEmail(code: code, for: user)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        verifying = false
+    }
+
+    private func resend() {
+        resending = true
+        errorMessage = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await auth.sendEmailVerificationCode(to: user)
+                infoMessage = "Un nouveau code a été envoyé."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            resending = false
+        }
+    }
+}
+
 // MARK: - Journal d'audit (B1)
 
 struct AuditLogView: View {
@@ -460,6 +565,9 @@ struct UserManagementView: View {
                         }
                     }
                     Spacer()
+                    Image(systemName: user.emailVerified ? "checkmark.seal.fill" : "checkmark.seal")
+                        .foregroundStyle(user.emailVerified ? .green : .gray)
+                        .help(user.emailVerified ? "Email validé" : "Email non validé")
                 }
                 .opacity(user.isActive ? 1 : 0.6)
                 .padding(.vertical, 2)
@@ -498,6 +606,8 @@ struct UserDetailCard: View {
     @EnvironmentObject var auth: AuthStore
     @State private var newPw = ""
     @State private var newPwConfirm = ""
+    @State private var resendingVerification = false
+    @State private var verificationMessage: String?
 
     var body: some View {
         GroupBox("Utilisateur : \(user.effectiveDisplayName)") {
@@ -522,6 +632,37 @@ struct UserDetailCard: View {
                             Text("connexion bloquée").font(.caption).foregroundStyle(.red)
                         }
                     }
+                }
+                LabeledContent("Email") {
+                    HStack(spacing: 8) {
+                        Label(user.emailVerified ? "Validé" : "Non validé",
+                              systemImage: user.emailVerified ? "checkmark.seal.fill" : "checkmark.seal")
+                            .foregroundStyle(user.emailVerified ? .green : .gray)
+                        if !user.emailVerified {
+                            Button {
+                                resendVerification()
+                            } label: {
+                                HStack {
+                                    if resendingVerification { ProgressView().controlSize(.small) }
+                                    Text("Renvoyer l'email de validation")
+                                }
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .disabled(resendingVerification)
+                            Button("Marquer comme validé") {
+                                var u = user
+                                u.emailVerified = true
+                                u.emailVerificationCode = nil
+                                u.emailVerificationCodeExpiresAt = nil
+                                onChange(u)
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .help("Validation manuelle si l'envoi d'email n'est pas utilisable pour ce compte")
+                        }
+                    }
+                }
+                if let msg = verificationMessage {
+                    Text(msg).font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
                 Text("Sociétés du périmètre").font(.headline)
@@ -591,6 +732,20 @@ struct UserDetailCard: View {
                 }
             }
             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func resendVerification() {
+        resendingVerification = true
+        verificationMessage = nil
+        Task {
+            do {
+                try await auth.sendEmailVerificationCode(to: user)
+                verificationMessage = "Email de validation renvoyé."
+            } catch {
+                verificationMessage = error.localizedDescription
+            }
+            resendingVerification = false
         }
     }
 }

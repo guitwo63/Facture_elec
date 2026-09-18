@@ -42,6 +42,14 @@ public struct User: Codable, Hashable, Identifiable {
     public var totpSecret: String?
     public var totpRecoveryCodesSalt: String?
     public var totpRecoveryCodeHashes: [String]
+    /// Adresse email (= `username`) validée par code. `true` par défaut pour ne pas
+    /// verrouiller rétroactivement les comptes existants lors de la migration — seuls
+    /// les comptes créés après cette fonctionnalité, avec SMTP configuré, démarrent
+    /// à `false` (voir `AuthStore.createUser`).
+    public var emailVerified: Bool
+    public var emailVerificationCode: String?
+    public var emailVerificationCodeExpiresAt: Date?
+    public var emailVerificationSentAt: Date?
 
     public init(
         id: UUID = UUID(),
@@ -62,7 +70,11 @@ public struct User: Codable, Hashable, Identifiable {
         totpEnabled: Bool = false,
         totpSecret: String? = nil,
         totpRecoveryCodesSalt: String? = nil,
-        totpRecoveryCodeHashes: [String] = []
+        totpRecoveryCodeHashes: [String] = [],
+        emailVerified: Bool = true,
+        emailVerificationCode: String? = nil,
+        emailVerificationCodeExpiresAt: Date? = nil,
+        emailVerificationSentAt: Date? = nil
     ) {
         self.id = id
         self.username = username
@@ -83,6 +95,10 @@ public struct User: Codable, Hashable, Identifiable {
         self.totpSecret = totpSecret
         self.totpRecoveryCodesSalt = totpRecoveryCodesSalt
         self.totpRecoveryCodeHashes = totpRecoveryCodeHashes
+        self.emailVerified = emailVerified
+        self.emailVerificationCode = emailVerificationCode
+        self.emailVerificationCodeExpiresAt = emailVerificationCodeExpiresAt
+        self.emailVerificationSentAt = emailVerificationSentAt
     }
 
     public var role: UserRole { roles.first ?? .comptable }
@@ -99,6 +115,7 @@ public struct User: Codable, Hashable, Identifiable {
         case id, username, displayName, role, roles, passwordHash, salt, societyIDs, defaultSellerEntryID, isActive, createdAt
         case mustChangePassword, failedLoginAttempts, lockUntil, lastActivityAt
         case totpEnabled, totpSecret, totpRecoveryCodesSalt, totpRecoveryCodeHashes
+        case emailVerified, emailVerificationCode, emailVerificationCodeExpiresAt, emailVerificationSentAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -127,6 +144,10 @@ public struct User: Codable, Hashable, Identifiable {
         totpSecret = try c.decodeIfPresent(String.self, forKey: .totpSecret)
         totpRecoveryCodesSalt = try c.decodeIfPresent(String.self, forKey: .totpRecoveryCodesSalt)
         totpRecoveryCodeHashes = try c.decodeIfPresent([String].self, forKey: .totpRecoveryCodeHashes) ?? []
+        emailVerified = try c.decodeIfPresent(Bool.self, forKey: .emailVerified) ?? true
+        emailVerificationCode = try c.decodeIfPresent(String.self, forKey: .emailVerificationCode)
+        emailVerificationCodeExpiresAt = try c.decodeIfPresent(Date.self, forKey: .emailVerificationCodeExpiresAt)
+        emailVerificationSentAt = try c.decodeIfPresent(Date.self, forKey: .emailVerificationSentAt)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -150,6 +171,10 @@ public struct User: Codable, Hashable, Identifiable {
         try c.encodeIfPresent(totpSecret, forKey: .totpSecret)
         try c.encodeIfPresent(totpRecoveryCodesSalt, forKey: .totpRecoveryCodesSalt)
         try c.encode(totpRecoveryCodeHashes, forKey: .totpRecoveryCodeHashes)
+        try c.encode(emailVerified, forKey: .emailVerified)
+        try c.encodeIfPresent(emailVerificationCode, forKey: .emailVerificationCode)
+        try c.encodeIfPresent(emailVerificationCodeExpiresAt, forKey: .emailVerificationCodeExpiresAt)
+        try c.encodeIfPresent(emailVerificationSentAt, forKey: .emailVerificationSentAt)
     }
 }
 
@@ -250,6 +275,9 @@ public enum AuthError: Error, LocalizedError {
     case wrongTwoFactorCode
     case twoFactorNotConfigured
     case twoFactorDisabledGlobally
+    case invalidVerificationCode
+    case verificationCodeExpired
+    case verificationEmailNotConfigured
 
     public var errorDescription: String? {
         switch self {
@@ -271,6 +299,9 @@ public enum AuthError: Error, LocalizedError {
         case .wrongTwoFactorCode: return "Code de double authentification incorrect."
         case .twoFactorNotConfigured: return "La double authentification n'est pas activée sur ce compte."
         case .twoFactorDisabledGlobally: return "La double authentification est désactivée pour cette application (paramètre administrateur)."
+        case .invalidVerificationCode: return "Code de validation incorrect."
+        case .verificationCodeExpired: return "Ce code de validation a expiré. Demandez un nouvel envoi."
+        case .verificationEmailNotConfigured: return "L'envoi d'email n'est pas configuré (Réglages > Alertes email). Contactez votre administrateur."
         }
     }
 }
@@ -709,6 +740,11 @@ public final class AuthStore: ObservableObject {
         }
         let salt = PasswordHasher.generateSalt()
         let hash = PasswordHasher.hash(password: password, salt: salt)
+        // La validation d'email n'est exigée que si l'envoi est réellement possible
+        // (SMTP configuré) — sans quoi un compte fraîchement créé serait bloqué sans
+        // aucun moyen de recevoir son code (l'admin garde toujours la validation
+        // manuelle en secours, voir UserDetailCard).
+        let requiresEmailVerification = SMTPSettings.shared.credentials.isConfigured
         let user = User(
             username: trimmedName,
             displayName: displayName,
@@ -719,12 +755,16 @@ public final class AuthStore: ObservableObject {
             societyIDs: societyIDs,
             defaultSellerEntryID: defaultSellerEntryID,
             isActive: true,
-            mustChangePassword: mustChangePassword
+            mustChangePassword: mustChangePassword,
+            emailVerified: !requiresEmailVerification
         )
         users.append(user)
         save()
         audit.record(actor: currentUser?.username ?? "system", action: "user_created", target: trimmedName, details: user.rolesLabel)
         sendNewUserAlertIfNeeded(user)
+        if requiresEmailVerification {
+            Task { try? await sendEmailVerificationCode(to: user) }
+        }
         return user
     }
 
@@ -753,6 +793,71 @@ public final class AuthStore: ObservableObject {
                 audit.record(actor: "system", action: "smtp_alert_error", target: username, details: "Alerte nouvel utilisateur : \(error.localizedDescription)")
             }
         }
+    }
+
+    // MARK: - Validation d'email par code
+
+    private static func generateVerificationCode() -> String {
+        String(format: "%06d", Int.random(in: 0...999_999))
+    }
+
+    private static let verificationCodeValiditySeconds: TimeInterval = 24 * 3600
+
+    /// Génère un nouveau code et l'envoie par email — utilisé à la création du
+    /// compte et par le bouton "Renvoyer" (utilisateur bloqué ou administrateur
+    /// dans la fiche utilisateur). Contrairement à `sendNewUserAlertIfNeeded`
+    /// (best-effort, silencieux), cette action est déclenchée explicitement et
+    /// doit remonter une erreur claire si l'envoi échoue.
+    public func sendEmailVerificationCode(to user: User) async throws {
+        let smtp = SMTPSettings.shared.credentials
+        guard smtp.isConfigured else { throw AuthError.verificationEmailNotConfigured }
+        let code = Self.generateVerificationCode()
+        // Envoi d'abord, persistance ensuite : si l'envoi échoue (SMTP temporairement
+        // inaccessible…), un code précédent encore valide n'est pas invalidé pour rien.
+        try await SMTPService().send(
+            to: user.username,
+            subject: "Validez votre adresse email — Factur-X",
+            body: """
+            Bonjour,
+
+            Voici votre code de validation d'adresse email pour votre compte Factur-X : \(code)
+
+            Ce code est valable 24 heures. Saisissez-le dans l'application pour activer votre compte.
+
+            Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.
+
+            — Factur-X
+            """,
+            credentials: smtp
+        )
+        if let idx = users.firstIndex(where: { $0.id == user.id }) {
+            users[idx].emailVerificationCode = code
+            users[idx].emailVerificationCodeExpiresAt = Date().addingTimeInterval(Self.verificationCodeValiditySeconds)
+            users[idx].emailVerificationSentAt = Date()
+            save()
+            if currentUser?.id == user.id { currentUser = users[idx] }
+        }
+        audit.record(actor: currentUser?.username ?? "system", action: "email_verification_sent", target: user.username)
+    }
+
+    /// Valide le code saisi et active le compte (`emailVerified = true`) en cas de
+    /// succès. L'activation est automatique : aucune autre étape n'est requise.
+    public func verifyEmail(code: String, for user: User) throws {
+        guard let idx = users.firstIndex(where: { $0.id == user.id }) else { throw AuthError.unknownUser }
+        let trimmedCode = code.trimmingCharacters(in: .whitespaces)
+        guard let stored = users[idx].emailVerificationCode, !trimmedCode.isEmpty,
+              PasswordHasher.constantTimeEquals(trimmedCode, stored) else {
+            throw AuthError.invalidVerificationCode
+        }
+        if let expiresAt = users[idx].emailVerificationCodeExpiresAt, expiresAt < Date() {
+            throw AuthError.verificationCodeExpired
+        }
+        users[idx].emailVerified = true
+        users[idx].emailVerificationCode = nil
+        users[idx].emailVerificationCodeExpiresAt = nil
+        save()
+        if currentUser?.id == user.id { currentUser = users[idx] }
+        audit.record(actor: user.username, action: "email_verified", target: user.username)
     }
 
     public func updatePassword(_ user: User, newPassword: String, forceChange: Bool = false) throws {
