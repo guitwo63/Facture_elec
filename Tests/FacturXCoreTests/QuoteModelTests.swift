@@ -61,6 +61,18 @@ final class QuoteModelTests: XCTestCase {
         XCTAssertEqual(invoice.grandTotal, quote.grandTotal, accuracy: 0.001)
     }
 
+    func testToOrderCopiesLinesAndPartiesAndKeepsQuotationRef() {
+        let quote = makeQuote(status: .accepted)
+        let order = quote.toOrder(number: "CD-2026-017")
+        XCTAssertEqual(order.number, "CD-2026-017")
+        XCTAssertEqual(order.status, .draft, "une commande issue d'un devis démarre toujours en brouillon")
+        XCTAssertEqual(order.quotationRef, quote.number, "traçabilité vers le devis d'origine")
+        XCTAssertEqual(order.seller.name, quote.seller.name)
+        XCTAssertEqual(order.buyer.name, quote.buyer.name)
+        XCTAssertEqual(order.lines.count, quote.lines.count)
+        XCTAssertEqual(order.grandTotal, quote.grandTotal, accuracy: 0.001)
+    }
+
     func testDecodingToleratesMissingFieldsFromOlderPersistedData() throws {
         let legacyJSON = """
         {"id":"\(UUID().uuidString)","number":"DEV-OLD-1",
@@ -72,5 +84,6 @@ final class QuoteModelTests: XCTestCase {
         XCTAssertEqual(decoded.currency, "EUR")
         XCTAssertTrue(decoded.lines.isEmpty)
         XCTAssertNil(decoded.convertedInvoiceNumber)
+        XCTAssertNil(decoded.convertedOrderNumber)
     }
 }

@@ -67,6 +67,7 @@ public struct Quote: Codable, Hashable, Identifiable {
     public var lines: [InvoiceLine]
     public var notes: String?
     public var convertedInvoiceNumber: String?
+    public var convertedOrderNumber: String?
 
     public init(
         id: UUID = UUID(),
@@ -80,7 +81,8 @@ public struct Quote: Codable, Hashable, Identifiable {
         companyID: UUID? = nil,
         lines: [InvoiceLine] = [],
         notes: String? = nil,
-        convertedInvoiceNumber: String? = nil
+        convertedInvoiceNumber: String? = nil,
+        convertedOrderNumber: String? = nil
     ) {
         self.id = id
         self.number = number
@@ -94,10 +96,12 @@ public struct Quote: Codable, Hashable, Identifiable {
         self.lines = lines
         self.notes = notes
         self.convertedInvoiceNumber = convertedInvoiceNumber
+        self.convertedOrderNumber = convertedOrderNumber
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, number, status, issueDate, validUntil, currency, seller, buyer, companyID, lines, notes, convertedInvoiceNumber
+        case id, number, status, issueDate, validUntil, currency, seller, buyer, companyID, lines, notes
+        case convertedInvoiceNumber, convertedOrderNumber
     }
 
     public init(from decoder: Decoder) throws {
@@ -114,6 +118,7 @@ public struct Quote: Codable, Hashable, Identifiable {
         lines = try c.decodeIfPresent([InvoiceLine].self, forKey: .lines) ?? []
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         convertedInvoiceNumber = try c.decodeIfPresent(String.self, forKey: .convertedInvoiceNumber)
+        convertedOrderNumber = try c.decodeIfPresent(String.self, forKey: .convertedOrderNumber)
     }
 
     public var lineTotal: Double {
@@ -163,6 +168,23 @@ public struct Quote: Codable, Hashable, Identifiable {
             paymentTerms: seller.paymentTerms,
             notes: notes,
             billingMode: .m1
+        )
+    }
+
+    /// Miroir de `toInvoice`, pour le parcours devis accepté → commande → facture
+    /// (au lieu de facturer le devis directement, en court-circuitant la commande).
+    /// `quotationRef` conserve la traçabilité vers le devis d'origine.
+    public func toOrder(number: String) -> SalesOrder {
+        SalesOrder(
+            number: number,
+            status: .draft,
+            currency: currency,
+            buyer: buyer,
+            seller: seller,
+            quotationRef: self.number,
+            lines: lines,
+            notes: notes,
+            companyID: companyID
         )
     }
 }

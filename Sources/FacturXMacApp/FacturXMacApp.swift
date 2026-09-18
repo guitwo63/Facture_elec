@@ -663,7 +663,7 @@ struct RootView: View {
             case .orders:
                 OrdersTabView(selectedID: $selectedOrderID)
             case .quotes:
-                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID)
+                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID, orderSelectedID: $selectedOrderID)
             case .directory:
                 DirectoryView()
             case .dashboard:
@@ -1136,6 +1136,85 @@ struct QuoteToInvoiceSheet: View {
     }
 }
 
+struct QuoteToOrderSheet: View {
+    let quotes: [Quote]
+    let onCreate: (Quote) -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var selectedQuoteID: UUID?
+
+    private var filteredQuotes: [Quote] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return quotes }
+        return quotes.filter { quote in
+            quote.number.lowercased().contains(q)
+                || quote.buyer.name.lowercased().contains(q)
+                || quote.seller.name.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Créer une commande depuis un devis").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, client…)", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filteredQuotes.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text.below.ecg").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucun devis accepté disponible à transformer en commande dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(Array(filteredQuotes.enumerated()), id: \.element.id) { _, quote in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(quote.number).font(.headline)
+                            Text("\(quote.buyer.name.isEmpty ? "Sans client" : quote.buyer.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", quote.grandTotal, quote.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(quote.issueDate, format: .dateTime.day().month().year())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedQuoteID = quote.id }
+                    .background(selectedQuoteID == quote.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Créer la commande") {
+                    if let quote = filteredQuotes.first(where: { $0.id == selectedQuoteID }) {
+                        onCreate(quote)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedQuoteID == nil)
+            }
+            .padding(12)
+        }
+        .frame(width: 520, height: 420)
+    }
+}
+
 struct InvoicePickerSheet: View {
     let invoices: [Invoice]
     let selectedID: UUID?
@@ -1575,9 +1654,13 @@ struct InvoicesTabView: View {
 
     /// Devis facturables : acceptés (le client a dit oui) et pas déjà convertis — même
     /// garde que le bouton "Convertir en facture" sur la fiche devis elle-même, pour que
-    /// cette seconde entrée n'invente pas une règle différente.
+    /// cette seconde entrée n'invente pas une règle différente. Exclut aussi les devis
+    /// déjà transformés en commande : la facture doit alors venir de la commande, pas
+    /// court-circuiter la traçabilité en repartant directement du devis.
     private var scopedInvoiceableQuotes: [Quote] {
-        var result = quoteStore.quotes.filter { $0.status == .accepted && $0.convertedInvoiceNumber == nil }
+        var result = quoteStore.quotes.filter {
+            $0.status == .accepted && $0.convertedInvoiceNumber == nil && $0.convertedOrderNumber == nil
+        }
         if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
             result = result.filter { quote in
                 if let cid = quote.companyID { return scope.contains(cid) }
@@ -7883,10 +7966,13 @@ struct OrdersTabView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var moduleStore: ModuleStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var showScanImport = false
+    @State private var showQuotePicker = false
     @State private var statusFilter: OrderStatus? = nil
     @State private var showAdvancedFilters = false
     @State private var advField1: OrderFilterField = .none
@@ -8055,6 +8141,13 @@ struct OrdersTabView: View {
                     } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
                         .buttonStyle(.bordered)
                         .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
+                    if moduleStore.settings.quotesEnabled {
+                        Button {
+                            showQuotePicker = true
+                        } label: { Label("Depuis un devis", systemImage: "doc.text.below.ecg") }
+                            .buttonStyle(.bordered)
+                            .help("Transforme un devis accepté en commande")
+                    }
                     Text("Ventes").font(.title2.bold())
                     Picker("Statut", selection: $statusFilter) {
                         Text("Tous statuts").tag(OrderStatus?.none)
@@ -8210,6 +8303,22 @@ struct OrdersTabView: View {
                 onCancel: { showScanImport = false }
             )
         }
+        .sheet(isPresented: $showQuotePicker) {
+            QuoteToOrderSheet(
+                quotes: scopedOrderableQuotes,
+                onCreate: { quote in
+                    let number = orderStore.nextNumber(companyID: quote.companyID)
+                    let order = quote.toOrder(number: number)
+                    orderStore.upsert(order)
+                    var converted = quote
+                    converted.convertedOrderNumber = order.number
+                    quoteStore.upsert(converted)
+                    selectedID = order.id
+                    showQuotePicker = false
+                },
+                onCancel: { showQuotePicker = false }
+            )
+        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -8217,6 +8326,22 @@ struct OrdersTabView: View {
         if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
             result = result.filter { order in
                 if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    /// Devis transformables en commande : acceptés et pas déjà convertis (ni en
+    /// commande, ni directement en facture) — même garde que côté Factures, pour
+    /// qu'un devis n'alimente jamais deux documents de vente à la fois.
+    private var scopedOrderableQuotes: [Quote] {
+        var result = quoteStore.quotes.filter {
+            $0.status == .accepted && $0.convertedOrderNumber == nil && $0.convertedInvoiceNumber == nil
+        }
+        if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
+            result = result.filter { quote in
+                if let cid = quote.companyID { return scope.contains(cid) }
                 return false
             }
         }
@@ -8255,6 +8380,7 @@ struct QuotesTabView: View {
     @Binding var selectedID: UUID?
     @Binding var rootTab: RootTab
     @Binding var invoiceSelectedID: UUID?
+    @Binding var orderSelectedID: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var statusFilter: QuoteStatus? = nil
@@ -8562,7 +8688,7 @@ struct QuotesTabView: View {
                 }
 
                 if let id = selectedID, quoteStore.quotes.contains(where: { $0.id == id }) {
-                    QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID)
+                    QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID, orderSelectedID: $orderSelectedID)
                         .frame(minWidth: 380)
                 } else {
                     VStack(spacing: 8) {
@@ -8590,9 +8716,12 @@ struct QuoteEditorView: View {
     @Binding var quote: Quote
     @Binding var rootTab: RootTab
     @Binding var invoiceSelectedID: UUID?
+    @Binding var orderSelectedID: UUID?
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @State private var sendingQuoteEmail = false
@@ -8665,7 +8794,7 @@ struct QuoteEditorView: View {
                         .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: so.hexColor)))
                         .help("Passer au statut « \(so.label) »")
                     }
-                    if quote.status == .accepted {
+                    if quote.status == .accepted && quote.convertedOrderNumber == nil {
                         Button {
                             let number = store.nextNumber(companyID: quote.companyID)
                             let invoice = quote.toInvoice(number: number)
@@ -8679,10 +8808,29 @@ struct QuoteEditorView: View {
                         .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
                         .help("Recopie les lignes du devis dans une nouvelle facture brouillon")
                     }
+                    if quote.status == .accepted && moduleStore.settings.ordersEnabled && quote.convertedInvoiceNumber == nil {
+                        Button {
+                            let number = orderStore.nextNumber(companyID: quote.companyID)
+                            let order = quote.toOrder(number: number)
+                            orderStore.upsert(order)
+                            quote.convertedOrderNumber = order.number
+                            orderSelectedID = order.id
+                            rootTab = .orders
+                        } label: {
+                            Label("Convertir en commande", systemImage: "cart.badge.plus")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .orange, filled: true))
+                        .help("Recopie les lignes du devis dans une nouvelle commande brouillon")
+                    }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
             }
 
+            if let n = quote.convertedOrderNumber {
+                Text("Converti en commande : \(n) (disponible dans l'onglet Ventes)")
+                    .font(.caption).foregroundStyle(.green)
+                    .padding(.horizontal, 12)
+            }
             if let n = quote.convertedInvoiceNumber {
                 Text("Converti en facture : \(n) (disponible dans l'onglet Factures)")
                     .font(.caption).foregroundStyle(.green)
