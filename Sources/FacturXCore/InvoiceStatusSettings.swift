@@ -43,12 +43,15 @@ public final class InvoiceStatusStore: ObservableObject {
     }
 
     /// Code d'événement SUPER PDP associé à chaque statut standard (table officielle
-    /// "Meaning of fr:* statuses" de la doc SUPER PDP — https://superpdp.tech/openapi).
-    /// Non modifiable par l'utilisateur : c'est cette table, et non la donnée persistée,
-    /// qui fait foi (voir `load()`), pour éviter qu'une valeur erronée reste bloquée en
-    /// local. `accepted`/`rejected`/`cancelled` gardent volontairement leurs codes déjà en
-    /// usage (fr:207/fr:206/fr:320) — la correction vers les codes officiellement exacts
-    /// (fr:205/fr:210, et pas d'équivalent réforme pour "Annulée") est un chantier séparé.
+    /// "Meaning of fr:* statuses" de la doc SUPER PDP — https://superpdp.tech/openapi —
+    /// et Spécifications Externes AIFE chapitres 5-6). Non modifiable par l'utilisateur :
+    /// c'est cette table, et non la donnée persistée, qui fait foi (voir `load()`), pour
+    /// éviter qu'une valeur erronée reste bloquée en local. `accepted`/`rejected`/
+    /// `cancelled` gardent volontairement leurs codes déjà en usage avant cette évolution
+    /// (fr:207/fr:206/fr:320) — la correction vers les codes officiellement exacts
+    /// (fr:205 pour "Acceptée" ; pas d'équivalent réforme pour "Annulée" ; et `rejected`
+    /// recouvre déjà, une fois corrigé, le même sens que `technicallyRejected` — à
+    /// clarifier dans ce même chantier) est volontairement séparée de celui-ci.
     static func reformCode(for status: InvoiceStatus) -> String? {
         switch status {
         case .sentToPDP: return "200"            // Déposée — jamais envoyé isolément, voir notifyPDPStatusChange
@@ -59,7 +62,8 @@ public final class InvoiceStatusStore: ObservableObject {
         case .onHold: return "fr:208"            // En attente
         case .accepted: return "fr:207"          // Accepté par le destinataire (code à corriger, voir doc de l'enum)
         case .rejected: return "fr:206"          // Refusé par le destinataire (code à corriger, voir doc de l'enum)
-        case .rejectedByRecipient: return "fr:213" // Rejetée — réseau, non créable via l'API
+        case .refused: return "fr:210"           // Refusée par le destinataire (AIFE "REFUSEE")
+        case .technicallyRejected: return "fr:213" // Rejetée, validation technique — réseau, non créable via l'API
         case .completed: return "fr:209"         // Complétée
         case .paymentSent: return "fr:211"       // Paiement envoyé
         case .paid: return "fr:212"              // Facture encaissée

@@ -90,7 +90,8 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         XCTAssertEqual(store.override(for: .onHold).reformCode, "fr:208")
         XCTAssertEqual(store.override(for: .completed).reformCode, "fr:209")
         XCTAssertEqual(store.override(for: .paymentSent).reformCode, "fr:211")
-        XCTAssertEqual(store.override(for: .rejectedByRecipient).reformCode, "fr:213")
+        XCTAssertEqual(store.override(for: .refused).reformCode, "fr:210")
+        XCTAssertEqual(store.override(for: .technicallyRejected).reformCode, "fr:213")
     }
 
     /// Les statuts réseau (rapportés automatiquement par SUPER PDP, jamais créés par l'app)
@@ -101,30 +102,31 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         XCTAssertEqual(InvoiceStatus.sentToRecipient.allowedTransitions(), [])
         XCTAssertEqual(InvoiceStatus.receivedByRecipient.allowedTransitions(), [])
         XCTAssertEqual(InvoiceStatus.madeAvailable.allowedTransitions(), [])
-        XCTAssertEqual(InvoiceStatus.rejectedByRecipient.allowedTransitions(), [])
+        XCTAssertEqual(InvoiceStatus.technicallyRejected.allowedTransitions(), [])
     }
 
     func testNetworkOnlyReformCodesMatchTheOnesFlaggedAsNonCreatable() {
-        for status in [InvoiceStatus.sentToPDP, .sentToRecipient, .receivedByRecipient, .madeAvailable, .rejectedByRecipient] {
+        for status in [InvoiceStatus.sentToPDP, .sentToRecipient, .receivedByRecipient, .madeAvailable, .technicallyRejected] {
             let code = InvoiceStatusStore.reformCode(for: status)
             XCTAssertNotNil(code)
             XCTAssertTrue(InvoiceStatusStore.networkOnlyReformCodes.contains(code!), "\(status) (\(code!)) devrait être marqué non créable via l'API")
         }
         // Les codes réellement créables ne doivent pas être marqués à tort comme réseau seul.
-        for status in [InvoiceStatus.acknowledged, .onHold, .accepted, .rejected, .completed, .paymentSent, .paid] {
+        for status in [InvoiceStatus.acknowledged, .onHold, .accepted, .rejected, .refused, .completed, .paymentSent, .paid] {
             let code = InvoiceStatusStore.reformCode(for: status)
             XCTAssertNotNil(code)
             XCTAssertFalse(InvoiceStatusStore.networkOnlyReformCodes.contains(code!), "\(status) (\(code!)) est créable via l'API, ne devrait pas être marqué réseau seul")
         }
     }
 
-    /// Les statuts alternatifs à un même point du cycle de vie (accepted/rejected/
-    /// rejectedByRecipient après acknowledged) ne doivent jamais se "rétrograder" l'un
+    /// Les statuts alternatifs à un même point du cycle de vie (accepted/rejected/refused/
+    /// technicallyRejected après acknowledged) ne doivent jamais se "rétrograder" l'un
     /// l'autre : même rang, pour que la synchronisation PDP (qui refuse tout recul) ne
     /// bloque pas le passage légitime de l'un à l'autre.
     func testAlternativeOutcomesAtTheSameLifecycleStageShareTheSameRank() {
         XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.rejected.lifecycleRank)
-        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.rejectedByRecipient.lifecycleRank)
+        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.refused.lifecycleRank)
+        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.technicallyRejected.lifecycleRank)
     }
 
     func testLifecycleRankIsMonotonicAlongTheHappyPath() {
@@ -138,8 +140,30 @@ final class InvoiceStatusTransitionTests: XCTestCase {
     }
 
     func testAllNewReformStatusesLockTheInvoice() {
-        for status in [InvoiceStatus.sentToRecipient, .receivedByRecipient, .madeAvailable, .acknowledged, .onHold, .rejectedByRecipient, .completed, .paymentSent] {
+        for status in [InvoiceStatus.sentToRecipient, .receivedByRecipient, .madeAvailable, .acknowledged, .onHold, .technicallyRejected, .completed, .paymentSent] {
             XCTAssertTrue(status.locksInvoice, "\(status) devrait verrouiller la facture, comme les autres statuts transmis")
         }
+    }
+
+    // MARK: - fr:210 "Refusée" (AIFE REFUSEE) — refus métier, distinct du rejet technique
+
+    /// Un refus métier du destinataire doit rester modifiable, comme un rejet technique :
+    /// l'émetteur doit pouvoir corriger et réémettre (nouveau dépôt) sans être bloqué par
+    /// un verrouillage sur l'ancienne facture.
+    func testRefusedStatusRemainsEditable() {
+        XCTAssertFalse(InvoiceStatus.refused.locksInvoice)
+    }
+
+    /// Règle métier issue des Spécifications Externes AIFE : une facture acceptée/approuvée
+    /// ne redevient jamais "refusée" — seul un avoir permet de corriger une contestation
+    /// tardive après acceptation.
+    func testAcceptedInvoiceCanNeverTransitionToRefused() {
+        XCTAssertFalse(InvoiceStatus.accepted.allowedTransitions().contains(.refused))
+    }
+
+    func testRefusedIsReachableFromTheUsualDecisionPoints() {
+        XCTAssertTrue(InvoiceStatus.sentToPDP.allowedTransitions().contains(.refused))
+        XCTAssertTrue(InvoiceStatus.acknowledged.allowedTransitions().contains(.refused))
+        XCTAssertTrue(InvoiceStatus.onHold.allowedTransitions().contains(.refused))
     }
 }
