@@ -311,13 +311,18 @@ public final class ChorusProSettings: ObservableObject {
     private var clientSecretKeychainKey: String { env.key("facturx.choruspro.clientSecret.v1") }
     private var techPasswordKeychainKey: String { env.key("facturx.choruspro.techPassword.v1") }
 
-    /// `clientSecret`/`techPassword` ne sont jamais persistés dans le JSON
-    /// UserDefaults : ils vivent uniquement dans le Keychain (voir `KeychainStore`).
+    /// Retour arrière volontaire — voir le commentaire équivalent dans `SMTPSettings.init()`
+    /// (signature ad hoc instable d'une build à l'autre, secrets Keychain inaccessibles
+    /// après mise à jour). Migration one-shot depuis le Keychain si les champs sont vides.
     public init() {
         if let data = defaults.data(forKey: env.key("facturx.choruspro.credentials.v1")),
            var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
-            decoded.clientSecret = KeychainStore.get(forKey: env.key("facturx.choruspro.clientSecret.v1")) ?? ""
-            decoded.techPassword = KeychainStore.get(forKey: env.key("facturx.choruspro.techPassword.v1")) ?? ""
+            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.choruspro.clientSecret.v1")), !migrated.isEmpty {
+                decoded.clientSecret = migrated
+            }
+            if decoded.techPassword.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.choruspro.techPassword.v1")), !migrated.isEmpty {
+                decoded.techPassword = migrated
+            }
             credentials = decoded
         } else {
             credentials = ChorusProCredentials(clientID: "", clientSecret: "")
@@ -325,13 +330,10 @@ public final class ChorusProSettings: ObservableObject {
     }
 
     public func save() {
-        var toPersist = credentials
-        toPersist.clientSecret = ""
-        toPersist.techPassword = ""
-        if let data = try? JSONEncoder().encode(toPersist) {
+        if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
-        KeychainStore.set(credentials.clientSecret, forKey: clientSecretKeychainKey)
-        KeychainStore.set(credentials.techPassword, forKey: techPasswordKeychainKey)
+        KeychainStore.delete(forKey: clientSecretKeychainKey)
+        KeychainStore.delete(forKey: techPasswordKeychainKey)
     }
 }

@@ -268,12 +268,15 @@ public final class PCloudSettings: ObservableObject {
     private var storageKey: String { env.key("facturx.pcloud.credentials.v1") }
     private var passwordKeychainKey: String { env.key("facturx.pcloud.password.v1") }
 
-    /// Le mot de passe n'est jamais persisté dans le JSON UserDefaults : il vit
-    /// uniquement dans le Keychain (voir `KeychainStore`).
+    /// Retour arrière volontaire — voir le commentaire équivalent dans `SMTPSettings.init()`
+    /// (signature ad hoc instable d'une build à l'autre, mot de passe Keychain inaccessible
+    /// après mise à jour). Migration one-shot depuis le Keychain si le champ est vide.
     public init() {
         if let data = defaults.data(forKey: env.key("facturx.pcloud.credentials.v1")),
            var decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
-            decoded.password = KeychainStore.get(forKey: env.key("facturx.pcloud.password.v1")) ?? ""
+            if decoded.password.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.pcloud.password.v1")), !migrated.isEmpty {
+                decoded.password = migrated
+            }
             credentials = decoded
         } else {
             credentials = PCloudCredentials()
@@ -283,7 +286,9 @@ public final class PCloudSettings: ObservableObject {
     public func load() {
         if let data = defaults.data(forKey: storageKey),
            var decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
-            decoded.password = KeychainStore.get(forKey: passwordKeychainKey) ?? ""
+            if decoded.password.isEmpty, let migrated = KeychainStore.get(forKey: passwordKeychainKey), !migrated.isEmpty {
+                decoded.password = migrated
+            }
             credentials = decoded
         } else {
             credentials = PCloudCredentials()
@@ -291,11 +296,9 @@ public final class PCloudSettings: ObservableObject {
     }
 
     public func save() {
-        var toPersist = credentials
-        toPersist.password = ""
-        if let data = try? JSONEncoder().encode(toPersist) {
+        if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
-        KeychainStore.set(credentials.password, forKey: passwordKeychainKey)
+        KeychainStore.delete(forKey: passwordKeychainKey)
     }
 }
