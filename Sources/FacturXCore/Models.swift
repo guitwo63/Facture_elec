@@ -174,6 +174,30 @@ public struct OptionalField: Codable, Hashable, Identifiable {
     }
 }
 
+/// Pièce jointe libre (justificatif, devis signé, bon de livraison scanné…) attachée à un
+/// document. Le contenu est embarqué en base64 dans le JSON persisté (UserDefaults), comme
+/// le reste des données — pas de gestion de fichiers externes séparée. `maxSizeBytes` borne
+/// la taille pour ne pas alourdir démesurément la sauvegarde/synchronisation pCloud.
+public struct Attachment: Codable, Hashable, Identifiable {
+    public var id: UUID
+    public var fileName: String
+    public var data: Data
+    public var addedAt: Date
+
+    public static let maxSizeBytes = 10 * 1024 * 1024 // 10 Mo
+
+    public init(id: UUID = UUID(), fileName: String, data: Data, addedAt: Date = Date()) {
+        self.id = id
+        self.fileName = fileName
+        self.data = data
+        self.addedAt = addedAt
+    }
+
+    public var sizeDescription: String {
+        ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+    }
+}
+
 public enum OptionalFieldLocation: String, Codable, CaseIterable {
     case header
     case line
@@ -508,6 +532,10 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var prepaidAmount: Double
     public var superPDPRemoteID: String?
     public var optionalFields: [OptionalField]
+    public var attachments: [Attachment]
+    /// Distinct de `notes` (BT-22, imprimé sur le document) : remarque interne à l'équipe,
+    /// jamais incluse dans le PDF/XML généré.
+    public var internalComment: String?
 
     public init(
         id: UUID = UUID(),
@@ -537,7 +565,9 @@ public struct Invoice: Codable, Hashable, Identifiable {
         legalNoteAAB: String = "Escompte pour paiement anticipé : aucun",
         prepaidAmount: Double = 0,
         superPDPRemoteID: String? = nil,
-        optionalFields: [OptionalField] = []
+        optionalFields: [OptionalField] = [],
+        attachments: [Attachment] = [],
+        internalComment: String? = nil
     ) {
         self.id = id
         self.number = number
@@ -566,6 +596,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.prepaidAmount = prepaidAmount
         self.superPDPRemoteID = superPDPRemoteID
         self.optionalFields = optionalFields
+        self.attachments = attachments
+        self.internalComment = internalComment
         self.buyerReference = buyerReference
     }
 
@@ -613,6 +645,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
         case purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
+        case attachments, internalComment
     }
 
     private enum LegacyReferenceKeys: String, CodingKey {
@@ -650,6 +683,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         prepaidAmount = try c.decodeIfPresent(Double.self, forKey: .prepaidAmount) ?? 0
         superPDPRemoteID = try c.decodeIfPresent(String.self, forKey: .superPDPRemoteID)
         optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
+        attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        internalComment = try c.decodeIfPresent(String.self, forKey: .internalComment)
         migrateReference("ram:BuyerReference", legacyBuyerReference)
         migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
         migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))
