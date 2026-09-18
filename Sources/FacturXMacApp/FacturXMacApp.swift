@@ -2541,11 +2541,11 @@ struct InvoiceEditorView: View {
                                 HStack(spacing: 2) {
                                     Picker("", selection: $line.vatCategory) {
                                         ForEach(VATCategory.allCases, id: \.self) { cat in
-                                            Text(cat.rawValue).tag(cat)
+                                            Text("\(cat.rawValue) — \(cat.label)").tag(cat)
                                         }
                                     }
                                     .labelsHidden()
-                                    .frame(width: 68)
+                                    .frame(width: 210)
                                     InfoBadge(text: "BT-151 — Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
@@ -9122,11 +9122,11 @@ struct OrderEditorView: View {
                                 HStack(spacing: 2) {
                                     Picker("", selection: $line.vatCategory) {
                                         ForEach(VATCategory.allCases, id: \.self) { cat in
-                                            Text(cat.rawValue).tag(cat)
+                                            Text("\(cat.rawValue) — \(cat.label)").tag(cat)
                                         }
                                     }
                                     .labelsHidden()
-                                    .frame(width: 68)
+                                    .frame(width: 210)
                                     InfoBadge(text: "Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
