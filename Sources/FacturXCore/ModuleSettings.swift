@@ -2,25 +2,28 @@ import Foundation
 
 /// Active/désactive des modules optionnels de l'application. Annuaire et
 /// Factures restent toujours actifs (cœur de l'app, rien ne fonctionne sans
-/// eux) ; Devis et Ventes (commandes) peuvent être désactivés par une TPE qui
+/// eux) ; Devis, Ventes (commandes) et Achats peuvent être désactivés par une TPE qui
 /// facture directement sans passer par ces étapes.
 public struct ModuleSettings: Codable, Equatable {
     public var ordersEnabled: Bool
     public var quotesEnabled: Bool
+    public var purchasesEnabled: Bool
 
-    public init(ordersEnabled: Bool = true, quotesEnabled: Bool = true) {
+    public init(ordersEnabled: Bool = true, quotesEnabled: Bool = true, purchasesEnabled: Bool = true) {
         self.ordersEnabled = ordersEnabled
         self.quotesEnabled = quotesEnabled
+        self.purchasesEnabled = purchasesEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
-        case ordersEnabled, quotesEnabled
+        case ordersEnabled, quotesEnabled, purchasesEnabled
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ordersEnabled = try c.decodeIfPresent(Bool.self, forKey: .ordersEnabled) ?? true
         quotesEnabled = try c.decodeIfPresent(Bool.self, forKey: .quotesEnabled) ?? true
+        purchasesEnabled = try c.decodeIfPresent(Bool.self, forKey: .purchasesEnabled) ?? true
     }
 }
 
