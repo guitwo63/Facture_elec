@@ -3641,6 +3641,8 @@ struct PartySection: View {
     @State private var duplicateMatches: [PartyDirectory.DuplicateMatch]?
     @State private var lookingUpElectronicAddress = false
     @State private var electronicAddressLookupNote: String?
+    @State private var electronicAddressChoices: [SuperPDPDirectoryEntry] = []
+    @State private var pendingPartyForAddressChoice: InvoiceParty?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -3744,6 +3746,30 @@ struct PartySection: View {
                 }
             }.padding(20).frame(minWidth: 360)
         }
+        .sheet(isPresented: Binding(
+            get: { !electronicAddressChoices.isEmpty },
+            set: { if !$0 { electronicAddressChoices = []; pendingPartyForAddressChoice = nil } }
+        )) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Plusieurs adresses électroniques trouvées").font(.headline).padding(12)
+                Text("Ce SIREN/SIRET correspond à plusieurs établissements sur SUPER PDP. Choisissez celle à enregistrer pour ce tiers.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
+                Divider().padding(.top, 8)
+                List(electronicAddressChoices) { entry in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(entry.name ?? entry.routingAddress ?? "(sans nom)").font(.body.bold())
+                        Text(entry.routingAddress ?? "").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        if let addr = entry.addressLine, !addr.isEmpty {
+                            Text([addr, entry.postcode, entry.city].compactMap { $0 }.joined(separator: " "))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { applyElectronicAddressChoice(entry) }
+                }
+            }
+            .frame(width: 420, height: 340)
+        }
         .alert("Tiers potentiellement en doublon", isPresented: Binding(
             get: { duplicateMatches != nil },
             set: { if !$0 { duplicateMatches = nil; pendingEntry = nil } }
@@ -3792,7 +3818,18 @@ struct PartySection: View {
         Task {
             do {
                 let results = try await SuperPDPService().searchRecipient(siretOrSiren: query, credentials: superPDPSettings.credentials)
-                if let match = results.first(where: { ($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty == false }) {
+                let withAddress = results.filter { !($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+                let distinctAddresses = Set(withAddress.map { $0.routingAddress ?? "" })
+                if distinctAddresses.count > 1 {
+                    // Plusieurs adresses électroniques différentes trouvées pour ce SIREN/SIRET
+                    // (plusieurs établissements, par ex.) : on ne peut pas en choisir une au
+                    // hasard, l'utilisateur doit trancher — au lieu de prendre silencieusement
+                    // la première, ce qui pouvait enregistrer la mauvaise adresse.
+                    lookingUpElectronicAddress = false
+                    pendingPartyForAddressChoice = p
+                    electronicAddressChoices = withAddress
+                    return
+                } else if let match = withAddress.first {
                     p.endpointID = match.routingAddress
                     p.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
                     electronicAddressLookupNote = "Adresse électronique trouvée sur SUPER PDP."
@@ -3807,8 +3844,33 @@ struct PartySection: View {
         }
     }
 
+    /// Choix retenu quand plusieurs adresses électroniques étaient disponibles pour le même
+    /// SIREN/SIRET (plusieurs établissements) : reprend le flux normal avec l'adresse choisie.
+    private func applyElectronicAddressChoice(_ match: SuperPDPDirectoryEntry) {
+        guard var p = pendingPartyForAddressChoice else { return }
+        p.endpointID = match.routingAddress
+        p.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
+        electronicAddressChoices = []
+        pendingPartyForAddressChoice = nil
+        finishSaveToDirectory(p)
+    }
+
     private func finishSaveToDirectory(_ p: InvoiceParty) {
-        let entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        var entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        // L'adresse électronique trouvée était appliquée à `party.endpointID` mais jamais
+        // recopiée dans `routingAddresses` (la liste gérée depuis la fiche tiers) : elle
+        // semblait alors ne "rien avoir enregistré" une fois le tiers ouvert, malgré un
+        // endpointID bien présent en mémoire au moment de la sauvegarde.
+        let siren = (p.siren ?? "").filter { $0.isNumber }
+        let siret = (p.siret ?? "").filter { $0.isNumber }
+        let endpoint = (p.endpointID ?? "").trimmingCharacters(in: .whitespaces)
+        if !endpoint.isEmpty, !siren.isEmpty {
+            let format: RoutingAddressFormat = siret.count == 14 ? .sirenSiret : .siren
+            entry.routingAddresses = [PartyRoutingAddress(
+                format: format, siren: siren, siret: siret.count == 14 ? siret : nil,
+                label: "SUPER PDP", isActive: true, isDefault: true
+            )]
+        }
         let dup = directory.findDuplicates(of: entry)
         if dup.isEmpty {
             directory.upsert(entry)
@@ -4509,6 +4571,8 @@ struct DirectoryDetailView: View {
                         }
                         }
                         Divider()
+                        HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Contact(s)").font(.headline)
                             Spacer()
@@ -4567,9 +4631,11 @@ struct DirectoryDetailView: View {
                             if let ce = entry.party.contactEmail, !ce.isEmpty { detailRow("Email", ce) }
                             if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
                         }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                         if entry.kind != .fournisseur {
-                        Divider()
+                        VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Adresses de facturation électronique").font(.headline)
                             Spacer()
@@ -4622,6 +4688,9 @@ struct DirectoryDetailView: View {
                             }
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+                        }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         }
 
@@ -4805,6 +4874,20 @@ struct DirectoryEditorView: View {
         }
         .padding(16)
         .frame(minWidth: 560, minHeight: 560)
+        .onChange(of: entry.routingAddresses) { _ in
+            // L'identifiant électronique affiché sur la fiche (BT-49/34, champ "Ident. élec.")
+            // et la liste "Adresses de facturation électronique" ci-dessus pouvaient diverger :
+            // modifier la liste (ajout, suppression, changement de défaut) ne rafraîchissait
+            // jamais le champ sur le tiers, qui restait sur son ancienne valeur saisie ou
+            // choisie précédemment. Recalé automatiquement sur l'adresse par défaut active.
+            if let def = entry.defaultRoutingAddress, def.isActive {
+                let composed = def.composedAddress.trimmingCharacters(in: .whitespaces)
+                if !composed.isEmpty {
+                    entry.party.endpointID = composed
+                    entry.party.endpointSchemeID = "0225"
+                }
+            }
+        }
         .alert("Tiers potentiellement en doublon", isPresented: Binding(
             get: { duplicateMatches != nil },
             set: { if !$0 { duplicateMatches = nil } }
