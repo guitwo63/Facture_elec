@@ -497,6 +497,7 @@ struct RootView: View {
     @State private var showSetupWizard = false
     @State private var setupWizardSkippedThisSession = false
     @State private var showFullSettingsWizard = false
+    @State private var showConnectionStatus = false
 
     var body: some View {
         Group {
@@ -651,6 +652,15 @@ struct RootView: View {
                     .help("Gestion utilisateurs")
                 }
                 Button {
+                    showConnectionStatus = true
+                } label: {
+                    Image(systemName: allConnectionsConfigured ? "checkmark.circle" : "exclamationmark.circle")
+                        .font(.title2)
+                        .foregroundStyle(allConnectionsConfigured ? Color.secondary : Color.orange)
+                }
+                .buttonStyle(.borderless)
+                .help("État des connexions distantes (SUPER PDP, pCloud)")
+                Button {
                     showSettings = true
                 } label: {
                     Image(systemName: "gearshape")
@@ -716,6 +726,9 @@ struct RootView: View {
                 UserManagementView()
                     .frame(minWidth: 760, minHeight: 560)
             }
+        }
+        .sheet(isPresented: $showConnectionStatus) {
+            ConnectionStatusView()
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
@@ -786,6 +799,12 @@ struct RootView: View {
         }
     }
 
+    /// Configuration (pas connectivité live) des deux services distants — un simple repère
+    /// dans l'en-tête, le test réel se fait à la demande dans ConnectionStatusView.
+    private var allConnectionsConfigured: Bool {
+        superPDPSettings.credentials.isConfigured && pcloudSettings.credentials.isConfigured
+    }
+
     private func syncAuditActor() {
         let name = auth.currentUser?.username ?? "system"
         store.actorName = name
@@ -801,6 +820,121 @@ struct RootView: View {
             return preferred.id
         }
         return visible.first?.id
+    }
+}
+
+/// Témoin de configuration + test à la demande pour les deux services distants (SUPER PDP,
+/// pCloud). Pas de test automatique au chargement : uniquement sur clic, comme le
+/// "Tester la connexion" déjà en place côté pCloud (Réglages > Application > Sauvegardes).
+struct ConnectionStatusView: View {
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
+    @EnvironmentObject var pcloudSettings: PCloudSettings
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var pdpTesting = false
+    @State private var pdpResult: String?
+    @State private var pdpOK: Bool?
+
+    @State private var pcloudTesting = false
+    @State private var pcloudResult: String?
+    @State private var pcloudOK: Bool?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("État des connexions").font(.title2.bold())
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    connectionRow(
+                        name: "SUPER PDP", systemImage: "checkmark.shield",
+                        configured: superPDPSettings.credentials.isConfigured,
+                        testing: pdpTesting, result: pdpResult, ok: pdpOK, test: testSuperPDP
+                    )
+                    Divider()
+                    connectionRow(
+                        name: "pCloud", systemImage: "icloud",
+                        configured: pcloudSettings.credentials.isConfigured,
+                        testing: pcloudTesting, result: pcloudResult, ok: pcloudOK, test: testPCloud
+                    )
+                }
+                .padding()
+            }
+        }
+        .frame(width: 460, height: 340)
+    }
+
+    @ViewBuilder
+    private func connectionRow(
+        name: String, systemImage: String, configured: Bool,
+        testing: Bool, result: String?, ok: Bool?, test: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(name, systemImage: systemImage).font(.headline)
+                Spacer()
+                if configured {
+                    Label("Configuré", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
+                } else {
+                    Label("Non configuré", systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
+                }
+            }
+            Button {
+                test()
+            } label: {
+                if testing {
+                    HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Test…") }
+                } else {
+                    Label("Tester la connexion", systemImage: "network")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(testing || !configured)
+            if let result {
+                Text(result).font(.caption).foregroundStyle(ok == true ? .green : .red)
+            }
+        }
+    }
+
+    private func testSuperPDP() {
+        pdpTesting = true
+        pdpResult = nil
+        let credentials = superPDPSettings.credentials
+        Task {
+            do {
+                _ = try await SuperPDPService().fetchToken(credentials: credentials)
+                pdpOK = true
+                pdpResult = "Connexion réussie."
+            } catch {
+                pdpOK = false
+                pdpResult = "Échec : \(error.localizedDescription)"
+            }
+            pdpTesting = false
+        }
+    }
+
+    private func testPCloud() {
+        pcloudTesting = true
+        pcloudResult = nil
+        let credentials = pcloudSettings.credentials
+        Task {
+            do {
+                _ = try await PCloudService().login(credentials: credentials)
+                pcloudOK = true
+                pcloudResult = "Connexion réussie."
+            } catch {
+                pcloudOK = false
+                pcloudResult = "Échec : \(error.localizedDescription)"
+            }
+            pcloudTesting = false
+        }
     }
 }
 
