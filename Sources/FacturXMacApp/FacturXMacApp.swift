@@ -1653,6 +1653,7 @@ struct InvoicesTabView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    ScrollViewReader { listProxy in
                     List(filteredInvoices, selection: Binding(
                         get: { selectedID },
                         set: { id in selectedID = id }
@@ -1704,6 +1705,15 @@ struct InvoicesTabView: View {
                         }
                     }
                     .frame(minWidth: 180, idealWidth: 230, maxWidth: 270)
+                    .onChange(of: selectedID) { newID in
+                        // À la création d'une facture (insérée en tête de liste), le haut de la
+                        // nouvelle ligne pouvait rester hors champ si la liste était défilée plus
+                        // bas — on recentre explicitement sur la sélection.
+                        if let newID {
+                            withAnimation { listProxy.scrollTo(newID, anchor: .top) }
+                        }
+                    }
+                    }
                 }
 
                 if let id = selectedID,
@@ -2068,6 +2078,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
     @State private var sendingInvoiceEmail = false
+    @State private var showResendEmailConfirm = false
     @State private var invoiceEmailMessage: String?
     @State private var exportError: String?
     @State private var exportedURL: URL?
@@ -2358,7 +2369,11 @@ struct InvoiceEditorView: View {
                 if emailTemplateStore.globalEnabled {
                     Divider().frame(height: 20)
                     Button {
-                        sendInvoiceEmail()
+                        if invoice.lastEmailSentAt != nil {
+                            showResendEmailConfirm = true
+                        } else {
+                            sendInvoiceEmail()
+                        }
                     } label: {
                         if sendingInvoiceEmail {
                             HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Envoi…") }
@@ -2378,6 +2393,17 @@ struct InvoiceEditorView: View {
                           : !smtpSettings.credentials.isConfigured
                           ? "Configurez l'envoi d'email (Réglages) pour envoyer la facture"
                           : "Envoyer la facture par email au client")
+                    .confirmationDialog(
+                        "Cette facture a déjà été envoyée le \(invoice.lastEmailSentAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "")",
+                        isPresented: $showResendEmailConfirm, titleVisibility: .visible
+                    ) {
+                        Button("Envoyer quand même") { sendInvoiceEmail() }
+                        Button("Annuler", role: .cancel) {}
+                    }
+                    if let sentAt = invoice.lastEmailSentAt {
+                        Text("Envoyée le \(sentAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
 
                     if invoice.isOverdue {
                         Divider().frame(height: 20)
@@ -2831,7 +2857,7 @@ struct InvoiceEditorView: View {
                     }.padding(8)
                 }.lockable(fieldLocked)
 
-                GroupBox("Paiement") {
+                GroupBox("Coordonnées bancaires") {
                     VStack(alignment: .leading, spacing: 8) {
                         if let iban = invoice.paymentIBAN, !iban.isEmpty {
                             HStack(spacing: 3) {
@@ -2848,8 +2874,6 @@ struct InvoiceEditorView: View {
                         if (invoice.paymentIBAN ?? "").isEmpty && (invoice.paymentBIC ?? "").isEmpty {
                             Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("Conditions de paiement : modifiables dans l'en-tête ci-dessus.")
-                            .font(.caption2).foregroundStyle(.tertiary)
                     }.padding(8)
                 }.lockable(fieldLocked)
 
@@ -3280,6 +3304,7 @@ struct InvoiceEditorView: View {
             do {
                 try await SMTPService().send(to: recipient, subject: email.subject, body: email.body, credentials: credentials)
                 invoiceEmailMessage = "Facture envoyée à \(recipient)."
+                invoice.lastEmailSentAt = Date()
             } catch {
                 invoiceEmailMessage = "Échec envoi : \(error.localizedDescription)"
             }
