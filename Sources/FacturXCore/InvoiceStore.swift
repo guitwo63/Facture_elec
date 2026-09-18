@@ -313,18 +313,26 @@ public final class InvoiceStore: ObservableObject {
         return false
     }
 
+    /// Basé sur le plus haut numéro déjà utilisé, pas sur un compte de factures existantes :
+    /// un compte se décale dès qu'une facture est supprimée (brouillon abandonné, par ex.),
+    /// et rejouer "numéro de départ + compte" peut alors reproduire un numéro déjà pris par
+    /// une facture restante de numéro plus élevé — un vrai doublon de numéro de facture.
+    private func nextSequence(headKey: String, companyID: UUID?) -> Int {
+        let paddedStart = max(1, numberingFormat(for: companyID).start)
+        let matching = invoices.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }
+        let maxExistingSeq = matching.compactMap { Int($0.number.dropFirst(headKey.count)) }.max() ?? (paddedStart - 1)
+        return max(paddedStart, maxExistingSeq + 1)
+    }
+
     public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
         let headKey = self.headKey(prefix: prefix, companyID: companyID)
-        let paddedStart = max(1, numberingFormat(for: companyID).start)
-        let existing = invoices.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }.count
-        let seq = paddedStart + existing
-        let chrono = String(format: "%04d", seq)
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
         return headKey + chrono
     }
 
     public func previewNextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
         let headKey = self.headKey(prefix: prefix, companyID: companyID)
-        let chrono = String(format: "%04d", max(1, numberingFormat(for: companyID).start))
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
         return headKey + chrono
     }
 

@@ -194,21 +194,28 @@ public final class OrderStore: ObservableObject {
         return false
     }
 
+    /// Basé sur le plus haut numéro déjà utilisé, pas sur un compte de commandes existantes —
+    /// voir `InvoiceStore.nextSequence` pour le bug de doublon que ça évite (un compte se
+    /// décale dès qu'une commande est supprimée).
+    private func nextSequence(headKey: String, companyID: UUID?) -> Int {
+        let paddedStart = max(1, numberStart)
+        let matching = orders.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }
+        let maxExistingSeq = matching.compactMap { Int($0.number.dropFirst(headKey.count)) }.max() ?? (paddedStart - 1)
+        return max(paddedStart, maxExistingSeq + 1)
+    }
+
     /// `companyID` scope désormais le compteur, comme pour les factures et les devis —
     /// avant, une seule séquence de commandes était partagée par toutes les sociétés,
     /// ce qui n'avait pas de sens dès qu'un compte gère plusieurs sociétés émettrices.
     public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
         let headKey = self.headKey(prefix: prefix)
-        let paddedStart = max(1, numberStart)
-        let existing = orders.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }.count
-        let seq = paddedStart + existing
-        let chrono = String(format: "%04d", seq)
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
         return headKey + chrono
     }
 
     public func previewNextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
         let headKey = self.headKey(prefix: prefix)
-        let chrono = String(format: "%04d", max(1, numberStart))
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
         return headKey + chrono
     }
 }
