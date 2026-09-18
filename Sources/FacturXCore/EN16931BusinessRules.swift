@@ -215,6 +215,17 @@ public enum EN16931BusinessRules {
                 results.append(BusinessRuleResult(ruleId: "BR-CO-16", severity: .warning,
                     message: "BR-CO-16 : \(label) — taux nul (BT-151=Z) : vérifiez qu'il s'agit bien d'une exonération et non d'un oubli de taux."))
             }
+            // Toute catégorie autre que "Standard" (Z, AE, K, G, E, O) implique un taux à 0 — sinon
+            // le sous-total de TVA calculé pour ce groupe (BG-23) est non nul alors que sa catégorie
+            // l'exige à zéro, rejeté par le validateur EN16931 officiel (confirmé en conditions
+            // réelles via SUPER PDP : BR-Z-05/BR-Z-09 pour la catégorie Z). Le suffixe -RATE est
+            // interne (pas un vrai numéro de règle officiel) pour les autres catégories, dont
+            // l'identifiant exact de cette règle précise n'est pas vérifié ici.
+            if line.vatCategory != .standard && line.vatRate != 0 {
+                let ruleId = line.vatCategory == .zeroRated ? "BR-Z-05" : "BR-\(line.vatCategory.rawValue)-RATE"
+                results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
+                    message: "\(ruleId) : \(label) — catégorie « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) incompatible avec un taux non nul (BT-152=\(line.vatRate)) ; changez la catégorie ou repassez le taux à 0."))
+            }
             if line.vatCategory.requiresExemptionReason,
                (line.vatExemptionReason ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
                 results.append(BusinessRuleResult(ruleId: "BR-\(line.vatCategory.rawValue)-05", severity: .error,

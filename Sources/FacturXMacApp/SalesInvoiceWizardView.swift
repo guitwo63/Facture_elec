@@ -153,15 +153,17 @@ struct SalesInvoiceWizardView: View {
                         TextField("Désignation", text: $line.name)
                         TextField("Qté", value: $line.quantity, format: .number).frame(width: 60)
                         TextField("Prix U. HT", value: $line.unitPrice, format: .number).frame(width: 90)
-                        Picker("TVA", selection: $line.vatRate) {
-                            Text("20 %").tag(20.0)
-                            Text("10 %").tag(10.0)
-                            Text("5,5 %").tag(5.5)
-                            Text("2,1 %").tag(2.1)
-                            Text("0 %").tag(0.0)
-                        }
-                        .labelsHidden()
-                        .frame(width: 90)
+                        VATRatePicker(rate: $line.vatRate)
+                            .onChange(of: line.vatRate) { newRate in
+                                // Catégorie de TVA (BT-151) tenue cohérente avec le taux : cet assistant
+                                // minimal n'offre pas de sélection fine (autoliquidation, export…), donc
+                                // ne propose que standard/zéro-rated — affiner ensuite dans la fiche facture
+                                // complète si besoin. Sans ce recalage, changer le taux ici pouvait laisser
+                                // une catégorie "zéro-rated" sur une ligne repassée à taux plein (ou l'inverse),
+                                // rejeté par le validateur EN16931 (BR-Z-05/BR-Z-09).
+                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
+                                if newRate != 0 { line.vatExemptionReason = nil }
+                            }
                         Text(String(format: "%.2f", line.lineTotal))
                             .font(.caption).foregroundStyle(.secondary)
                             .frame(width: 60, alignment: .trailing)

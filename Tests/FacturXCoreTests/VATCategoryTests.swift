@@ -138,6 +138,30 @@ final class VATCategoryTests: XCTestCase {
         XCTAssertFalse(rules.contains { $0.ruleId.hasSuffix("-05") })
     }
 
+    /// Régression : repérée en conditions réelles via SUPER PDP (rejet BR-Z-05/BR-Z-09) sur une
+    /// facture dont une ligne avait été créée à taux 0 % (catégorie Z auto-inférée) puis vue son
+    /// taux changé vers une valeur non nulle par un sélecteur de TVA qui ne recalait pas la
+    /// catégorie (le cas de "Facture guidée" avant correction). Le validateur interne affichait
+    /// "Conforme" malgré cette incohérence — cette règle comble le trou.
+    func testBusinessRulesFlagZeroRatedCategoryWithNonZeroRate() {
+        let inv = sampleInvoice(lines: [
+            InvoiceLine(name: "Ligne mal recalée", quantity: 1, unitPrice: 100, vatRate: 20, vatCategory: .zeroRated)
+        ])
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-Z-05" && $0.severity == .error },
+                     "catégorie Z avec un taux non nul doit être signalé en erreur, pas laissé passer silencieusement")
+    }
+
+    func testBusinessRulesFlagNonStandardCategoryWithNonZeroRateGenerically() {
+        let inv = sampleInvoice(lines: [
+            InvoiceLine(name: "Autoliquidation mal recalée", quantity: 1, unitPrice: 100, vatRate: 20, vatCategory: .reverseCharge,
+                        vatExemptionReason: "Autoliquidation, article 283-2 du CGI")
+        ])
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-AE-RATE" && $0.severity == .error },
+                     "toute catégorie non standard implique un taux nul, même quand le motif d'exonération est renseigné")
+    }
+
     // MARK: - CIIXMLGenerator / OrderCIOXMLGenerator
 
     func testXMLLineAndBreakdownUseTheLinesActualCategoryNotHardcodedS() throws {
