@@ -904,8 +904,9 @@ struct ConnectionStatusView: View {
     }
 
     /// Statut de la synchronisation périodique des statuts SUPER PDP (factures déposées,
-    /// pas encore à un statut terminal — voir `PDPPeriodicSyncEngine`). Le cycle tourne en
-    /// arrière-plan toutes les 15 minutes ; ce bouton permet de le déclencher sans attendre.
+    /// pas encore à un statut terminal — voir `PDPPeriodicSyncEngine`). Cadence réglable
+    /// dans Réglages > Application > SUPER PDP ; ce bouton permet de déclencher un cycle
+    /// sans attendre le prochain.
     private var pdpSyncSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -915,7 +916,7 @@ struct ConnectionStatusView: View {
                     Label("Active", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
                 }
             }
-            Text("Interroge périodiquement SUPER PDP pour les factures déposées non encore à un statut terminal, et applique tout avancement reçu.")
+            Text("Interroge SUPER PDP toutes les \(superPDPSettings.credentials.syncIntervalMinutes) min pour les factures déposées non encore à un statut terminal, et applique tout avancement reçu.")
                 .font(.caption).foregroundStyle(.secondary)
             if let lastRun = pdpSync.lastRunAt {
                 Text("Dernière synchronisation : \(lastRun.formatted(date: .abbreviated, time: .shortened))")
@@ -2289,16 +2290,26 @@ struct InvoiceEditorView: View {
                 }
                 if superPDPSettings.credentials.usePDP {
                     Button {
+                        // Rafraîchit le statut (auparavant un bouton "Statut PDP" séparé
+                        // dans la barre d'action) et ouvre l'historique en un seul clic :
+                        // consulter l'historique sans le statut à jour n'avait pas grand
+                        // sens, et inversement.
+                        refreshSuperPDPStatus()
                         fetchPDPEvents()
                     } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.callout)
+                        if superPDPSubmitting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.callout)
+                        }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
+                    .disabled(superPDPSubmitting
+                              || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
                               || !superPDPSettings.credentials.isConfigured)
-                    .help("Historique des événements de cycle de vie sur SUPER PDP")
+                    .help("Rafraîchir le statut et voir l'historique des événements SUPER PDP")
                 }
                 if isLocked {
                     Label(statusLocked ? "Verrouillée (statut)" : "Lecture seule", systemImage: "lock.fill")
@@ -2441,25 +2452,6 @@ struct InvoiceEditorView: View {
                     }
                     .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
                     .help("Visualiser, exporter XML, générer le Factur-X, dupliquer, copie PDP…")
-                    if superPDPSettings.credentials.usePDP {
-                        Button {
-                            refreshSuperPDPStatus()
-                        } label: {
-                            if superPDPSubmitting {
-                                HStack(spacing: 4) {
-                                    ProgressView().controlSize(.small)
-                                    Text("Statut PDP…")
-                                }
-                            } else {
-                                Label("Statut PDP", systemImage: "antenna.radar")
-                            }
-                        }
-                        .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
-                        .disabled(superPDPSubmitting
-                                  || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                  || !superPDPSettings.credentials.isConfigured)
-                        .help("Interroger le statut de la facture sur SUPER PDP")
-                    }
                 }
 
                 if emailTemplateStore.globalEnabled {
@@ -5928,6 +5920,18 @@ struct ApplicationSettingsView: View {
                         HStack {
                             Text("Base API").frame(width: 100, alignment: .leading)
                             TextField("https://api.superpdp.tech", text: $superPDPSettings.credentials.apiBaseURL)
+                        }
+                        HStack {
+                            Text("Synchronisation").frame(width: 100, alignment: .leading)
+                            Stepper(
+                                value: $superPDPSettings.credentials.syncIntervalMinutes,
+                                in: SuperPDPCredentials.minSyncIntervalMinutes...120,
+                                step: 5
+                            ) {
+                                Text("Toutes les \(superPDPSettings.credentials.syncIntervalMinutes) min")
+                            }
+                            .onChange(of: superPDPSettings.credentials.syncIntervalMinutes) { _ in superPDPSettings.save() }
+                            .help("Cadence du cycle en arrière-plan qui interroge SUPER PDP pour les factures déposées et applique tout avancement de statut reçu.")
                         }
                         HStack {
                             Text("Mode SUPER PDP").font(.caption.bold())

@@ -48,17 +48,18 @@ final class PDPPeriodicSyncEngine: ObservableObject {
 
     private var task: Task<Void, Never>?
 
-    /// Entre deux cycles, en secondes. 15 minutes : assez réactif pour un usage
-    /// quotidien sans multiplier les appels à l'API SUPER PDP (quota, latence).
-    static let interval: TimeInterval = 15 * 60
-
     func start(store: InvoiceStore, credentials: @escaping () -> SuperPDPCredentials) {
         guard task == nil else { return }
         isRunning = true
         task = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.runOnce(store: store, credentials: credentials())
-                try? await Task.sleep(nanoseconds: UInt64(Self.interval * 1_000_000_000))
+                let current = credentials()
+                await self?.runOnce(store: store, credentials: current)
+                // Relu à chaque cycle (pas capturé une fois pour toutes) : un changement de
+                // `syncIntervalMinutes` dans Réglages > Application > SUPER PDP prend effet
+                // dès le prochain cycle, sans redémarrer le moteur.
+                let minutes = max(SuperPDPCredentials.minSyncIntervalMinutes, current.syncIntervalMinutes)
+                try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
             }
         }
     }
