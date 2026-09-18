@@ -73,7 +73,7 @@ public struct CIIXMLGenerator {
         let price = String(format: "%.4f", line.unitPrice)
         let total = String(format: "%.2f", line.lineTotal)
         let rate = formatRate(line.vatRate)
-        let category = "S"
+        let category = line.vatCategory.rawValue
         let unitCode = line.unit.trimmingCharacters(in: .whitespaces).isEmpty ? "C62" : line.unit
         let desc = line.description.map { """
             <ram:Description>\(escape($0))</ram:Description>
@@ -314,11 +314,12 @@ public struct CIIXMLGenerator {
             let amount = String(format: "%.2f", item.amount)
             let basis = String(format: "%.2f", item.basis)
             let rate = formatRate(item.rate)
-            let category = invoice.vatCategory(for: item.rate)
+            let category = item.category.rawValue
+            let exemptionReason = item.exemptionReason.map { "\n        <ram:ExemptionReason>\(escape($0))</ram:ExemptionReason>" } ?? ""
             return """
       <ram:ApplicableTradeTax>
         <ram:CalculatedAmount>\(amount)</ram:CalculatedAmount>
-        <ram:TypeCode>VAT</ram:TypeCode>
+        <ram:TypeCode>VAT</ram:TypeCode>\(exemptionReason)
         <ram:BasisAmount>\(basis)</ram:BasisAmount>
         <ram:CategoryCode>\(category)</ram:CategoryCode>
         <ram:RateApplicablePercent>\(rate)</ram:RateApplicablePercent>

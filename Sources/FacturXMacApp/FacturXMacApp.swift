@@ -2641,8 +2641,8 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("TVA %", value: $line.vatRate, format: .number)
-                                    InfoBadge(text: "BT-151 — Taux de TVA appliqué (%).")
+                                    VATRatePicker(rate: $line.vatRate)
+                                    InfoBadge(text: "BT-151 — Taux de TVA appliqué (%). Catégorie et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
@@ -2656,6 +2656,35 @@ struct InvoiceEditorView: View {
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
+                            }
+                            .onChange(of: line.vatRate) { newRate in
+                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
+                                if newRate != 0 { line.vatExemptionReason = nil }
+                            }
+                            // Catégorie/motif d'exonération : uniquement pertinents à taux 0 % (autoliquidation,
+                            // export, exonération…) — masqués pour le cas standard afin de ne pas allonger
+                            // la ligne pour rien.
+                            if line.vatRate == 0 {
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 2) {
+                                        Picker("", selection: $line.vatCategory) {
+                                            ForEach(VATCategory.allCases, id: \.self) { cat in
+                                                Text("\(cat.rawValue) — \(cat.label)").tag(cat)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .frame(width: 210)
+                                        InfoBadge(text: "BT-151 — Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                    }
+                                    if line.vatCategory.requiresExemptionReason {
+                                        HStack(spacing: 2) {
+                                            TextField("Motif d'exonération (BT-120)", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                                                .frame(minWidth: 280)
+                                            InfoBadge(text: "BT-120 — Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                                        }
+                                    }
+                                }
+                                .padding(.leading, 4)
                             }
                             OptionalFieldsSection(fields: $line.optionalFields, location: .line, locked: fieldLocked)
                                 .padding(.leading, 4)
@@ -3334,10 +3363,10 @@ struct InvoiceEditorView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     if v.isValid {
-                        Label("Conforme", systemImage: "checkmark.seal.fill")
+                        Label("OK — contrôlé en local", systemImage: "checkmark.circle")
                             .foregroundStyle(.green)
                     } else {
-                        Label("Non conforme — \(ruleErrors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                        Label("Pré-vérification locale : \(ruleErrors.count) erreur(s)", systemImage: "exclamationmark.circle")
                             .foregroundStyle(.red)
                     }
                     Spacer()
@@ -3345,6 +3374,8 @@ struct InvoiceEditorView: View {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
                 }
+                Text("Contrôles internes, non exhaustifs — seule la validation SUPER PDP ci-dessous fait foi.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 if !ruleErrors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
                     ForEach(ruleErrors) { br in
@@ -7960,6 +7991,42 @@ struct NormRefPicker: View {
     }
 }
 
+/// Taux de TVA français standards (métropole). "Autre…" bascule sur un champ
+/// numérique libre pour un cas hors norme (DOM-TOM, régime particulier…).
+struct VATRatePicker: View {
+    @Binding var rate: Double
+
+    static let standardRates: [(rate: Double, label: String)] = [
+        (20, "20 % — Normal"),
+        (10, "10 % — Intermédiaire"),
+        (5.5, "5,5 % — Réduit"),
+        (2.1, "2,1 % — Particulier"),
+        (0, "0 % — Exonéré")
+    ]
+
+    private var isStandard: Bool { Self.standardRates.contains { $0.rate == rate } }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Picker("", selection: Binding(
+                get: { isStandard ? rate : -1 },
+                set: { newValue in if newValue >= 0 { rate = newValue } }
+            )) {
+                ForEach(Self.standardRates, id: \.rate) { entry in
+                    Text(entry.label).tag(entry.rate)
+                }
+                Text("Autre…").tag(-1.0)
+            }
+            .labelsHidden()
+            .frame(width: 150)
+            if !isStandard {
+                TextField("%", value: $rate, format: .number)
+                    .frame(width: 50)
+            }
+        }
+    }
+}
+
 struct OrderPartySection: View {
     enum Role {
         case buyer, seller
@@ -8932,6 +8999,15 @@ struct QuoteEditorView: View {
                             TextField("Qté", value: $line.quantity, format: .number).frame(width: 50).disabled(isLocked)
                             TextField("Prix U.", value: $line.unitPrice, format: .number).frame(width: 70).disabled(isLocked)
                             TextField("TVA %", value: $line.vatRate, format: .number).frame(width: 50).disabled(isLocked)
+                                .onChange(of: line.vatRate) { newRate in
+                                    // Un devis n'affiche pas de sélecteur de catégorie TVA (il n'émet pas de
+                                    // XML), mais toInvoice()/toOrder() recopient les lignes telles quelles :
+                                    // sans ce recalage, une catégorie "zéro-rated" laissée par un ancien taux
+                                    // à 0 % suivrait la ligne jusqu'à la facture/commande, rejetée par le
+                                    // validateur EN16931 (BR-Z-05/BR-Z-09).
+                                    line.vatCategory = newRate == 0 ? .zeroRated : .standard
+                                    if newRate != 0 { line.vatExemptionReason = nil }
+                                }
                             Text(String(format: "%.2f", line.lineTotal)).foregroundStyle(.secondary).frame(width: 70)
                         }
                     }
@@ -9319,8 +9395,8 @@ struct OrderEditorView: View {
                                     InfoBadge(text: "Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("TVA %", value: $line.vatRate, format: .number)
-                                    InfoBadge(text: "Taux de TVA appliqué (%).")
+                                    VATRatePicker(rate: $line.vatRate)
+                                    InfoBadge(text: "Taux de TVA appliqué (%). Catégorie et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
@@ -9331,6 +9407,32 @@ struct OrderEditorView: View {
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
+                            }
+                            .onChange(of: line.vatRate) { newRate in
+                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
+                                if newRate != 0 { line.vatExemptionReason = nil }
+                            }
+                            if line.vatRate == 0 {
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 2) {
+                                        Picker("", selection: $line.vatCategory) {
+                                            ForEach(VATCategory.allCases, id: \.self) { cat in
+                                                Text("\(cat.rawValue) — \(cat.label)").tag(cat)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .frame(width: 210)
+                                        InfoBadge(text: "Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                    }
+                                    if line.vatCategory.requiresExemptionReason {
+                                        HStack(spacing: 2) {
+                                            TextField("Motif d'exonération", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                                                .frame(minWidth: 280)
+                                            InfoBadge(text: "Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                                        }
+                                    }
+                                }
+                                .padding(.leading, 4)
                             }
                         }
                         Button {
@@ -9535,10 +9637,10 @@ struct OrderEditorView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     if v.isValid {
-                        Label("Conforme", systemImage: "checkmark.seal.fill")
+                        Label("OK — contrôlé en local", systemImage: "checkmark.circle")
                             .foregroundStyle(.green)
                     } else {
-                        Label("Non conforme — \(v.errors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                        Label("Pré-vérification locale : \(v.errors.count) erreur(s)", systemImage: "exclamationmark.circle")
                             .foregroundStyle(.red)
                     }
                     Spacer()
@@ -9546,6 +9648,8 @@ struct OrderEditorView: View {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
                 }
+                Text("Contrôles internes, non exhaustifs — seule une validation officielle (SUPER PDP, etc.) fait foi.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 if !v.errors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
                     ForEach(v.errors, id: \.self) { e in
