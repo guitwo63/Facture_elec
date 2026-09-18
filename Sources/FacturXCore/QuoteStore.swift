@@ -122,21 +122,28 @@ public final class QuoteStore: ObservableObject {
         return false
     }
 
+    /// Basé sur le plus haut numéro déjà utilisé, pas sur un compte de devis existants —
+    /// voir `InvoiceStore.nextSequence` pour le bug de doublon que ça évite (un compte se
+    /// décale dès qu'un devis est supprimé).
+    private func nextSequence(headKey: String, companyID: UUID?) -> Int {
+        let paddedStart = max(1, numberStart)
+        let matching = quotes.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }
+        let maxExistingSeq = matching.compactMap { Int($0.number.dropFirst(headKey.count)) }.max() ?? (paddedStart - 1)
+        return max(paddedStart, maxExistingSeq + 1)
+    }
+
     /// `companyID` scope le compteur, comme pour les factures et les commandes ;
     /// le format (préfixe, année, séparateur, numéro de début) est configurable
     /// comme pour les commandes, au lieu du format "DEV-AAAA-NNN" figé.
     public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
         let headKey = self.headKey(prefix: prefix)
-        let paddedStart = max(1, numberStart)
-        let existing = quotes.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }.count
-        let seq = paddedStart + existing
-        let chrono = String(format: "%04d", seq)
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
         return headKey + chrono
     }
 
     public func previewNextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
         let headKey = self.headKey(prefix: prefix)
-        let chrono = String(format: "%04d", max(1, numberStart))
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
         return headKey + chrono
     }
 

@@ -98,6 +98,39 @@ final class InvoiceNumberingTests: XCTestCase {
         XCTAssertEqual(reloaded.numberFormatOverrides[cid]?.start, 42)
     }
 
+    // MARK: - Régression : doublon de numéro après suppression d'un brouillon
+
+    /// Avant cette correction, nextNumber() comptait les factures existantes (paddedStart +
+    /// count) au lieu de se baser sur le plus haut numéro utilisé. Supprimer une facture du
+    /// milieu de la séquence décale ce compte, et la prochaine facture créée pouvait alors
+    /// recevoir un numéro déjà pris par une facture restante de numéro plus élevé — un vrai
+    /// doublon de numéro de facture, pas seulement une réutilisation esthétique.
+    func testDeletingAMiddleInvoiceDoesNotProduceADuplicateNumberAfterwards() {
+        let store = InvoiceStore()
+        store.numberPrefix = "FAC"
+        store.numberIncludeYear = false
+        store.numberUseSeparator = false
+        let party = InvoiceParty(name: "", street: "", postcode: "", city: "")
+
+        let n1 = store.nextNumber()
+        let inv1 = Invoice(number: n1, seller: party, buyer: party)
+        store.upsert(inv1)
+        let n2 = store.nextNumber()
+        let inv2 = Invoice(number: n2, seller: party, buyer: party)
+        store.upsert(inv2)
+        let n3 = store.nextNumber()
+        let inv3 = Invoice(number: n3, seller: party, buyer: party)
+        store.upsert(inv3)
+        XCTAssertEqual([n1, n2, n3], ["FAC0001", "FAC0002", "FAC0003"])
+
+        store.delete(inv2)
+        XCTAssertEqual(store.invoices.map(\.number).sorted(), ["FAC0001", "FAC0003"])
+
+        let n4 = store.nextNumber()
+        XCTAssertEqual(n4, "FAC0004", "doit repartir après le plus haut numéro existant (FAC0003), pas réutiliser FAC0003")
+        XCTAssertFalse(store.invoices.contains { $0.number == n4 }, "le nouveau numéro ne doit jamais déjà exister")
+    }
+
     func testNoOverridesMeansExistingSingleSocietyBehaviorIsUnchanged() {
         // Une installation existante (une seule société, jamais de réglage par société créé)
         // ne doit voir aucune différence de comportement après cette évolution.
