@@ -1920,8 +1920,8 @@ struct InvoiceEditorView: View {
 
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     /// Appliquer un préréglage recalcule aussi l'échéance (BT-9) à partir de la date de
-    /// facture — l'utilisateur garde toujours la main pour modifier la date ensuite,
-    /// ce calcul ne verrouille jamais le champ.
+    /// facture. Le champ Échéance se grise alors (voir `dueDateIsComputedFromPreset`) :
+    /// en mode Personnalisé, il reste modifiable manuellement.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
             get: { paymentTermsStore.matchingPresetID(for: invoice.paymentTerms) },
@@ -1931,6 +1931,18 @@ struct InvoiceEditorView: View {
                 invoice.dueDate = preset.dueRule.dueDate(from: invoice.issueDate)
             }
         )
+    }
+
+    /// Vrai si le préréglage actif calcule réellement une échéance (jours nets /
+    /// fin de mois + jours) — le champ Échéance se grise alors, pour éviter une
+    /// saisie manuelle immédiatement écrasée par le prochain recalcul. Un
+    /// préréglage sans règle (ex. "Comptant") ou le mode Personnalisé laissent
+    /// le champ modifiable.
+    private var dueDateIsComputedFromPreset: Bool {
+        guard let id = paymentTermsPresetIDBinding.wrappedValue,
+              let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return false }
+        if case .none = preset.dueRule { return false }
+        return true
     }
 
     private func fieldHighlight<V: View>(_ view: V, forRuleIDs ids: [String]) -> some View {
@@ -2367,9 +2379,10 @@ struct InvoiceEditorView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
                                             Text("Échéance").font(.caption)
-                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Calculée automatiquement par le préréglage de conditions de paiement sélectionné ; modifiable uniquement en mode « Personnalisé ».")
                                         }
                                         DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
+                                            .disabled(fieldLocked || dueDateIsComputedFromPreset)
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
