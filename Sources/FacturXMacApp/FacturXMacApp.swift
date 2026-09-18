@@ -505,6 +505,12 @@ struct RootView: View {
         Group {
             if auth.currentUser == nil {
                 LoginView()
+            } else if let user = auth.currentUser, !user.emailVerified, !auth.testBypassSecurity {
+                // Toutes les fonctions de l'application sont bloquées tant que l'email du
+                // compte n'est pas validé — seule cette fenêtre (saisie/renvoi du code) est
+                // accessible. `testBypassSecurity` contourne ce blocage, comme pour
+                // `mustChangePassword` dans LoginView, pour ne pas gêner la mise au point.
+                EmailVerificationGateView(user: user)
             } else {
                 mainBody
                     .onChange(of: appEnv.mode) { _ in
