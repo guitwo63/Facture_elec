@@ -241,18 +241,35 @@ struct LoginView: View {
 
 struct AuditLogView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var actionLabels: AuditActionLabelStore
     @State private var query = ""
     @State private var typeFilter: AuditObjectType? = nil
     @State private var statusOnly = false
 
+    private var isAdmin: Bool { auth.currentUser?.isAdmin == true }
+
+    /// Types d'objets visibles selon le rôle : un non-admin ne doit pas voir les
+    /// événements liés aux comptes utilisateurs (créations, verrouillages…), qui
+    /// relèvent de l'administration et pas du suivi métier des documents.
+    private var visibleObjectTypes: [AuditObjectType] {
+        AuditObjectType.allCases.filter { isAdmin || $0 != .user }
+    }
+
+    /// Entrées visibles pour le rôle courant, avant recherche/filtre de type.
+    private var visibleEntries: [AuditLogEntry] {
+        let all = auth.audit.entries
+        return isAdmin ? all : all.filter { $0.objectType != .user }
+    }
+
     var filtered: [AuditLogEntry] {
-        var result = auth.audit.entries
+        var result = visibleEntries
         if let t = typeFilter { result = result.filter { $0.objectType == t } }
         if statusOnly { result = result.filter { $0.action == "status_change" } }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
         return result.filter {
             $0.actor.lowercased().contains(q) || $0.action.lowercased().contains(q)
+            || actionLabels.label(for: $0.action).lowercased().contains(q)
             || $0.target.lowercased().contains(q) || $0.details.lowercased().contains(q)
             || ($0.objectCode ?? "").lowercased().contains(q)
             || ($0.statusFrom ?? "").lowercased().contains(q) || ($0.statusTo ?? "").lowercased().contains(q)
@@ -264,19 +281,21 @@ struct AuditLogView: View {
             HStack {
                 Text("Journal d'audit").font(.title2.bold())
                 Spacer()
-                Text("\(auth.audit.entries.count) / \(auth.audit.maxEntries)")
+                Text("\(visibleEntries.count) / \(auth.audit.maxEntries)")
                     .font(.caption).foregroundStyle(.secondary)
-                Button(role: .destructive) {
-                    auth.audit.clear()
-                } label: { Label("Vider", systemImage: "trash") }
-                    .buttonStyle(.bordered)
+                if isAdmin {
+                    Button(role: .destructive) {
+                        auth.audit.clear()
+                    } label: { Label("Vider", systemImage: "trash") }
+                        .buttonStyle(.bordered)
+                }
             }.padding(10)
             HStack {
                 TextField("Rechercher", text: $query)
                     .textFieldStyle(.roundedBorder)
                 Picker("Type", selection: $typeFilter) {
                     Text("Tous").tag(AuditObjectType?.none)
-                    ForEach(AuditObjectType.allCases, id: \.self) { t in
+                    ForEach(visibleObjectTypes, id: \.self) { t in
                         Text(t.label).tag(AuditObjectType?.some(t))
                     }
                 }
@@ -295,7 +314,7 @@ struct AuditLogView: View {
                 }.width(90)
                 TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(120)
                 TableColumn("Code") { e in Text(e.objectCode ?? e.target).font(.caption) }.width(120)
-                TableColumn("Action") { e in Text(e.action).font(.caption) }.width(120)
+                TableColumn("Action") { e in Text(actionLabels.label(for: e.action)).font(.caption) }.width(160)
                 TableColumn("Détails") { e in
                     if e.action == "status_change" {
                         Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
