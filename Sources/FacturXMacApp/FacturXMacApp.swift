@@ -488,6 +488,7 @@ struct RootView: View {
     @EnvironmentObject var pcloudSettings: PCloudSettings
     @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var backupStrategyStore: BackupStrategyStore
+    @StateObject private var pdpSync = PDPPeriodicSyncEngine()
     @State private var tab: RootTab = .invoices
     @State private var didAttemptAutoBackup = false
     @State private var selectedID: UUID?
@@ -554,6 +555,11 @@ struct RootView: View {
         directory.actorName = auth.currentUser?.username ?? "system"
         selectedID = nil
         selectedOrderID = nil
+        // Les identifiants SUPER PDP sont propres à l'environnement (test/production) :
+        // un cycle de synchronisation en cours avec les anciens identifiants n'a plus de
+        // sens après une bascule — on relance avec ceux qui viennent d'être rechargés.
+        pdpSync.stop()
+        pdpSync.start(store: store) { superPDPSettings.credentials }
     }
 
     private func reloadChorusCredentials() -> ChorusProCredentials {
@@ -746,7 +752,7 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showConnectionStatus) {
-            ConnectionStatusView()
+            ConnectionStatusView(pdpSync: pdpSync)
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
@@ -768,6 +774,7 @@ struct RootView: View {
             syncAuditActor()
             maybeShowSetupWizard()
             runAutoBackupIfNeeded()
+            pdpSync.start(store: store) { superPDPSettings.credentials }
         }
         .onChange(of: auth.currentUser) { _ in
             syncAuditActor()
@@ -845,9 +852,12 @@ struct RootView: View {
 /// pCloud). Pas de test automatique au chargement : uniquement sur clic, comme le
 /// "Tester la connexion" déjà en place côté pCloud (Réglages > Application > Sauvegardes).
 struct ConnectionStatusView: View {
+    @ObservedObject var pdpSync: PDPPeriodicSyncEngine
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var pcloudSettings: PCloudSettings
+    @EnvironmentObject var store: InvoiceStore
     @Environment(\.dismiss) private var dismiss
+    @State private var syncingNow = false
 
     @State private var pdpTesting = false
     @State private var pdpResult: String?
@@ -882,11 +892,52 @@ struct ConnectionStatusView: View {
                         configured: pcloudSettings.credentials.isConfigured,
                         testing: pcloudTesting, result: pcloudResult, ok: pcloudOK, test: testPCloud
                     )
+                    Divider()
+                    pdpSyncSection
                 }
                 .padding()
             }
         }
-        .frame(width: 460, height: 340)
+        .frame(width: 460, height: 420)
+    }
+
+    /// Statut de la synchronisation périodique des statuts SUPER PDP (factures déposées,
+    /// pas encore à un statut terminal — voir `PDPPeriodicSyncEngine`). Le cycle tourne en
+    /// arrière-plan toutes les 15 minutes ; ce bouton permet de le déclencher sans attendre.
+    private var pdpSyncSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Synchronisation des statuts", systemImage: "arrow.triangle.2.circlepath").font(.headline)
+                Spacer()
+                if pdpSync.isRunning {
+                    Label("Active", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
+                }
+            }
+            Text("Interroge périodiquement SUPER PDP pour les factures déposées non encore à un statut terminal, et applique tout avancement reçu.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let lastRun = pdpSync.lastRunAt {
+                Text("Dernière synchronisation : \(lastRun.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let summary = pdpSync.lastRunSummary {
+                Text(summary).font(.caption2).foregroundStyle(.secondary)
+            }
+            Button {
+                syncingNow = true
+                Task {
+                    await pdpSync.runOnce(store: store, credentials: superPDPSettings.credentials)
+                    syncingNow = false
+                }
+            } label: {
+                if syncingNow {
+                    HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Synchronisation…") }
+                } else {
+                    Label("Synchroniser maintenant", systemImage: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(syncingNow || !superPDPSettings.credentials.isConfigured)
+        }
     }
 
     @ViewBuilder
@@ -3173,29 +3224,6 @@ struct InvoiceEditorView: View {
         }
     }
 
-    /// Reconnaît à la fois les codes officiels `fr:2XX` (table SUPER PDP) et quelques mots
-    /// libres déjà tolérés avant cette évolution (le champ `status` de `GET /invoices/{id}`
-    /// n'est pas documenté aussi précisément que les codes de `invoice_events`).
-    private static func mapPDPStatusToLocal(_ pdpStatus: String) -> InvoiceStatus? {
-        let s = pdpStatus.lowercased()
-        switch s {
-        case "fr:200": return .sentToPDP
-        case "fr:201": return .sentToRecipient
-        case "fr:202": return .receivedByRecipient
-        case "fr:203": return .madeAvailable
-        case "fr:204": return .acknowledged
-        case "fr:208": return .onHold
-        case "fr:207", "accepted", "processed", "received": return .accepted
-        case "fr:206", "rejected": return .rejected
-        case "fr:213": return .rejectedByRecipient
-        case "fr:209": return .completed
-        case "fr:211": return .paymentSent
-        case "fr:212", "encaissée", "encaissee", "paid": return .paid
-        case "fr:320", "annulée", "annulee", "cancelled": return .cancelled
-        default: return nil
-        }
-    }
-
     private func refreshSuperPDPStatus() {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         superPDPSubmitting = true
@@ -3209,7 +3237,7 @@ struct InvoiceEditorView: View {
                     enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
                     lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
                 )
-                if let mapped = Self.mapPDPStatusToLocal(updated.status) {
+                if let mapped = PDPStatusMapper.mapPDPStatusToLocal(updated.status) {
                     // Ne jamais rétrograder le statut local : on n'applique le statut PDP
                     // que s'il représente un avancement dans le cycle de vie (ou une annulation).
                     let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
