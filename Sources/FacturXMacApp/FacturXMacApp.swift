@@ -3257,10 +3257,10 @@ struct InvoiceEditorView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     if v.isValid {
-                        Label("Conforme", systemImage: "checkmark.seal.fill")
+                        Label("OK — contrôlé en local", systemImage: "checkmark.circle")
                             .foregroundStyle(.green)
                     } else {
-                        Label("Non conforme — \(ruleErrors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                        Label("Pré-vérification locale : \(ruleErrors.count) erreur(s)", systemImage: "exclamationmark.circle")
                             .foregroundStyle(.red)
                     }
                     Spacer()
@@ -3268,6 +3268,8 @@ struct InvoiceEditorView: View {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
                 }
+                Text("Contrôles internes, non exhaustifs — seule la validation SUPER PDP ci-dessous fait foi.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 if !ruleErrors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
                     ForEach(ruleErrors) { br in
@@ -9414,10 +9416,10 @@ struct OrderEditorView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     if v.isValid {
-                        Label("Conforme", systemImage: "checkmark.seal.fill")
+                        Label("OK — contrôlé en local", systemImage: "checkmark.circle")
                             .foregroundStyle(.green)
                     } else {
-                        Label("Non conforme — \(v.errors.count) erreur(s)", systemImage: "xmark.seal.fill")
+                        Label("Pré-vérification locale : \(v.errors.count) erreur(s)", systemImage: "exclamationmark.circle")
                             .foregroundStyle(.red)
                     }
                     Spacer()
@@ -9425,6 +9427,8 @@ struct OrderEditorView: View {
                         Image(systemName: "xmark.circle")
                     }.buttonStyle(.plain)
                 }
+                Text("Contrôles internes, non exhaustifs — seule une validation officielle (SUPER PDP, etc.) fait foi.")
+                    .font(.caption2).foregroundStyle(.secondary)
                 if !v.errors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
                     ForEach(v.errors, id: \.self) { e in
