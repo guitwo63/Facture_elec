@@ -3870,7 +3870,7 @@ struct DirectoryView: View {
                     Toggle(isOn: $showArchived) {
                         Label("Archives", systemImage: "archivebox")
                     }
-                    .toggleStyle(.checkbox)
+                    .toggleStyle(.switch)
                     .help("Afficher les tiers archivés")
                 }
                 HStack {
@@ -4580,7 +4580,9 @@ struct RoutingAddressFormView: View {
             }
             TextField("Libellé (optionnel)", text: Binding($draft.label, replacingNilWith: ""))
             Toggle("Adresse active", isOn: $draft.isActive)
+                .toggleStyle(.switch)
             Toggle("Adresse par défaut", isOn: $draft.isDefault)
+                .toggleStyle(.switch)
             HStack {
                 Spacer()
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -5567,7 +5569,7 @@ struct ApplicationSettingsView: View {
                                     .frame(width: 70)
                             }
                             Toggle("TLS implicite (recommandé, port 465)", isOn: $smtpSettings.credentials.useTLS)
-                                .toggleStyle(.checkbox)
+                                .toggleStyle(.switch)
                             HStack {
                                 Text("Utilisateur").frame(width: 100, alignment: .leading)
                                 TextField("Identifiant SMTP", text: $smtpSettings.credentials.username)
@@ -5584,9 +5586,9 @@ struct ApplicationSettingsView: View {
                             Divider()
                             Text("Déclencheurs").font(.caption.bold())
                             Toggle("Nouvel utilisateur créé", isOn: $smtpSettings.credentials.alertOnNewUser)
-                                .toggleStyle(.checkbox)
+                                .toggleStyle(.switch)
                             Toggle("Changement de statut de facture (Acceptée/Rejetée/Payée/Annulée)", isOn: $smtpSettings.credentials.alertOnInvoiceStatusChange)
-                                .toggleStyle(.checkbox)
+                                .toggleStyle(.switch)
                             HStack {
                                 Button {
                                     smtpSettings.save()
@@ -5748,6 +5750,7 @@ struct ApplicationSettingsView: View {
                                 .frame(width: 140)
                         }
                         Toggle("Inclure l'année", isOn: activeNumberingFormatBinding.includeYear)
+                            .toggleStyle(.switch)
                         HStack {
                             Text("Numéro de début").font(.caption)
                             Stepper(value: activeNumberingFormatBinding.start, in: 1...999999) {
@@ -5755,6 +5758,7 @@ struct ApplicationSettingsView: View {
                             }
                         }
                         Toggle("Séparer par un \"-\"", isOn: activeNumberingFormatBinding.useSeparator)
+                            .toggleStyle(.switch)
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
