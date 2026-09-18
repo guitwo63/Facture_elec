@@ -419,19 +419,28 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
 
 /// Cycle de vie d'une facture, aligné sur les codes officiels `fr:2XX` de la réforme de
 /// facturation électronique française (table "Meaning of fr:* statuses", documentation
-/// SUPER PDP — https://superpdp.tech/openapi). `draft`/`issued` n'ont pas d'équivalent
-/// réforme (purement locaux, avant tout dépôt). `sentToPDP` correspond à fr:200 (Déposée),
-/// posé par le dépôt lui-même — jamais envoyé séparément via `sendInvoiceEvent` (voir
-/// `InvoiceStatusStore.reformCode`). `sentToRecipient`/`receivedByRecipient`/`madeAvailable`
-/// (fr:201/202/203) et `rejectedByRecipient` (fr:213) sont des statuts réseau, rapportés
-/// automatiquement par SUPER PDP — l'API ne permet pas de les créer soi-même
-/// (`status_code_create` ne les liste pas), donc ils ne sont atteignables qu'en réception
-/// (synchronisation du statut PDP), jamais via un bouton de transition manuelle.
+/// SUPER PDP — https://superpdp.tech/openapi — et Spécifications Externes AIFE, chapitres
+/// 5-6, qui décrivent le sens précis de chaque code et les transitions attendues, même si
+/// SUPER PDP elle-même n'impose pas de machine à états stricte). `draft`/`issued` n'ont pas
+/// d'équivalent réforme (purement locaux, avant tout dépôt). `sentToPDP` correspond à
+/// fr:200 (Déposée), posé par le dépôt lui-même — jamais envoyé séparément via
+/// `sendInvoiceEvent` (voir `InvoiceStatusStore.reformCode`). `sentToRecipient`/
+/// `receivedByRecipient`/`madeAvailable` (fr:201/202/203) et `technicallyRejected`
+/// (fr:213) sont des statuts réseau, rapportés automatiquement par SUPER PDP — l'API ne
+/// permet pas de les créer soi-même (`status_code_create` ne les liste pas), donc ils ne
+/// sont atteignables qu'en réception (synchronisation du statut PDP), jamais via un
+/// bouton de transition manuelle.
+///
+/// `technicallyRejected` (fr:213, AIFE "REJETEE_PPF_PDP") représente un rejet **technique**
+/// (échec de validation EN16931/mentions FR, ou destinataire inconnu de l'annuaire) — pas
+/// un refus métier du destinataire. `refused` (fr:210, AIFE "REFUSEE") représente au
+/// contraire le vrai refus métier ("l'acheteur conteste la facture : prix, livraison,
+/// conditions" — délai légal 90 jours pour une nouvelle émission après correction).
 ///
 /// `accepted` (fr:207) et `rejected` (fr:206) restent, pour l'instant, sur les codes déjà
 /// utilisés en production avant cette évolution — ces codes correspondent en réalité à
 /// "Contestée"/"Partiellement acceptée" dans la table officielle, pas "Acceptée"/"Rejetée" ;
-/// la correction (vers fr:205/fr:210) est un chantier séparé, volontairement pas fait ici
+/// la correction (vers fr:205/fr:213) est un chantier séparé, volontairement pas fait ici
 /// pour ne pas mélanger "compléter la table" et "corriger un mauvais code déjà en usage".
 public enum InvoiceStatus: String, Codable, CaseIterable {
     case draft
@@ -444,7 +453,8 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
     case onHold
     case accepted
     case rejected
-    case rejectedByRecipient
+    case refused
+    case technicallyRejected
     case completed
     case paymentSent
     case paid
@@ -462,7 +472,8 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .onHold: return "En attente"
         case .accepted: return "Acceptée par le PDP"
         case .rejected: return "Rejetée par le PDP"
-        case .rejectedByRecipient: return "Rejetée par le destinataire"
+        case .refused: return "Refusée par le destinataire"
+        case .technicallyRejected: return "Rejetée (validation technique)"
         case .completed: return "Complétée"
         case .paymentSent: return "Paiement envoyé"
         case .paid: return "Payée"
@@ -482,7 +493,8 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .onHold: return "pause.circle.fill"
         case .accepted: return "checkmark.seal.fill"
         case .rejected: return "xmark.octagon.fill"
-        case .rejectedByRecipient: return "hand.thumbsdown.fill"
+        case .refused: return "hand.raised.fill"
+        case .technicallyRejected: return "hand.thumbsdown.fill"
         case .completed: return "flag.checkered"
         case .paymentSent: return "arrow.up.circle.fill"
         case .paid: return "checkmark.circle.fill"
@@ -502,7 +514,8 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .onHold: return "D4A017"
         case .accepted: return "2E8B57"
         case .rejected: return "C0392B"
-        case .rejectedByRecipient: return "A93226"
+        case .refused: return "B33A3A"
+        case .technicallyRejected: return "A93226"
         case .completed: return "1E7E34"
         case .paymentSent: return "3A7DC9"
         case .paid: return "1E7E34"
@@ -512,17 +525,17 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
 
     public var locksInvoice: Bool {
         switch self {
-        case .draft, .rejected: return false
+        case .draft, .rejected, .refused: return false
         case .issued, .sentToPDP, .sentToRecipient, .receivedByRecipient, .madeAvailable,
-             .acknowledged, .onHold, .accepted, .rejectedByRecipient, .completed,
+             .acknowledged, .onHold, .accepted, .technicallyRejected, .completed,
              .paymentSent, .paid, .cancelled:
             return true
         }
     }
 
     /// Ordre du cycle de vie (pour empêcher tout rapatriement rétrograde depuis la PDP).
-    /// Des statuts alternatifs à un même point du cycle (ex. accepted/rejected/
-    /// rejectedByRecipient après acknowledged) partagent le même rang : aucun n'est une
+    /// Des statuts alternatifs à un même point du cycle (ex. accepted/rejected/refused/
+    /// technicallyRejected après acknowledged) partagent le même rang : aucun n'est une
     /// "régression" par rapport à l'autre, ce sont des issues différentes.
     public var lifecycleRank: Int {
         switch self {
@@ -536,7 +549,8 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .onHold: return 7
         case .accepted: return 8
         case .rejected: return 8
-        case .rejectedByRecipient: return 8
+        case .refused: return 8
+        case .technicallyRejected: return 8
         case .completed: return 9
         case .paymentSent: return 10
         case .paid: return 11
@@ -546,7 +560,7 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
 
     /// Transitions par défaut (personnalisables ensuite dans Réglages > Tables > Statuts des
     /// factures). Les statuts réseau non créables via l'API (`sentToRecipient`,
-    /// `receivedByRecipient`, `madeAvailable`, `rejectedByRecipient` — voir la doc de
+    /// `receivedByRecipient`, `madeAvailable`, `technicallyRejected` — voir la doc de
     /// l'enum) n'apparaissent dans aucune liste de transition manuelle : ils ne
     /// s'atteignent qu'en recevant le statut réel depuis SUPER PDP.
     public func allowedTransitions() -> [InvoiceStatus] {
@@ -556,7 +570,10 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .issued:
             return [.sentToPDP, .rejected]
         case .sentToPDP:
-            return [.acknowledged, .accepted, .rejected]
+            // Trois issues possibles dès le dépôt, comme le montre le diagramme des
+            // Spécifications Externes AIFE (DÉPOSÉE → REJETÉE PPF/PDP | APPROUVÉE | REFUSÉE) :
+            // une facture rejetée ou refusée ne devient jamais "acceptée" après coup.
+            return [.acknowledged, .accepted, .refused, .rejected]
         case .sentToRecipient:
             return []
         case .receivedByRecipient:
@@ -564,14 +581,18 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
         case .madeAvailable:
             return []
         case .acknowledged:
-            return [.accepted, .onHold, .rejected]
+            return [.accepted, .onHold, .refused, .rejected]
         case .onHold:
-            return [.accepted, .rejected]
+            return [.accepted, .refused, .rejected]
         case .accepted:
-            return [.completed, .paid, .rejected]
+            // Une facture acceptée/approuvée ne redevient jamais "refusée" (règle AIFE) —
+            // seul un avoir permet de corriger une contestation tardive.
+            return [.completed, .paid]
         case .rejected:
             return []
-        case .rejectedByRecipient:
+        case .refused:
+            return []
+        case .technicallyRejected:
             return []
         case .completed:
             return [.paymentSent, .paid]

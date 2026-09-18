@@ -165,12 +165,39 @@ Comparaison de `InvoiceStatus`/`InvoiceStatusStore.reformCode` avec la table off
 **Ajouté dans cette évolution** (statuts manquants uniquement, sans toucher aux codes déjà en
 usage) : `sentToRecipient` (fr:201), `receivedByRecipient` (fr:202), `madeAvailable` (fr:203),
 `acknowledged` (fr:204), `onHold` (fr:208), `completed` (fr:209), `paymentSent` (fr:211),
-`rejectedByRecipient` (fr:213). Les statuts réseau non créables via l'API (fr:200-203, fr:213)
+`technicallyRejected` (fr:213). Les statuts réseau non créables via l'API (fr:200-203, fr:213)
 ne sont accessibles qu'en réception (synchronisation du statut PDP), jamais via une transition
 manuelle — voir `InvoiceStatusStore.networkOnlyReformCodes`.
 
 **Non traité, volontairement séparé** : `accepted`/`rejected` restent sur fr:207/fr:206 (qui
-signifient en réalité "Contestée"/"Partiellement acceptée", pas "Acceptée"/"Rejetée" — les bons
-codes seraient fr:205/fr:210) et `cancelled` reste sur fr:320 (qui n'existe pas du tout dans la
-table officielle). Corriger ces trois codes déjà utilisés en production est un chantier distinct,
-pas fait ici pour ne pas mélanger "compléter la table" et "corriger un mauvais code en usage".
+signifient en réalité "Contestée"/"Partiellement acceptée", pas "Acceptée"/"Rejetée") et
+`cancelled` reste sur fr:320 (qui n'existe pas du tout dans la table officielle). Corriger ces
+trois codes déjà utilisés en production est un chantier distinct, pas fait ici pour ne pas
+mélanger "compléter la table" et "corriger un mauvais code en usage" — voir aussi la note
+ci-dessous sur `technicallyRejected`, qui recouvre déjà le sens que `rejected` devrait avoir.
+
+## 8. Mise à jour — statuts de réforme précisés via les Spécifications Externes AIFE (2026-09-18)
+
+La doc SUPER PDP dit explicitement "this is not a state machine" pour `status_code` — mais les
+**Spécifications Externes AIFE** (chapitres 5-6, cycle de vie de la facture électronique
+française) décrivent un modèle plus prescriptif, avec un vrai diagramme de transitions et des
+règles métier. Confrontées à la table SUPER PDP, elles précisent deux points :
+
+- **fr:207 "Contestée"** correspond au statut AIFE **LITIGEE** ("désaccord formalisé... un cas
+  dérive de REFUSEE qui n'a pas été résolu sous 30 jours") — confirme que fr:207 ne veut
+  toujours pas dire "Acceptée" (voir section 7).
+- **fr:210 "Refusée"** correspond au statut AIFE **REFUSEE** ("l'acheteur conteste la facture :
+  prix, livraison, conditions" — délai légal 90 jours pour réémettre après correction) : un vrai
+  refus métier, distinct du rejet technique. **Ajouté** comme nouveau statut `refused`.
+- **fr:213 "Rejetée"** correspond au statut AIFE **REJETEE_PPF_PDP** ("validation EN16931 + 24
+  mentions FR a échoué, ou destinataire inconnu de l'annuaire") : un rejet **technique**, pas une
+  décision du destinataire. Le statut ajouté en section 7 sous le nom `rejectedByRecipient` a
+  donc été **renommé `technicallyRejected`** (libellé "Rejetée (validation technique)") pour
+  refléter son vrai sens — ce qui, au passage, recouvre déjà ce que `rejected` (fr:206, encore
+  mal codé) devrait représenter une fois corrigé : un point à clarifier dans le chantier "corriger
+  fr:207/fr:206/fr:320" de la section 7.
+
+Règle métier appliquée dans `allowedTransitions()` : une facture acceptée/approuvée
+(`accepted`) ne redevient jamais "refusée" (`refused`) — seul un avoir permet de corriger une
+contestation tardive après acceptation, conformément à la règle AIFE "Une facture APPROUVEE ne
+peut pas devenir REFUSEE".

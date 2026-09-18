@@ -19,7 +19,8 @@ enum PDPStatusMapper {
         case "fr:208": return .onHold
         case "fr:207", "accepted", "processed", "received": return .accepted
         case "fr:206", "rejected": return .rejected
-        case "fr:213": return .rejectedByRecipient
+        case "fr:210": return .refused
+        case "fr:213": return .technicallyRejected
         case "fr:209": return .completed
         case "fr:211": return .paymentSent
         case "fr:212", "encaissée", "encaissee", "paid": return .paid
@@ -31,7 +32,7 @@ enum PDPStatusMapper {
     /// Statuts pour lesquels un dépôt SUPER PDP existant n'a plus rien à apprendre : la
     /// synchronisation périodique ignore ces factures pour ne pas interroger l'API en pure
     /// perte (voir aussi `Invoice.superPDPRemoteID`, requis pour même envisager une requête).
-    static let terminalStatuses: Set<InvoiceStatus> = [.paid, .cancelled, .rejected, .rejectedByRecipient]
+    static let terminalStatuses: Set<InvoiceStatus> = [.paid, .cancelled, .rejected, .refused, .technicallyRejected]
 }
 
 /// Interroge périodiquement SUPER PDP pour les factures déposées mais pas encore à un
