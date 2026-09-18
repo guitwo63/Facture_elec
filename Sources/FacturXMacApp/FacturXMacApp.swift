@@ -140,6 +140,7 @@ struct FacturXMacApp: App {
     @StateObject private var statusStore = OrderStatusStore.shared
     @StateObject private var invoiceStatusStore = InvoiceStatusStore.shared
     @StateObject private var paymentTermsStore = PaymentTermsPresetStore.shared
+    @StateObject private var auditActionLabelStore = AuditActionLabelStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -164,6 +165,7 @@ struct FacturXMacApp: App {
                 .environmentObject(statusStore)
                 .environmentObject(invoiceStatusStore)
                 .environmentObject(paymentTermsStore)
+                .environmentObject(auditActionLabelStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -2084,6 +2086,7 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
+    @EnvironmentObject var actionLabelStore: AuditActionLabelStore
     @State private var sendingInvoiceEmail = false
     @State private var showResendEmailConfirm = false
     @State private var invoiceEmailMessage: String?
@@ -3507,7 +3510,7 @@ struct InvoiceEditorView: View {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
                                 }
                             } else {
-                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_sent" ? "Dépôt PDP envoyé" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_received" ? "Statut PDP reçu" : e.action == "pdp_status_sent" ? "Statut PDP envoyé" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action == "pdp_status_send_error" ? "Envoi statut PDP échoué" : e.action)
+                                Text(actionLabelStore.label(for: e.action))
                                     .font(.caption)
                                 if !e.details.isEmpty {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
@@ -6228,6 +6231,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     case units
     case countries
     case endpointSchemes
+    case auditActionLabels
 
     var id: String { rawValue }
 
@@ -6243,6 +6247,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .units: return "Unités"
         case .countries: return "Pays"
         case .endpointSchemes: return "Schémas d'identifiant"
+        case .auditActionLabels: return "Libellés du journal"
         }
     }
 
@@ -6258,12 +6263,13 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .units: return "ruler"
         case .countries: return "globe"
         case .endpointSchemes: return "number"
+        case .auditActionLabels: return "list.bullet.clipboard"
         }
     }
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors: return true
+        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels: return true
         default: return false
         }
     }
@@ -6276,6 +6282,7 @@ struct ValueTablesView: View {
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
+    @EnvironmentObject var actionLabelStore: AuditActionLabelStore
     @State private var selectedTable: ValueTable = .orderStatuses
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
@@ -6393,6 +6400,48 @@ struct ValueTablesView: View {
         case .units: refPanel(NormRefs.units)
         case .countries: refPanel(NormRefs.countries)
         case .endpointSchemes: refPanel(NormRefs.endpointSchemes)
+        case .auditActionLabels: auditActionLabelsPanel
+        }
+    }
+
+    private var filteredAuditActionLabels: [AuditActionLabel] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let sorted = actionLabelStore.overrides.sorted { $0.label < $1.label }
+        guard !q.isEmpty else { return sorted }
+        return sorted.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    private var auditActionLabelsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Libellés du journal").font(.title3.bold())
+                Spacer()
+                Button {
+                    actionLabelStore.resetToDefaults()
+                } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
+                    .buttonStyle(.bordered)
+            }
+            .padding(12)
+            Divider()
+            Text("Libellé affiché dans le journal (Réglages > Journal, et le journal de chaque facture/commande/devis) pour chaque code technique d'événement.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredAuditActionLabels) { item in
+                        HStack(spacing: 10) {
+                            Text(item.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .frame(width: 220, alignment: .leading)
+                            TextField("Libellé", text: Binding(
+                                get: { item.label },
+                                set: { actionLabelStore.upsert(AuditActionLabel(id: item.id, label: $0)) }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding(12)
+            }
         }
     }
 

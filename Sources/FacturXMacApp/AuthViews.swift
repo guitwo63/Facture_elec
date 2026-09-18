@@ -241,6 +241,7 @@ struct LoginView: View {
 
 struct AuditLogView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var actionLabels: AuditActionLabelStore
     @State private var query = ""
     @State private var typeFilter: AuditObjectType? = nil
     @State private var statusOnly = false
@@ -268,6 +269,7 @@ struct AuditLogView: View {
         guard !q.isEmpty else { return result }
         return result.filter {
             $0.actor.lowercased().contains(q) || $0.action.lowercased().contains(q)
+            || actionLabels.label(for: $0.action).lowercased().contains(q)
             || $0.target.lowercased().contains(q) || $0.details.lowercased().contains(q)
             || ($0.objectCode ?? "").lowercased().contains(q)
             || ($0.statusFrom ?? "").lowercased().contains(q) || ($0.statusTo ?? "").lowercased().contains(q)
@@ -312,7 +314,7 @@ struct AuditLogView: View {
                 }.width(90)
                 TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(120)
                 TableColumn("Code") { e in Text(e.objectCode ?? e.target).font(.caption) }.width(120)
-                TableColumn("Action") { e in Text(e.action).font(.caption) }.width(120)
+                TableColumn("Action") { e in Text(actionLabels.label(for: e.action)).font(.caption) }.width(160)
                 TableColumn("Détails") { e in
                     if e.action == "status_change" {
                         Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
