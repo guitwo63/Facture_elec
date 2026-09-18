@@ -56,7 +56,7 @@ final class OrderNumberingTests: XCTestCase {
         XCTAssertEqual(store.nextNumber(companyID: cid), "CD0001")
     }
 
-    /// Régression : voir InvoiceNumberingTests.testDeletingAMiddleInvoiceDoesNotProduceADuplicateNumberAfterwards.
+    /// Régression : voir InvoiceNumberingTests.testDeletingAMiddleInvoiceNeverProducesADuplicateNumber.
     func testDeletingAMiddleOrderDoesNotProduceADuplicateNumberAfterwards() {
         let store = OrderStore()
         store.numberPrefix = "CD"
@@ -73,7 +73,24 @@ final class OrderNumberingTests: XCTestCase {
 
         store.delete(order2)
         let n4 = store.nextNumber()
-        XCTAssertEqual(n4, "CD0004")
         XCTAssertFalse(store.orders.contains { $0.number == n4 })
+    }
+
+    /// Régression : voir InvoiceNumberingTests.testDeletingAMiddleInvoiceRecyclesItsFreedNumber.
+    func testDeletingAMiddleOrderRecyclesItsFreedNumber() {
+        let store = OrderStore()
+        store.numberPrefix = "CD"
+        store.numberIncludeYear = false
+        store.numberUseSeparator = false
+
+        let order1 = SalesOrder(number: store.nextNumber(), buyer: party(), seller: party())
+        store.upsert(order1)
+        let order2 = SalesOrder(number: store.nextNumber(), buyer: party(), seller: party())
+        store.upsert(order2)
+        let order3 = SalesOrder(number: store.nextNumber(), buyer: party(), seller: party())
+        store.upsert(order3)
+
+        store.delete(order2)
+        XCTAssertEqual(store.nextNumber(), "CD0002")
     }
 }

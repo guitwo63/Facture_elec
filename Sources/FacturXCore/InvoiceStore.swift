@@ -313,15 +313,19 @@ public final class InvoiceStore: ObservableObject {
         return false
     }
 
-    /// Basé sur le plus haut numéro déjà utilisé, pas sur un compte de factures existantes :
-    /// un compte se décale dès qu'une facture est supprimée (brouillon abandonné, par ex.),
-    /// et rejouer "numéro de départ + compte" peut alors reproduire un numéro déjà pris par
-    /// une facture restante de numéro plus élevé — un vrai doublon de numéro de facture.
+    /// Le plus petit numéro libre à partir du numéro de départ, pas "plus haut numéro + 1" :
+    /// supprimer une facture du milieu de la séquence (brouillon abandonné, par ex.) libère
+    /// son numéro, qui est recyclé pour la prochaine facture au lieu de rester à jamais
+    /// inutilisé. Évite aussi le doublon que produisait l'ancien calcul par simple compte
+    /// (numéro de départ + nombre de factures existantes) quand une facture de numéro plus
+    /// élevé restait présente après suppression.
     private func nextSequence(headKey: String, companyID: UUID?) -> Int {
         let paddedStart = max(1, numberingFormat(for: companyID).start)
         let matching = invoices.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }
-        let maxExistingSeq = matching.compactMap { Int($0.number.dropFirst(headKey.count)) }.max() ?? (paddedStart - 1)
-        return max(paddedStart, maxExistingSeq + 1)
+        let usedSeqs = Set(matching.compactMap { Int($0.number.dropFirst(headKey.count)) })
+        var candidate = paddedStart
+        while usedSeqs.contains(candidate) { candidate += 1 }
+        return candidate
     }
 
     public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {

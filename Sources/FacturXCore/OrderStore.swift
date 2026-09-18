@@ -194,14 +194,16 @@ public final class OrderStore: ObservableObject {
         return false
     }
 
-    /// Basé sur le plus haut numéro déjà utilisé, pas sur un compte de commandes existantes —
-    /// voir `InvoiceStore.nextSequence` pour le bug de doublon que ça évite (un compte se
-    /// décale dès qu'une commande est supprimée).
+    /// Le plus petit numéro libre à partir du numéro de départ, pas "plus haut numéro + 1" —
+    /// voir `InvoiceStore.nextSequence` pour le détail (recycle le numéro d'une commande
+    /// supprimée au lieu de le laisser à jamais inutilisé).
     private func nextSequence(headKey: String, companyID: UUID?) -> Int {
         let paddedStart = max(1, numberStart)
         let matching = orders.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }
-        let maxExistingSeq = matching.compactMap { Int($0.number.dropFirst(headKey.count)) }.max() ?? (paddedStart - 1)
-        return max(paddedStart, maxExistingSeq + 1)
+        let usedSeqs = Set(matching.compactMap { Int($0.number.dropFirst(headKey.count)) })
+        var candidate = paddedStart
+        while usedSeqs.contains(candidate) { candidate += 1 }
+        return candidate
     }
 
     /// `companyID` scope désormais le compteur, comme pour les factures et les devis —
