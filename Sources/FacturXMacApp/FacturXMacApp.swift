@@ -2080,6 +2080,10 @@ struct OptionalFieldsSection: View {
     @Binding var fields: [OptionalField]
     let location: OptionalFieldLocation
     var locked: Bool = false
+    /// Repliée par défaut en saisie (`locked` == false, pour ne pas encombrer un formulaire
+    /// en cours de remplissage) ; forcée dépliée en lecture seule pour que le contenu déjà
+    /// saisi reste consultable sans clic supplémentaire.
+    @State private var isExpanded = false
 
     private var templates: [OptionalFieldTemplate] { OptionalFieldCatalogue.templates(for: location) }
     private var title: String { location == .header ? "Champs optionnels (entete)" : "Champs optionnels (ligne)" }
@@ -2096,7 +2100,10 @@ struct OptionalFieldsSection: View {
     }
 
     var body: some View {
-        DisclosureGroup(title) {
+        DisclosureGroup(isExpanded: Binding(
+            get: { isExpanded || locked },
+            set: { isExpanded = $0 }
+        )) {
             VStack(alignment: .leading, spacing: 6) {
                 if fields.isEmpty {
                     Text("Aucun champ optionnel.").foregroundStyle(.secondary)
@@ -2125,6 +2132,8 @@ struct OptionalFieldsSection: View {
                 .disabled(locked)
             }
             .padding(.top, 4)
+        } label: {
+            Text(title)
         }
         .font(.caption)
         .disabled(locked)
@@ -2974,28 +2983,14 @@ struct InvoiceEditorView: View {
                     }.padding(8)
                 }.lockable(fieldLocked)
 
-                GroupBox("Coordonnées bancaires") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let iban = invoice.paymentIBAN, !iban.isEmpty {
-                            HStack(spacing: 3) {
-                                Text(iban).font(.caption.monospaced())
-                                InfoBadge(text: "BT-84 — IBAN hérité de l'émetteur (annuaire).")
-                            }
-                        }
-                        if let bic = invoice.paymentBIC, !bic.isEmpty {
-                            HStack(spacing: 3) {
-                                Text(bic).font(.caption.monospaced())
-                                InfoBadge(text: "BT-85 — BIC hérité de l'émetteur (annuaire).")
-                            }
-                        }
-                        if (invoice.paymentIBAN ?? "").isEmpty && (invoice.paymentBIC ?? "").isEmpty {
-                            Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }.padding(8)
-                }.lockable(fieldLocked)
-
                 GroupBox {
-                    DisclosureGroup(isExpanded: $showLegalMentions) {
+                    DisclosureGroup(isExpanded: Binding(
+                        // Forcée dépliée en lecture seule : les mentions légales et les notes
+                        // libres sont des champs saisis, pas de la documentation statique —
+                        // à consulter sans clic supplémentaire une fois la facture verrouillée.
+                        get: { showLegalMentions || fieldLocked },
+                        set: { showLegalMentions = $0 }
+                    )) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Frais de recouvrement (SubjectCode PMT) :").font(.caption.bold())
                             TextField("Indemnité forfaitaire pour frais de recouvrement", text: $invoice.legalNotePMT)
