@@ -266,10 +266,14 @@ public final class PCloudSettings: ObservableObject {
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.pcloud.credentials.v1") }
+    private var passwordKeychainKey: String { env.key("facturx.pcloud.password.v1") }
 
+    /// Le mot de passe n'est jamais persisté dans le JSON UserDefaults : il vit
+    /// uniquement dans le Keychain (voir `KeychainStore`).
     public init() {
         if let data = defaults.data(forKey: env.key("facturx.pcloud.credentials.v1")),
-           let decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+            decoded.password = KeychainStore.get(forKey: env.key("facturx.pcloud.password.v1")) ?? ""
             credentials = decoded
         } else {
             credentials = PCloudCredentials()
@@ -278,7 +282,8 @@ public final class PCloudSettings: ObservableObject {
 
     public func load() {
         if let data = defaults.data(forKey: storageKey),
-           let decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+            decoded.password = KeychainStore.get(forKey: passwordKeychainKey) ?? ""
             credentials = decoded
         } else {
             credentials = PCloudCredentials()
@@ -286,8 +291,11 @@ public final class PCloudSettings: ObservableObject {
     }
 
     public func save() {
-        if let data = try? JSONEncoder().encode(credentials) {
+        var toPersist = credentials
+        toPersist.password = ""
+        if let data = try? JSONEncoder().encode(toPersist) {
             defaults.set(data, forKey: storageKey)
         }
+        KeychainStore.set(credentials.password, forKey: passwordKeychainKey)
     }
 }

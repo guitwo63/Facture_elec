@@ -550,7 +550,9 @@ struct RootView: View {
     private func reloadChorusCredentials() -> ChorusProCredentials {
         let k = appEnv.key("facturx.choruspro.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
-           let decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")) ?? ""
+            decoded.techPassword = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")) ?? ""
             return decoded
         }
         return ChorusProCredentials(clientID: "", clientSecret: "")
@@ -559,7 +561,8 @@ struct RootView: View {
     private func reloadSuperPDPCredentials() -> SuperPDPCredentials {
         let k = appEnv.key("facturx.superpdp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
-           let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")) ?? ""
             return decoded
         }
         return SuperPDPCredentials(clientID: "", clientSecret: "")
@@ -568,7 +571,8 @@ struct RootView: View {
     private func reloadSMTPCredentials() -> SMTPCredentials {
         let k = appEnv.key("facturx.smtp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
-           let decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+            decoded.password = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")) ?? ""
             return decoded
         }
         return SMTPCredentials()
