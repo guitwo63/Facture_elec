@@ -170,17 +170,23 @@ struct PurchasesTabView: View {
 /// Pendant de `InvoiceEditorView` côté achats — même modèle de verrouillage
 /// (isLocked/fieldLocked/adminConfirmedEdit), même structure de sections, mais sans les
 /// fonctions ventes qui n'ont pas de sens ici (dépôt PDP, envoi email client, relance,
-/// avoir/duplication, mentions légales d'émetteur). Dans cet incrément, seules les
-/// transitions côté acheteur (draft→received→toValidate) sont actives ; les transitions
-/// comptable sont visibles mais désactivées, câblées avec le retour SUPER PDP dans
-/// l'incrément suivant.
+/// avoir/duplication, mentions légales d'émetteur). Transitions acheteur
+/// (draft→received→toValidate) toujours locales ; transitions comptable
+/// (validated/disputed/refused/paid) envoient en plus un événement à SUPER PDP pour
+/// informer le fournisseur — voir `notifyPDPStatusChange(to:)`, même schéma que
+/// `InvoiceEditorView.notifyPDPStatusChange` côté ventes (changement de statut immédiat,
+/// notification PDP best-effort ensuite, jamais bloquante).
 struct PurchaseInvoiceEditorView: View {
     @Binding var record: PurchaseInvoice
+    @EnvironmentObject var store: PurchaseInvoiceStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var purchaseInvoiceStatusStore: PurchaseInvoiceStatusStore
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var isManuallyLocked = false
     @State private var adminConfirmedEdit = false
     @State private var showAdminEditConfirm = false
+    @State private var sendingPDPFeedback = false
+    @State private var pdpFeedbackMessage: String?
 
     private var invoice: Binding<Invoice> {
         Binding(get: { record.invoice }, set: { record.invoice = $0 })
@@ -204,8 +210,7 @@ struct PurchaseInvoiceEditorView: View {
         purchaseInvoiceStatusStore.override(for: record.status).transitionCodes.compactMap { PurchaseInvoiceStatus(rawValue: $0) }
     }
 
-    /// Transitions réservées au comptable (workflow de validation) — désactivées pour le
-    /// moment, câblées avec le retour SUPER PDP dans le prochain incrément.
+    /// Transitions réservées au comptable — le workflow de validation à proprement parler.
     private func requiresComptableWorkflow(_ s: PurchaseInvoiceStatus) -> Bool {
         [.validated, .disputed, .refused, .paid].contains(s)
     }
@@ -239,21 +244,30 @@ struct PurchaseInvoiceEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // MARK: Transitions
-                    HStack(spacing: 8) {
-                        ForEach(configuredTransitions, id: \.self) { s in
-                            let comptableOnly = requiresComptableWorkflow(s)
-                            Button {
-                                record.status = s
-                            } label: {
-                                Label(s.label, systemImage: s.systemImage)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            ForEach(configuredTransitions, id: \.self) { s in
+                                let comptableOnly = requiresComptableWorkflow(s)
+                                Button {
+                                    record.status = s
+                                } label: {
+                                    if sendingPDPFeedback, comptableOnly {
+                                        HStack(spacing: 4) { ProgressView().controlSize(.small); Text(s.label) }
+                                    } else {
+                                        Label(s.label, systemImage: s.systemImage)
+                                    }
+                                }
+                                .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: s.hexColor)))
+                                .disabled(sendingPDPFeedback || (comptableOnly ? !canActAsComptable : !canActAsAcheteur))
+                                .help(comptableOnly
+                                      ? "Réservé au comptable — passer au statut « \(s.label) »\(record.invoice.superPDPRemoteID != nil ? " et en informer le fournisseur via SUPER PDP" : "")."
+                                      : "Passer au statut « \(s.label) »")
                             }
-                            .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: s.hexColor)))
-                            .disabled(comptableOnly || (!canActAsAcheteur && !isAdmin))
-                            .help(comptableOnly
-                                  ? "Fait partie du workflow de validation comptable — pas encore actif dans cette version."
-                                  : "Passer au statut « \(s.label) »")
+                            Spacer()
                         }
-                        Spacer()
+                        if let m = pdpFeedbackMessage {
+                            Text(m).font(.caption).foregroundStyle(m.hasPrefix("Échec") ? .red : .secondary)
+                        }
                     }
                     .padding(.horizontal, 12).padding(.top, 8)
 
@@ -384,5 +398,39 @@ struct PurchaseInvoiceEditorView: View {
             Text("Cette facture d'achat a le statut « \(record.status.label) ». La modifier peut créer une incohérence comptable. Continuer ?")
         }
         .onChange(of: record.invoice.number) { _ in adminConfirmedEdit = false }
+        .onChange(of: record.status) { newStatus in
+            notifyPDPStatusChange(to: newStatus)
+        }
+    }
+
+    /// Notifie SUPER PDP du nouveau statut, pour informer le fournisseur — best-effort,
+    /// jamais bloquant : le statut local a déjà changé au moment où cette fonction s'exécute
+    /// (`.onChange` se déclenche après la mutation), un échec réseau n'annule jamais la
+    /// décision déjà prise, il est juste signalé. Ne fait rien pour un statut sans code
+    /// réforme (transitions acheteur) ou une facture jamais déposée par le fournisseur sur
+    /// PDP (saisie manuelle sans `superPDPRemoteID` : rien à notifier, personne à qui l'envoyer).
+    private func notifyPDPStatusChange(to newStatus: PurchaseInvoiceStatus) {
+        guard let code = purchaseInvoiceStatusStore.pdpFeedback(for: newStatus),
+              let remoteID = record.invoice.superPDPRemoteID, !remoteID.isEmpty,
+              superPDPSettings.credentials.usePDP else { return }
+        sendingPDPFeedback = true
+        pdpFeedbackMessage = nil
+        let detailLabel = newStatus.label
+        let invoiceNumber = record.invoice.number
+        Task {
+            do {
+                try await SuperPDPService().sendInvoiceEvent(remoteID: remoteID, statusCode: code, credentials: superPDPSettings.credentials)
+                pdpFeedbackMessage = "↑ Envoyé à SUPER PDP : statut \(detailLabel) — id distant \(remoteID)."
+                store.audit?.record(actor: store.actorName, action: "purchase_pdp_status_sent", target: invoiceNumber,
+                                     details: "Statut \(detailLabel) envoyé au fournisseur — id distant \(remoteID)",
+                                     objectType: .purchaseInvoice, objectCode: invoiceNumber)
+            } catch {
+                pdpFeedbackMessage = "Échec de l'envoi à SUPER PDP : \(error.localizedDescription)."
+                store.audit?.record(actor: store.actorName, action: "purchase_pdp_status_error", target: invoiceNumber,
+                                     details: "Échec envoi statut \(detailLabel) au fournisseur : \(error.localizedDescription)",
+                                     objectType: .purchaseInvoice, objectCode: invoiceNumber)
+            }
+            sendingPDPFeedback = false
+        }
     }
 }
