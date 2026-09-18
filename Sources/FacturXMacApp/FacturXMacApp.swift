@@ -358,28 +358,20 @@ struct TreasuryDashboardView: View {
         return sentInvoices.filter { range.contains($0.issueDate) }
     }
 
-    private var caFacture: Double {
-        periodInvoices.reduce(0) { $0 + signedAmount($1) }
-    }
-
-    private var encaisse: Double {
-        periodInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
-    }
-
-    private var enRetard: Double {
-        sentInvoices.filter(\.isOverdue).reduce(0) { $0 + signedAmount($1) }
-    }
-
-    private var enAttente: Double {
-        sentInvoices.filter { $0.status != .paid && !$0.isOverdue }.reduce(0) { $0 + signedAmount($1) }
-    }
-
+    private var caFactureInvoices: [Invoice] { periodInvoices }
+    private var encaisseInvoices: [Invoice] { periodInvoices.filter { $0.status == .paid } }
+    private var enRetardInvoices: [Invoice] { sentInvoices.filter(\.isOverdue) }
+    private var enAttenteInvoices: [Invoice] { sentInvoices.filter { $0.status != .paid && !$0.isOverdue } }
     /// Factures au statut « Validée (non envoyée) » : verrouillées côté saisie mais pas
     /// encore engagées vis-à-vis du client — exclues de `sentInvoices`, donc absentes
     /// des autres KPI. Utile pour repérer les factures prêtes qui attendent l'envoi.
-    private var validatedNotSent: Double {
-        activeInvoices.filter { $0.status == .issued }.reduce(0) { $0 + signedAmount($1) }
-    }
+    private var validatedNotSentInvoices: [Invoice] { activeInvoices.filter { $0.status == .issued } }
+
+    private var caFacture: Double { caFactureInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var encaisse: Double { encaisseInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var enRetard: Double { enRetardInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var enAttente: Double { enAttenteInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var validatedNotSent: Double { validatedNotSentInvoices.reduce(0) { $0 + signedAmount($1) } }
 
     private var byClient: [ClientBalance] {
         var byName: [String: (outstanding: Double, overdue: Double)] = [:]
@@ -420,11 +412,11 @@ struct TreasuryDashboardView: View {
                     }
                 }
                 HStack(spacing: 16) {
-                    kpiCard("CA facturé — \(period.rawValue)", caFacture, color: .blue, icon: "chart.line.uptrend.xyaxis")
-                    kpiCard("Encaissé — \(period.rawValue)", encaisse, color: .green, icon: "checkmark.circle.fill")
-                    kpiCard("En attente", enAttente, color: .orange, icon: "hourglass")
-                    kpiCard("En retard", enRetard, color: .red, icon: "exclamationmark.triangle.fill")
-                    kpiCard("Validées, non envoyées", validatedNotSent, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
+                    kpiCard("CA facturé — \(period.rawValue)", caFacture, invoices: caFactureInvoices, color: .blue, icon: "chart.line.uptrend.xyaxis")
+                    kpiCard("Encaissé — \(period.rawValue)", encaisse, invoices: encaisseInvoices, color: .green, icon: "checkmark.circle.fill")
+                    kpiCard("En attente", enAttente, invoices: enAttenteInvoices, color: .orange, icon: "hourglass")
+                    kpiCard("En retard", enRetard, invoices: enRetardInvoices, color: .red, icon: "exclamationmark.triangle.fill")
+                    kpiCard("Validées, non envoyées", validatedNotSent, invoices: validatedNotSentInvoices, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
                 }
                 GroupBox("Par client — montant dû") {
                     if byClient.isEmpty {
@@ -454,18 +446,26 @@ struct TreasuryDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private func kpiCard(_ title: String, _ amount: Double, color: Color, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func kpiCard(_ title: String, _ amount: Double, invoices: [Invoice], color: Color, icon: String) -> some View {
+        let invoiceCount = invoices.filter { !$0.type.isCreditNote }.count
+        let creditNoteCount = invoices.filter { $0.type.isCreditNote }.count
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Image(systemName: icon).foregroundStyle(color)
                 Text(title).font(.caption).foregroundStyle(.secondary)
             }
             Text(String(format: "%.2f %@", amount, currency))
                 .font(.title2.bold())
+            Text("\(pluralized(invoiceCount, "facture", "factures")) · \(pluralized(creditNoteCount, "avoir", "avoirs"))")
+                .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.12)))
+    }
+
+    private func pluralized(_ count: Int, _ singular: String, _ plural: String) -> String {
+        "\(count) \(count > 1 ? plural : singular)"
     }
 }
 
