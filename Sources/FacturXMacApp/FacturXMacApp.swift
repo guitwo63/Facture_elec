@@ -2535,18 +2535,8 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("TVA %", value: $line.vatRate, format: .number)
-                                    InfoBadge(text: "BT-151 — Taux de TVA appliqué (%).")
-                                }
-                                HStack(spacing: 2) {
-                                    Picker("", selection: $line.vatCategory) {
-                                        ForEach(VATCategory.allCases, id: \.self) { cat in
-                                            Text("\(cat.rawValue) — \(cat.label)").tag(cat)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .frame(width: 210)
-                                    InfoBadge(text: "BT-151 — Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                    VATRatePicker(rate: $line.vatRate)
+                                    InfoBadge(text: "BT-151 — Taux de TVA appliqué (%). Catégorie et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
@@ -2561,11 +2551,32 @@ struct InvoiceEditorView: View {
                                     Image(systemName: "minus.circle")
                                 }
                             }
-                            if line.vatCategory.requiresExemptionReason {
-                                HStack(spacing: 2) {
-                                    TextField("Motif d'exonération (BT-120)", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
-                                        .frame(minWidth: 320)
-                                    InfoBadge(text: "BT-120 — Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                            .onChange(of: line.vatRate) { newRate in
+                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
+                                if newRate != 0 { line.vatExemptionReason = nil }
+                            }
+                            // Catégorie/motif d'exonération : uniquement pertinents à taux 0 % (autoliquidation,
+                            // export, exonération…) — masqués pour le cas standard afin de ne pas allonger
+                            // la ligne pour rien.
+                            if line.vatRate == 0 {
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 2) {
+                                        Picker("", selection: $line.vatCategory) {
+                                            ForEach(VATCategory.allCases, id: \.self) { cat in
+                                                Text("\(cat.rawValue) — \(cat.label)").tag(cat)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .frame(width: 210)
+                                        InfoBadge(text: "BT-151 — Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                    }
+                                    if line.vatCategory.requiresExemptionReason {
+                                        HStack(spacing: 2) {
+                                            TextField("Motif d'exonération (BT-120)", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                                                .frame(minWidth: 280)
+                                            InfoBadge(text: "BT-120 — Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                                        }
+                                    }
                                 }
                                 .padding(.leading, 4)
                             }
@@ -7822,6 +7833,42 @@ struct NormRefPicker: View {
     }
 }
 
+/// Taux de TVA français standards (métropole). "Autre…" bascule sur un champ
+/// numérique libre pour un cas hors norme (DOM-TOM, régime particulier…).
+struct VATRatePicker: View {
+    @Binding var rate: Double
+
+    static let standardRates: [(rate: Double, label: String)] = [
+        (20, "20 % — Normal"),
+        (10, "10 % — Intermédiaire"),
+        (5.5, "5,5 % — Réduit"),
+        (2.1, "2,1 % — Particulier"),
+        (0, "0 % — Exonéré")
+    ]
+
+    private var isStandard: Bool { Self.standardRates.contains { $0.rate == rate } }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Picker("", selection: Binding(
+                get: { isStandard ? rate : -1 },
+                set: { newValue in if newValue >= 0 { rate = newValue } }
+            )) {
+                ForEach(Self.standardRates, id: \.rate) { entry in
+                    Text(entry.label).tag(entry.rate)
+                }
+                Text("Autre…").tag(-1.0)
+            }
+            .labelsHidden()
+            .frame(width: 150)
+            if !isStandard {
+                TextField("%", value: $rate, format: .number)
+                    .frame(width: 50)
+            }
+        }
+    }
+}
+
 struct OrderPartySection: View {
     enum Role {
         case buyer, seller
@@ -9116,18 +9163,8 @@ struct OrderEditorView: View {
                                     InfoBadge(text: "Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("TVA %", value: $line.vatRate, format: .number)
-                                    InfoBadge(text: "Taux de TVA appliqué (%).")
-                                }
-                                HStack(spacing: 2) {
-                                    Picker("", selection: $line.vatCategory) {
-                                        ForEach(VATCategory.allCases, id: \.self) { cat in
-                                            Text("\(cat.rawValue) — \(cat.label)").tag(cat)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .frame(width: 210)
-                                    InfoBadge(text: "Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                    VATRatePicker(rate: $line.vatRate)
+                                    InfoBadge(text: "Taux de TVA appliqué (%). Catégorie et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
@@ -9139,11 +9176,29 @@ struct OrderEditorView: View {
                                     Image(systemName: "minus.circle")
                                 }
                             }
-                            if line.vatCategory.requiresExemptionReason {
-                                HStack(spacing: 2) {
-                                    TextField("Motif d'exonération", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
-                                        .frame(minWidth: 320)
-                                    InfoBadge(text: "Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                            .onChange(of: line.vatRate) { newRate in
+                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
+                                if newRate != 0 { line.vatExemptionReason = nil }
+                            }
+                            if line.vatRate == 0 {
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 2) {
+                                        Picker("", selection: $line.vatCategory) {
+                                            ForEach(VATCategory.allCases, id: \.self) { cat in
+                                                Text("\(cat.rawValue) — \(cat.label)").tag(cat)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .frame(width: 210)
+                                        InfoBadge(text: "Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                    }
+                                    if line.vatCategory.requiresExemptionReason {
+                                        HStack(spacing: 2) {
+                                            TextField("Motif d'exonération", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                                                .frame(minWidth: 280)
+                                            InfoBadge(text: "Motif d'exonération, obligatoire pour cette catégorie de TVA.")
+                                        }
+                                    }
                                 }
                                 .padding(.leading, 4)
                             }
