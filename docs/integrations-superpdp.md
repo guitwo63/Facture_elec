@@ -286,3 +286,19 @@ réseau — il n'a jamais eu besoin d'être dupliqué dans `InvoiceStatus`. Le m
 synchronisation périodique (`PDPPeriodicSyncEngine`, section précédente) est inchangé dans sa
 structure ; seule son étape "traduire le code reçu" passe par la passerelle plutôt que par un
 mapping à 15 cibles.
+
+## 10. La passerelle devient une table de paramétrage (2026-09-18)
+
+`PDPStatusMapper.functionalTransition(for:)` (section 9) était un switch codé en dur — pour
+ajuster un libellé ou une règle de mise à jour, il fallait modifier le code. Nouvelle table
+**Réglages > Tables > Statuts SUPER PDP** (`SuperPDPStatusCodeStore`) : chaque code `fr:2XX`
+connu a désormais un libellé français modifiable et une "règle de mise à jour" — le statut
+fonctionnel qu'il déclenche, choisi dans une liste (ou "Aucune" pour un code purement
+informationnel). `PDPStatusMapper.functionalTransition(for:)` consulte maintenant cette table
+en premier, avec l'ancien switch (mots libres uniquement, plus les codes `fr:*`) en repli.
+
+Contrairement à la table des statuts de facture (section 9), un bouton "Nouvelle valeur" a un
+sens ici : un code SUPER PDP pas encore connu de l'app (ex. `fr:220`, ajouté en 1.33.0 sans
+signification publiée au moment de l'écriture) peut être configuré dès que sa signification
+est connue, sans mise à jour de l'app. Les 16 codes officiels connus par défaut (fr:200-213,
+fr:220, fr:501) restent non supprimables ; un code ajouté par l'administrateur l'est.

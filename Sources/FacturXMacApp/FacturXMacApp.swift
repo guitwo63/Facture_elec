@@ -141,6 +141,7 @@ struct FacturXMacApp: App {
     @StateObject private var invoiceStatusStore = InvoiceStatusStore.shared
     @StateObject private var paymentTermsStore = PaymentTermsPresetStore.shared
     @StateObject private var auditActionLabelStore = AuditActionLabelStore.shared
+    @StateObject private var superPDPStatusCodeStore = SuperPDPStatusCodeStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -166,6 +167,7 @@ struct FacturXMacApp: App {
                 .environmentObject(invoiceStatusStore)
                 .environmentObject(paymentTermsStore)
                 .environmentObject(auditActionLabelStore)
+                .environmentObject(superPDPStatusCodeStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -6307,6 +6309,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     case countries
     case endpointSchemes
     case auditActionLabels
+    case superPDPStatusCodes
 
     var id: String { rawValue }
 
@@ -6323,6 +6326,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .countries: return "Pays"
         case .endpointSchemes: return "Schémas d'identifiant"
         case .auditActionLabels: return "Libellés du journal"
+        case .superPDPStatusCodes: return "Statuts SUPER PDP"
         }
     }
 
@@ -6339,12 +6343,13 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .countries: return "globe"
         case .endpointSchemes: return "number"
         case .auditActionLabels: return "list.bullet.clipboard"
+        case .superPDPStatusCodes: return "antenna.radar"
         }
     }
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels: return true
+        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels, .superPDPStatusCodes: return true
         default: return false
         }
     }
@@ -6358,7 +6363,10 @@ struct ValueTablesView: View {
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
     @EnvironmentObject var actionLabelStore: AuditActionLabelStore
+    @EnvironmentObject var superPDPStatusCodeStore: SuperPDPStatusCodeStore
     @State private var selectedTable: ValueTable = .orderStatuses
+    @State private var editingPDPStatusCode: PDPEventCodeOverride?
+    @State private var creatingPDPStatusCode = false
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
     @State private var editingInvoiceStatus: InvoiceStatusOverride?
@@ -6422,6 +6430,16 @@ struct ValueTablesView: View {
                 kindColors.save()
             }
         }
+        .sheet(item: $editingPDPStatusCode) { override in
+            PDPStatusCodeEditorSheet(existing: override) { updated in
+                superPDPStatusCodeStore.upsert(updated)
+            }
+        }
+        .sheet(isPresented: $creatingPDPStatusCode) {
+            PDPStatusCodeEditorSheet(existing: nil) { created in
+                superPDPStatusCodeStore.upsert(created)
+            }
+        }
     }
 
     private var filteredTables: [ValueTable] {
@@ -6476,6 +6494,7 @@ struct ValueTablesView: View {
         case .countries: refPanel(NormRefs.countries)
         case .endpointSchemes: refPanel(NormRefs.endpointSchemes)
         case .auditActionLabels: auditActionLabelsPanel
+        case .superPDPStatusCodes: superPDPStatusCodesPanel
         }
     }
 
@@ -6518,6 +6537,79 @@ struct ValueTablesView: View {
                 .padding(12)
             }
         }
+    }
+
+    private var filteredPDPStatusCodes: [PDPEventCodeOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let sorted = superPDPStatusCodeStore.overrides.sorted { $0.id < $1.id }
+        guard !q.isEmpty else { return sorted }
+        return sorted.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    /// Table de paramétrage des codes d'événement SUPER PDP (fr:2XX) : libellé français et
+    /// règle de mise à jour (quel statut fonctionnel le code déclenche, s'il y en a un) —
+    /// voir `SuperPDPStatusCodeStore` et la passerelle `PDPStatusMapper.functionalTransition`
+    /// qui la consulte. Contrairement à la table des statuts de facture, "Nouvelle valeur"
+    /// a un sens ici : un code SUPER PDP pas encore connu de l'app (ex. une future version
+    /// de l'API) peut être ajouté dès que sa signification est publiée, sans mise à jour
+    /// de l'app.
+    private var superPDPStatusCodesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts SUPER PDP").font(.title3.bold())
+                Spacer()
+                Button {
+                    creatingPDPStatusCode = true
+                } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            Divider()
+            Text("Libellé et règle de mise à jour pour chaque code d'événement SUPER PDP (envoyé ou reçu). Une règle de mise à jour fait avancer le statut fonctionnel de la facture quand ce code est rencontré ; sans règle, le code reste visible dans le journal SUPER PDP de la facture sans effet sur son statut.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredPDPStatusCodes) { item in
+                        pdpStatusCodeRow(item)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func pdpStatusCodeRow(_ item: PDPEventCodeOverride) -> some View {
+        HStack(spacing: 10) {
+            Text(item.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+            Text(item.label).font(.body)
+                .frame(minWidth: 160, alignment: .leading)
+            if let raw = item.functionalTransition, let status = InvoiceStatus(rawValue: raw) {
+                Label(status.label, systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption2.bold())
+                    .foregroundStyle(Color(hex: status.hexColor))
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color(hex: status.hexColor).opacity(0.12)))
+                    .help("Fait passer la facture au statut « \(status.label) »")
+            } else {
+                Text("informatif seulement").font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Button {
+                editingPDPStatusCode = item
+            } label: { Image(systemName: "pencil") }
+                .buttonStyle(.borderless)
+                .help("Modifier")
+            if !item.isSystemDefined {
+                Button(role: .destructive) {
+                    superPDPStatusCodeStore.remove(item)
+                } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Supprimer ce code")
+            }
+        }
+        .padding(.vertical, 4).padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
     }
 
     private var invoiceStatusesPanel: some View {
@@ -6977,6 +7069,89 @@ struct ValueTablesView: View {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return refs }
         return refs.filter { $0.code.lowercased().contains(q) || $0.label.lowercased().contains(q) }
+    }
+}
+
+struct PDPStatusCodeEditorSheet: View {
+    var existing: PDPEventCodeOverride?
+    let onSave: (PDPEventCodeOverride) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var id: String
+    @State private var label: String
+    @State private var functionalTransition: InvoiceStatus?
+    @State private var errorMessage: String?
+
+    private var isNew: Bool { existing == nil }
+
+    init(existing: PDPEventCodeOverride?, onSave: @escaping (PDPEventCodeOverride) -> Void) {
+        self.existing = existing
+        self.onSave = onSave
+        _id = State(initialValue: existing?.id ?? "")
+        _label = State(initialValue: existing?.label ?? "")
+        _functionalTransition = State(initialValue: existing?.functionalTransition.flatMap { InvoiceStatus(rawValue: $0) })
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text(isNew ? "Nouveau code SUPER PDP" : "Modifier le code SUPER PDP").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Code").frame(width: 140, alignment: .leading)
+                    TextField("ex. fr:214", text: $id)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!isNew)
+                        .disableAutocorrection(true)
+                }
+                HStack {
+                    Text("Libellé").frame(width: 140, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Règle de mise à jour").frame(width: 140, alignment: .leading)
+                        Picker("", selection: $functionalTransition) {
+                            Text("Aucune (informatif seulement)").tag(InvoiceStatus?.none)
+                            ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                                Text(s.label).tag(InvoiceStatus?.some(s))
+                            }
+                        }
+                        .labelsHidden()
+                        Spacer()
+                    }
+                    Text("Si ce code est envoyé ou reçu pour une facture, le statut choisi ici s'applique — sauf s'il s'agirait d'une rétrogradation dans le cycle de vie.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if let err = errorMessage {
+                Text(err).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    let trimmedID = id.trimmingCharacters(in: .whitespaces)
+                    guard !trimmedID.isEmpty else {
+                        errorMessage = "Le code ne peut pas être vide."
+                        return
+                    }
+                    let trimmedLabel = label.trimmingCharacters(in: .whitespaces)
+                    onSave(PDPEventCodeOverride(
+                        id: trimmedID,
+                        label: trimmedLabel.isEmpty ? trimmedID : trimmedLabel,
+                        functionalTransition: functionalTransition?.rawValue,
+                        isSystemDefined: existing?.isSystemDefined ?? false
+                    ))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(id.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
     }
 }
 

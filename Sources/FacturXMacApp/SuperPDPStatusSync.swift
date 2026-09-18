@@ -3,26 +3,30 @@ import FacturXCore
 
 /// La passerelle entre le journal des événements SUPER PDP (codes `fr:2XX`, envoyés et
 /// reçus — voir la doc de `InvoiceStatus`) et le statut fonctionnel réduit de l'app.
-/// `functionalTransition(for:)` est le SEUL endroit à modifier quand SUPER PDP ajoute ou
-/// précise un code : un code absent de ce switch reste purement informationnel (visible
-/// dans le journal SUPER PDP de la facture) sans jamais forcer de changement de statut —
-/// c'est le comportement sûr par défaut, pas une omission à corriger d'urgence.
+/// La règle par code (quel statut fonctionnel il déclenche, le cas échéant) vit dans
+/// `SuperPDPStatusCodeStore` (Réglages > Tables > Statuts SUPER PDP), pas ici : c'est cette
+/// table, éditable sans changement de code, qui fait foi. Un code absent de la table ou
+/// sans règle configurée reste purement informationnel (visible dans le journal SUPER PDP
+/// de la facture) sans jamais forcer de changement de statut — comportement sûr par
+/// défaut, pas une omission à corriger d'urgence.
 ///
-/// Reconnaît à la fois les codes officiels et quelques mots libres déjà tolérés avant
-/// l'introduction des codes détaillés (le champ `status` de `GET /invoices/{id}` n'est
-/// pas documenté aussi précisément que les codes de `invoice_events`). Partagé entre le
-/// rafraîchissement manuel (bouton "Statut PDP" de la fiche facture) et la synchronisation
-/// périodique en arrière-plan.
+/// Reconnaît aussi quelques mots libres tolérés avant l'introduction des codes détaillés
+/// (le champ `status` de `GET /invoices/{id}` n'est pas documenté aussi précisément que
+/// les codes de `invoice_events`) en repli si le code ne correspond à aucune entrée de la
+/// table. Partagé entre le rafraîchissement manuel (bouton "Statut PDP" de la fiche
+/// facture) et la synchronisation périodique en arrière-plan.
 enum PDPStatusMapper {
     static func functionalTransition(for pdpStatus: String) -> InvoiceStatus? {
+        if let configured = SuperPDPStatusCodeStore.shared.functionalTransition(for: pdpStatus) {
+            return configured
+        }
         let s = pdpStatus.lowercased()
         switch s {
-        case "fr:205", "accepted", "processed", "received": return .accepted
-        case "fr:207": return .disputed
-        case "fr:206", "fr:210", "fr:213", "rejected": return .refused
-        case "fr:212", "encaissée", "encaissee", "paid": return .paid
-        case "fr:320", "annulée", "annulee", "cancelled": return .cancelled
-        default: return nil // fr:200-204, fr:208, fr:209, fr:211, fr:220… : informatif seulement
+        case "accepted", "processed", "received": return .accepted
+        case "rejected": return .refused
+        case "paid", "encaissée", "encaissee": return .paid
+        case "cancelled", "annulée", "annulee": return .cancelled
+        default: return nil
         }
     }
 
