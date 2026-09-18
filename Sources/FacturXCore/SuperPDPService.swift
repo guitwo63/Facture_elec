@@ -568,7 +568,18 @@ public final class SuperPDPService {
         return try parseValidationReport(data: data)
     }
 
-    private func parseValidationReport(data: Data) throws -> SuperPDPValidationReport {
+    /// Le rapport n'a pas de champs errors/warnings au premier niveau : chaque validateur
+    /// (schéma XSD, schematron EN16931, schematron d'avertissements français) est un
+    /// "subreport" avec ses propres `failures` (échecs, chacun {message, raw, location})
+    /// — c'est là que vivent les vrais messages d'erreur (ex. "[BR-Z-05]-..."). Un validateur
+    /// dont le nom contient "WARNING" est traité comme non bloquant même si l'API les range
+    /// aussi sous `failures`. Confirmé sur la référence OpenAPI publique de SUPER PDP
+    /// (schéma `validation_report` / `subreport` / `message`), le format precedent
+    /// (`errors`/`warnings` au premier niveau) ne correspondait à aucun champ réel de l'API
+    /// et affichait donc toujours "0 erreur(s)" malgré un is_valid=false.
+    /// `internal` (pas `private`) pour être testable directement avec un JSON figé, sans
+    /// mocker les deux appels réseau (token + validation) de `validateInvoice`.
+    func parseValidationReport(data: Data) throws -> SuperPDPValidationReport {
         guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
             throw SuperPDPError.decoding("JSON rapport de validation illisible")
         }
@@ -580,16 +591,35 @@ public final class SuperPDPService {
             return nil
         }
         let isValid = (first["is_valid"] as? Bool) ?? (s("is_valid")?.lowercased() == "true")
-        let errors = (first["errors"] as? [Any])?.compactMap { entry -> String? in
-            if let e = entry as? String { return e }
-            if let d = entry as? [String: Any] { return (d["message"] as? String) ?? (d["error"] as? String) }
-            return nil
-        } ?? []
-        let warnings = (first["warnings"] as? [Any])?.compactMap { entry -> String? in
-            if let e = entry as? String { return e }
-            if let d = entry as? [String: Any] { return (d["message"] as? String) ?? (d["warning"] as? String) }
-            return nil
-        } ?? []
+
+        func failureMessages(_ entries: [Any]?) -> [String] {
+            (entries ?? []).compactMap { entry -> String? in
+                if let e = entry as? String { return e }
+                if let d = entry as? [String: Any] {
+                    return (d["message"] as? String) ?? (d["raw"] as? String)
+                }
+                return nil
+            }
+        }
+
+        var errors: [String] = []
+        var warnings: [String] = []
+        let subreports = (first["subreports"] as? [Any]) ?? []
+        for case let subreport as [String: Any] in subreports {
+            let validatorName = (subreport["validator"] as? String) ?? ""
+            let failures = failureMessages(subreport["failures"] as? [Any])
+            if validatorName.uppercased().contains("WARNING") {
+                warnings.append(contentsOf: failures)
+            } else {
+                errors.append(contentsOf: failures)
+            }
+        }
+        // Erreur générique éventuelle au niveau du rapport (ex. fichier illisible), en plus
+        // des échecs par validateur.
+        if let topLevelError = first["error"] as? String, !topLevelError.isEmpty {
+            errors.append(topLevelError)
+        }
+
         var raw: [String: String] = [:]
         for (k, v) in first {
             if let sv = v as? String { raw[k] = sv }
