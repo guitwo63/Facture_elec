@@ -2394,11 +2394,17 @@ struct InvoiceEditorView: View {
                                     .frame(width: 180)
                                     .disabled(fieldLocked)
                                     .help("Applique le texte du préréglage et recalcule l'échéance ci-dessus — celle-ci reste modifiable manuellement ensuite.")
-                                    TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
-                                        .textFieldStyle(.roundedBorder)
-                                        .font(.callout)
-                                        .frame(maxWidth: 260)
-                                        .disabled(fieldLocked)
+                                    if paymentTermsPresetIDBinding.wrappedValue == nil {
+                                        TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.callout)
+                                            .frame(maxWidth: 260)
+                                            .disabled(fieldLocked)
+                                    } else {
+                                        Text(invoice.paymentTerms ?? "")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                            .frame(maxWidth: 260, alignment: .leading)
+                                    }
                                     if (invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
                                         Label("Non renseignées", systemImage: "exclamationmark.circle")
                                             .font(.caption).foregroundStyle(.orange)
