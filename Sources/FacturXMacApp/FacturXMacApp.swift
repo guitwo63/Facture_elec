@@ -6699,12 +6699,40 @@ struct PaymentTermsPresetEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var label: String
     @State private var text: String
+    @State private var ruleKind: DueRuleKind
+    @State private var days: Int
+
+    private enum DueRuleKind: String, CaseIterable, Identifiable {
+        case none = "Aucune (saisie manuelle)"
+        case days = "Jours nets"
+        case endOfMonth = "Fin de mois + jours"
+        var id: String { rawValue }
+    }
 
     init(preset: PaymentTermsPreset, onSave: @escaping (PaymentTermsPreset) -> Void) {
         self.preset = preset
         self.onSave = onSave
         _label = State(initialValue: preset.label)
         _text = State(initialValue: preset.text)
+        switch preset.dueRule {
+        case .none:
+            _ruleKind = State(initialValue: .none)
+            _days = State(initialValue: 30)
+        case .days(let n):
+            _ruleKind = State(initialValue: .days)
+            _days = State(initialValue: n)
+        case .endOfMonthPlusDays(let n):
+            _ruleKind = State(initialValue: .endOfMonth)
+            _days = State(initialValue: n)
+        }
+    }
+
+    private var dueRule: PaymentTermsDueRule {
+        switch ruleKind {
+        case .none: return .none
+        case .days: return .days(days)
+        case .endOfMonth: return .endOfMonthPlusDays(days)
+        }
     }
 
     var body: some View {
@@ -6716,18 +6744,36 @@ struct PaymentTermsPresetEditorSheet: View {
             }
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    Text("Libellé").frame(width: 160, alignment: .leading)
                     TextField("Libellé affiché dans le menu", text: $label).textFieldStyle(.roundedBorder)
                 }
                 HStack {
-                    Text("Texte").frame(width: 100, alignment: .leading)
+                    Text("Texte").frame(width: 160, alignment: .leading)
                     TextField("Texte inséré dans les conditions de paiement", text: $text).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Échéance").frame(width: 160, alignment: .leading)
+                    Picker("", selection: $ruleKind) {
+                        ForEach(DueRuleKind.allCases) { k in Text(k.rawValue).tag(k) }
+                    }
+                    .labelsHidden()
+                }
+                if ruleKind != .none {
+                    HStack {
+                        Text(ruleKind == .days ? "Nombre de jours" : "Jours après fin de mois").frame(width: 160, alignment: .leading)
+                        Stepper(value: $days, in: 0...120) { Text("\(days) j") }
+                    }
+                    Text("Échéance calculée automatiquement pour toute facture utilisant ce préréglage.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("L'échéance reste à saisir manuellement sur chaque facture.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(PaymentTermsPreset(id: preset.id, label: label, text: text))
+                    onSave(PaymentTermsPreset(id: preset.id, label: label, text: text, dueRule: dueRule))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -6736,7 +6782,7 @@ struct PaymentTermsPresetEditorSheet: View {
             Spacer()
         }
         .padding()
-        .frame(width: 420, height: 260)
+        .frame(width: 440, height: 360)
     }
 }
 
