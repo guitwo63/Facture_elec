@@ -1920,8 +1920,8 @@ struct InvoiceEditorView: View {
 
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     /// Appliquer un préréglage recalcule aussi l'échéance (BT-9) à partir de la date de
-    /// facture — l'utilisateur garde toujours la main pour modifier la date ensuite,
-    /// ce calcul ne verrouille jamais le champ.
+    /// facture. Le champ Échéance se grise alors (voir `dueDateIsComputedFromPreset`) :
+    /// en mode Personnalisé, il reste modifiable manuellement.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
             get: { paymentTermsStore.matchingPresetID(for: invoice.paymentTerms) },
@@ -1931,6 +1931,18 @@ struct InvoiceEditorView: View {
                 invoice.dueDate = preset.dueRule.dueDate(from: invoice.issueDate)
             }
         )
+    }
+
+    /// Vrai si le préréglage actif calcule réellement une échéance (jours nets /
+    /// fin de mois + jours) — le champ Échéance se grise alors, pour éviter une
+    /// saisie manuelle immédiatement écrasée par le prochain recalcul. Un
+    /// préréglage sans règle (ex. "Comptant") ou le mode Personnalisé laissent
+    /// le champ modifiable.
+    private var dueDateIsComputedFromPreset: Bool {
+        guard let id = paymentTermsPresetIDBinding.wrappedValue,
+              let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return false }
+        if case .none = preset.dueRule { return false }
+        return true
     }
 
     private func fieldHighlight<V: View>(_ view: V, forRuleIDs ids: [String]) -> some View {
@@ -2367,9 +2379,10 @@ struct InvoiceEditorView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
                                             Text("Échéance").font(.caption)
-                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Calculée automatiquement par le préréglage de conditions de paiement sélectionné ; modifiable uniquement en mode « Personnalisé ».")
                                         }
                                         DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
+                                            .disabled(fieldLocked || dueDateIsComputedFromPreset)
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
@@ -2394,11 +2407,17 @@ struct InvoiceEditorView: View {
                                     .frame(width: 180)
                                     .disabled(fieldLocked)
                                     .help("Applique le texte du préréglage et recalcule l'échéance ci-dessus — celle-ci reste modifiable manuellement ensuite.")
-                                    TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
-                                        .textFieldStyle(.roundedBorder)
-                                        .font(.callout)
-                                        .frame(maxWidth: 260)
-                                        .disabled(fieldLocked)
+                                    if paymentTermsPresetIDBinding.wrappedValue == nil {
+                                        TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.callout)
+                                            .frame(maxWidth: 260)
+                                            .disabled(fieldLocked)
+                                    } else {
+                                        Text(invoice.paymentTerms ?? "")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                            .frame(maxWidth: 260, alignment: .leading)
+                                    }
                                     if (invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
                                         Label("Non renseignées", systemImage: "exclamationmark.circle")
                                             .font(.caption).foregroundStyle(.orange)
@@ -6699,12 +6718,40 @@ struct PaymentTermsPresetEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var label: String
     @State private var text: String
+    @State private var ruleKind: DueRuleKind
+    @State private var days: Int
+
+    private enum DueRuleKind: String, CaseIterable, Identifiable {
+        case none = "Aucune (saisie manuelle)"
+        case days = "Jours nets"
+        case endOfMonth = "Fin de mois + jours"
+        var id: String { rawValue }
+    }
 
     init(preset: PaymentTermsPreset, onSave: @escaping (PaymentTermsPreset) -> Void) {
         self.preset = preset
         self.onSave = onSave
         _label = State(initialValue: preset.label)
         _text = State(initialValue: preset.text)
+        switch preset.dueRule {
+        case .none:
+            _ruleKind = State(initialValue: .none)
+            _days = State(initialValue: 30)
+        case .days(let n):
+            _ruleKind = State(initialValue: .days)
+            _days = State(initialValue: n)
+        case .endOfMonthPlusDays(let n):
+            _ruleKind = State(initialValue: .endOfMonth)
+            _days = State(initialValue: n)
+        }
+    }
+
+    private var dueRule: PaymentTermsDueRule {
+        switch ruleKind {
+        case .none: return .none
+        case .days: return .days(days)
+        case .endOfMonth: return .endOfMonthPlusDays(days)
+        }
     }
 
     var body: some View {
@@ -6716,18 +6763,36 @@ struct PaymentTermsPresetEditorSheet: View {
             }
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    Text("Libellé").frame(width: 160, alignment: .leading)
                     TextField("Libellé affiché dans le menu", text: $label).textFieldStyle(.roundedBorder)
                 }
                 HStack {
-                    Text("Texte").frame(width: 100, alignment: .leading)
+                    Text("Texte").frame(width: 160, alignment: .leading)
                     TextField("Texte inséré dans les conditions de paiement", text: $text).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Échéance").frame(width: 160, alignment: .leading)
+                    Picker("", selection: $ruleKind) {
+                        ForEach(DueRuleKind.allCases) { k in Text(k.rawValue).tag(k) }
+                    }
+                    .labelsHidden()
+                }
+                if ruleKind != .none {
+                    HStack {
+                        Text(ruleKind == .days ? "Nombre de jours" : "Jours après fin de mois").frame(width: 160, alignment: .leading)
+                        Stepper(value: $days, in: 0...120) { Text("\(days) j") }
+                    }
+                    Text("Échéance calculée automatiquement pour toute facture utilisant ce préréglage.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("L'échéance reste à saisir manuellement sur chaque facture.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(PaymentTermsPreset(id: preset.id, label: label, text: text))
+                    onSave(PaymentTermsPreset(id: preset.id, label: label, text: text, dueRule: dueRule))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -6736,7 +6801,7 @@ struct PaymentTermsPresetEditorSheet: View {
             Spacer()
         }
         .padding()
-        .frame(width: 420, height: 260)
+        .frame(width: 440, height: 360)
     }
 }
 
