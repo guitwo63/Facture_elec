@@ -1004,12 +1004,19 @@ public final class SuperPDPSettings: ObservableObject {
     private var storageKey: String { env.key("facturx.superpdp.credentials.v1") }
     private var clientSecretKeychainKey: String { env.key("facturx.superpdp.clientSecret.v1") }
 
-    /// `clientSecret` n'est jamais persisté dans le JSON UserDefaults : il vit
-    /// uniquement dans le Keychain (voir `KeychainStore`).
+    /// Retour arrière volontaire (2026-09-18) — voir le commentaire équivalent dans
+    /// `SMTPSettings.init()` : l'app n'étant signée qu'en "ad hoc", une entrée Keychain
+    /// créée par une build devient inaccessible à la build suivante (signature différente
+    /// à chaque reconstruction), ce qui faisait apparaître le mot de passe SUPER PDP comme
+    /// "effacé" à chaque mise à jour. Retour au stockage en clair dans UserDefaults ; à
+    /// reconsidérer si l'app passe un jour en mode SaaS. Migration one-shot depuis le
+    /// Keychain si le champ est vide, pour ne pas perdre un secret déjà saisi.
     public init() {
         if let data = defaults.data(forKey: env.key("facturx.superpdp.credentials.v1")),
            var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
-            decoded.clientSecret = KeychainStore.get(forKey: env.key("facturx.superpdp.clientSecret.v1")) ?? ""
+            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.superpdp.clientSecret.v1")), !migrated.isEmpty {
+                decoded.clientSecret = migrated
+            }
             credentials = decoded
         } else {
             credentials = SuperPDPCredentials(clientID: "", clientSecret: "")
@@ -1017,11 +1024,9 @@ public final class SuperPDPSettings: ObservableObject {
     }
 
     public func save() {
-        var toPersist = credentials
-        toPersist.clientSecret = ""
-        if let data = try? JSONEncoder().encode(toPersist) {
+        if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
-        KeychainStore.set(credentials.clientSecret, forKey: clientSecretKeychainKey)
+        KeychainStore.delete(forKey: clientSecretKeychainKey)
     }
 }

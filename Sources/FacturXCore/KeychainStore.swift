@@ -1,18 +1,21 @@
 import Foundation
 import Security
 
-/// Wrapper minimal autour du Keychain macOS, pour les seuls champs sensibles
-/// (mots de passe, secrets) des identifiants d'intégration (SMTP, pCloud,
-/// Chorus Pro, SUPER PDP). Avant cette version, ces valeurs étaient stockées
-/// en clair dans UserDefaults (~/Library/Preferences/*.plist), lisibles par
-/// tout process tournant sous le même compte utilisateur. Le reste des
-/// identifiants (host, port, région, identifiants publics non sensibles)
-/// continue de vivre dans UserDefaults, inchangé.
+/// Wrapper minimal autour du Keychain macOS. Utilisé un temps pour les champs
+/// sensibles (mots de passe, secrets) des identifiants d'intégration (SMTP,
+/// pCloud, Chorus Pro, SUPER PDP), avant un retour arrière volontaire
+/// (2026-09-18) : l'app étant distribuée signée « ad hoc » (pas de compte
+/// Apple Developer, voir scripts/package-mac.sh), une entrée Keychain créée
+/// par une build devient inaccessible à la build suivante (signature ad hoc
+/// différente à chaque reconstruction) — le mot de passe semblait "effacé"
+/// à chaque mise à jour de l'app. Les identifiants sensibles sont donc
+/// revenus en clair dans UserDefaults (`*Settings.save()`), comme le reste
+/// des champs de configuration.
 ///
-/// L'app étant distribuée signée « ad hoc » (pas de compte Apple Developer,
-/// voir scripts/package-mac.sh), macOS peut redemander l'autorisation d'accès
-/// au Keychain après chaque reconstruction du binaire (l'identité de
-/// signature change) — attendu tant que l'app n'est pas signée Developer ID.
+/// Ce wrapper est conservé (inutilisé pour l'instant) pour une éventuelle
+/// réactivation si l'app passe en mode SaaS (signature stable / autre
+/// mécanisme de secret côté serveur) : `*Settings.init()` migre encore, une
+/// seule fois, un secret resté dans le Keychain d'une build précédente.
 public enum KeychainStore {
     private static let service = "fr.arverneo.facturxmacapp"
 

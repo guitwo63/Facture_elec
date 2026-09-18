@@ -552,8 +552,14 @@ struct RootView: View {
         let k = appEnv.key("facturx.choruspro.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
            var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
-            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")) ?? ""
-            decoded.techPassword = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")) ?? ""
+            // Migration one-shot depuis le Keychain (retour arrière du stockage des secrets,
+            // voir `ChorusProSettings.init()`) : ne s'applique qu'aux champs encore vides.
+            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")), !migrated.isEmpty {
+                decoded.clientSecret = migrated
+            }
+            if decoded.techPassword.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")), !migrated.isEmpty {
+                decoded.techPassword = migrated
+            }
             return decoded
         }
         return ChorusProCredentials(clientID: "", clientSecret: "")
@@ -563,7 +569,9 @@ struct RootView: View {
         let k = appEnv.key("facturx.superpdp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
            var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
-            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")) ?? ""
+            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")), !migrated.isEmpty {
+                decoded.clientSecret = migrated
+            }
             return decoded
         }
         return SuperPDPCredentials(clientID: "", clientSecret: "")
@@ -573,7 +581,9 @@ struct RootView: View {
         let k = appEnv.key("facturx.smtp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
            var decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
-            decoded.password = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")) ?? ""
+            if decoded.password.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")), !migrated.isEmpty {
+                decoded.password = migrated
+            }
             return decoded
         }
         return SMTPCredentials()
