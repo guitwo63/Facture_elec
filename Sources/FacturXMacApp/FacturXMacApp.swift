@@ -2309,7 +2309,18 @@ struct InvoiceEditorView: View {
                     }
                     ForEach(configuredTransitions, id: \.self) { s in
                         Button {
-                            invoice.status = s
+                            // « Transmise au PDP » ne doit jamais être qu'une étiquette : passer
+                            // ce statut sans réellement déposer laissait croire la facture
+                            // transmise alors qu'elle ne l'était pas, tout en la verrouillant
+                            // (statut verrouillant) — ce qui bloquait ensuite le vrai bouton
+                            // "Super PDP" (dépôt), y compris pour un administrateur. Le seul
+                            // chemin valide vers ce statut est donc le dépôt réel.
+                            if s == .sentToPDP, superPDPSettings.credentials.usePDP,
+                               (invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty {
+                                depositToSuperPDP()
+                            } else {
+                                invoice.status = s
+                            }
                         } label: {
                             Label(s.label, systemImage: s.systemImage)
                         }
@@ -2324,7 +2335,13 @@ struct InvoiceEditorView: View {
                             depositToSuperPDP()
                         } label: { Label("Super PDP", systemImage: "paperplane.fill") }
                             .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
-                            .disabled(fieldLocked || statusLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured || !isAdmin)
+                            // `fieldLocked` intègre déjà `statusLocked` (verrouillé sauf
+                            // administrateur ayant confirmé "Modifier quand même") : le vérifier
+                            // une seconde fois ici rendait ce bouton définitivement inaccessible
+                            // dès que le statut verrouille la facture, même pour un administrateur
+                            // — empêchant justement de corriger une facture restée bloquée à tort
+                            // au statut « Transmise au PDP » sans dépôt réel.
+                            .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured || !isAdmin)
                             .help(isAdmin
                                   ? "Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)"
                                   : "Réservé aux administrateurs : dépôt réglementaire sur SUPER PDP (Plateforme Agréée)")
