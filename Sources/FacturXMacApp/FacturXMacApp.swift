@@ -7686,7 +7686,11 @@ struct PartyEditorView: View {
     @State private var dinumLoading = false
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
+    @State private var superPDPLookupLoading = false
+    @State private var superPDPLookupNote: String?
+    @State private var superPDPAddressChoices: [SuperPDPDirectoryEntry] = []
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
 
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     private var paymentTermsPresetIDBinding: Binding<String?> {
@@ -7844,7 +7848,24 @@ struct PartyEditorView: View {
                     } else {
                         TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
                         NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
+                        if !locked, superPDPSettings.credentials.isConfigured {
+                            Button {
+                                lookupSuperPDPElectronicAddress()
+                            } label: {
+                                if superPDPLookupLoading {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "magnifyingglass.circle.fill").font(.title3)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(superPDPLookupLoading || !canLookupSuperPDPElectronicAddress)
+                            .help("Rechercher l'adresse électronique sur SUPER PDP à partir du SIREN/SIRET")
+                        }
                     }
+                }
+                if !locked, linkedEntry == nil, let note = superPDPLookupNote {
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
             }
             if isMultiContact {
@@ -8083,6 +8104,86 @@ struct PartyEditorView: View {
                 }
             }
         }
+        .sheet(isPresented: Binding(
+            get: { !superPDPAddressChoices.isEmpty },
+            set: { if !$0 { superPDPAddressChoices = [] } }
+        )) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Plusieurs adresses électroniques trouvées").font(.headline).padding(12)
+                Text("Ce SIREN/SIRET correspond à plusieurs établissements sur SUPER PDP. Choisissez l'adresse à utiliser.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+                Divider()
+                List(superPDPAddressChoices) { entry in
+                    Button {
+                        applySuperPDPMatch(entry)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.name ?? entry.routingAddress ?? "—").font(.body.weight(.medium))
+                            Text(entry.routingAddress ?? "").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(minWidth: 420, minHeight: 320)
+        }
+    }
+
+    private var canLookupSuperPDPElectronicAddress: Bool {
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        let siret = (party.siret ?? "").filter { $0.isNumber }
+        return siren.count == 9 || siret.count == 14
+    }
+
+    /// Recherche manuelle de l'adresse électronique SUPER PDP pour le SIREN/SIRET saisi —
+    /// même logique que `PartySection.saveToDirectory()`, mais déclenchée explicitement ici
+    /// car cette vue sert aussi à la création directe d'un tiers depuis l'Annuaire, un
+    /// chemin qui ne passait jusque-là par aucune recherche automatique.
+    private func lookupSuperPDPElectronicAddress() {
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        let siret = (party.siret ?? "").filter { $0.isNumber }
+        guard superPDPSettings.credentials.isConfigured, siren.count == 9 || siret.count == 14 else { return }
+        superPDPLookupLoading = true
+        superPDPLookupNote = nil
+        let query = siret.count == 14 ? siret : siren
+        Task {
+            do {
+                let results = try await SuperPDPService().searchRecipient(siretOrSiren: query, credentials: superPDPSettings.credentials)
+                let withAddress = results.filter { !($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+                let distinctAddresses = Set(withAddress.map { $0.routingAddress ?? "" })
+                if distinctAddresses.count > 1 {
+                    superPDPAddressChoices = withAddress
+                } else if let match = withAddress.first {
+                    applySuperPDPMatch(match)
+                    superPDPLookupNote = "Adresse électronique trouvée sur SUPER PDP."
+                } else {
+                    superPDPLookupNote = "Aucune adresse électronique trouvée sur SUPER PDP pour ce SIREN/SIRET."
+                }
+            } catch {
+                superPDPLookupNote = "Recherche SUPER PDP indisponible : \(error.localizedDescription)"
+            }
+            superPDPLookupLoading = false
+        }
+    }
+
+    private func applySuperPDPMatch(_ match: SuperPDPDirectoryEntry) {
+        guard let addr = match.routingAddress?.trimmingCharacters(in: .whitespaces), !addr.isEmpty else { return }
+        party.endpointID = addr
+        party.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        let siret = (party.siret ?? "").filter { $0.isNumber }
+        if !siren.isEmpty {
+            let format: RoutingAddressFormat = siret.count == 14 ? .sirenSiret : .siren
+            let newAddress = PartyRoutingAddress(
+                format: format, siren: siren, siret: siret.count == 14 ? siret : nil,
+                label: "SUPER PDP", isActive: true, isDefault: routingAddresses.isEmpty
+            )
+            if !routingAddresses.contains(where: { $0.composedAddress == newAddress.composedAddress }) {
+                routingAddresses.append(newAddress)
+            }
+        }
+        superPDPAddressChoices = []
     }
 
     private func scheduleDinumSearch() {
