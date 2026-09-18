@@ -210,6 +210,7 @@ struct FullSettingsWizardView: View {
                 get: { invoiceStore.numberIncludeYear },
                 set: { invoiceStore.numberIncludeYear = $0; invoiceStore.save() }
             ))
+            .toggleStyle(.switch)
             HStack {
                 Text("Numéro de début").font(.caption)
                 Stepper(value: Binding(
@@ -223,6 +224,7 @@ struct FullSettingsWizardView: View {
                 get: { invoiceStore.numberUseSeparator },
                 set: { invoiceStore.numberUseSeparator = $0; invoiceStore.save() }
             ))
+            .toggleStyle(.switch)
             Divider()
             HStack {
                 Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
