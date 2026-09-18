@@ -550,7 +550,9 @@ struct RootView: View {
     private func reloadChorusCredentials() -> ChorusProCredentials {
         let k = appEnv.key("facturx.choruspro.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
-           let decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")) ?? ""
+            decoded.techPassword = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")) ?? ""
             return decoded
         }
         return ChorusProCredentials(clientID: "", clientSecret: "")
@@ -559,7 +561,8 @@ struct RootView: View {
     private func reloadSuperPDPCredentials() -> SuperPDPCredentials {
         let k = appEnv.key("facturx.superpdp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
-           let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")) ?? ""
             return decoded
         }
         return SuperPDPCredentials(clientID: "", clientSecret: "")
@@ -568,7 +571,8 @@ struct RootView: View {
     private func reloadSMTPCredentials() -> SMTPCredentials {
         let k = appEnv.key("facturx.smtp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
-           let decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+            decoded.password = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")) ?? ""
             return decoded
         }
         return SMTPCredentials()
@@ -663,7 +667,7 @@ struct RootView: View {
             case .orders:
                 OrdersTabView(selectedID: $selectedOrderID)
             case .quotes:
-                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID)
+                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID, orderSelectedID: $selectedOrderID)
             case .directory:
                 DirectoryView()
             case .dashboard:
@@ -1136,6 +1140,85 @@ struct QuoteToInvoiceSheet: View {
     }
 }
 
+struct QuoteToOrderSheet: View {
+    let quotes: [Quote]
+    let onCreate: (Quote) -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var selectedQuoteID: UUID?
+
+    private var filteredQuotes: [Quote] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return quotes }
+        return quotes.filter { quote in
+            quote.number.lowercased().contains(q)
+                || quote.buyer.name.lowercased().contains(q)
+                || quote.seller.name.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Créer une commande depuis un devis").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, client…)", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filteredQuotes.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text.below.ecg").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucun devis accepté disponible à transformer en commande dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(Array(filteredQuotes.enumerated()), id: \.element.id) { _, quote in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(quote.number).font(.headline)
+                            Text("\(quote.buyer.name.isEmpty ? "Sans client" : quote.buyer.name)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", quote.grandTotal, quote.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(quote.issueDate, format: .dateTime.day().month().year())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedQuoteID = quote.id }
+                    .background(selectedQuoteID == quote.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Créer la commande") {
+                    if let quote = filteredQuotes.first(where: { $0.id == selectedQuoteID }) {
+                        onCreate(quote)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedQuoteID == nil)
+            }
+            .padding(12)
+        }
+        .frame(width: 520, height: 420)
+    }
+}
+
 struct InvoicePickerSheet: View {
     let invoices: [Invoice]
     let selectedID: UUID?
@@ -1575,9 +1658,13 @@ struct InvoicesTabView: View {
 
     /// Devis facturables : acceptés (le client a dit oui) et pas déjà convertis — même
     /// garde que le bouton "Convertir en facture" sur la fiche devis elle-même, pour que
-    /// cette seconde entrée n'invente pas une règle différente.
+    /// cette seconde entrée n'invente pas une règle différente. Exclut aussi les devis
+    /// déjà transformés en commande : la facture doit alors venir de la commande, pas
+    /// court-circuiter la traçabilité en repartant directement du devis.
     private var scopedInvoiceableQuotes: [Quote] {
-        var result = quoteStore.quotes.filter { $0.status == .accepted && $0.convertedInvoiceNumber == nil }
+        var result = quoteStore.quotes.filter {
+            $0.status == .accepted && $0.convertedInvoiceNumber == nil && $0.convertedOrderNumber == nil
+        }
         if let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser) {
             result = result.filter { quote in
                 if let cid = quote.companyID { return scope.contains(cid) }
@@ -1920,8 +2007,8 @@ struct InvoiceEditorView: View {
 
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     /// Appliquer un préréglage recalcule aussi l'échéance (BT-9) à partir de la date de
-    /// facture — l'utilisateur garde toujours la main pour modifier la date ensuite,
-    /// ce calcul ne verrouille jamais le champ.
+    /// facture. Le champ Échéance se grise alors (voir `dueDateIsComputedFromPreset`) :
+    /// en mode Personnalisé, il reste modifiable manuellement.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
             get: { paymentTermsStore.matchingPresetID(for: invoice.paymentTerms) },
@@ -1931,6 +2018,18 @@ struct InvoiceEditorView: View {
                 invoice.dueDate = preset.dueRule.dueDate(from: invoice.issueDate)
             }
         )
+    }
+
+    /// Vrai si le préréglage actif calcule réellement une échéance (jours nets /
+    /// fin de mois + jours) — le champ Échéance se grise alors, pour éviter une
+    /// saisie manuelle immédiatement écrasée par le prochain recalcul. Un
+    /// préréglage sans règle (ex. "Comptant") ou le mode Personnalisé laissent
+    /// le champ modifiable.
+    private var dueDateIsComputedFromPreset: Bool {
+        guard let id = paymentTermsPresetIDBinding.wrappedValue,
+              let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return false }
+        if case .none = preset.dueRule { return false }
+        return true
     }
 
     private func fieldHighlight<V: View>(_ view: V, forRuleIDs ids: [String]) -> some View {
@@ -2367,9 +2466,10 @@ struct InvoiceEditorView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
                                             Text("Échéance").font(.caption)
-                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Obligatoire si non déduit des conditions.")
+                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Calculée automatiquement par le préréglage de conditions de paiement sélectionné ; modifiable uniquement en mode « Personnalisé ».")
                                         }
                                         DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
+                                            .disabled(fieldLocked || dueDateIsComputedFromPreset)
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
@@ -2394,11 +2494,17 @@ struct InvoiceEditorView: View {
                                     .frame(width: 180)
                                     .disabled(fieldLocked)
                                     .help("Applique le texte du préréglage et recalcule l'échéance ci-dessus — celle-ci reste modifiable manuellement ensuite.")
-                                    TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
-                                        .textFieldStyle(.roundedBorder)
-                                        .font(.callout)
-                                        .frame(maxWidth: 260)
-                                        .disabled(fieldLocked)
+                                    if paymentTermsPresetIDBinding.wrappedValue == nil {
+                                        TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.callout)
+                                            .frame(maxWidth: 260)
+                                            .disabled(fieldLocked)
+                                    } else {
+                                        Text(invoice.paymentTerms ?? "")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                            .frame(maxWidth: 260, alignment: .leading)
+                                    }
                                     if (invoice.paymentTerms ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
                                         Label("Non renseignées", systemImage: "exclamationmark.circle")
                                             .font(.caption).foregroundStyle(.orange)
@@ -3882,7 +3988,7 @@ struct DirectoryView: View {
                     Toggle(isOn: $showArchived) {
                         Label("Archives", systemImage: "archivebox")
                     }
-                    .toggleStyle(.checkbox)
+                    .toggleStyle(.switch)
                     .help("Afficher les tiers archivés")
                 }
                 HStack {
@@ -4592,7 +4698,9 @@ struct RoutingAddressFormView: View {
             }
             TextField("Libellé (optionnel)", text: Binding($draft.label, replacingNilWith: ""))
             Toggle("Adresse active", isOn: $draft.isActive)
+                .toggleStyle(.switch)
             Toggle("Adresse par défaut", isOn: $draft.isDefault)
+                .toggleStyle(.switch)
             HStack {
                 Spacer()
                 Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -5579,7 +5687,7 @@ struct ApplicationSettingsView: View {
                                     .frame(width: 70)
                             }
                             Toggle("TLS implicite (recommandé, port 465)", isOn: $smtpSettings.credentials.useTLS)
-                                .toggleStyle(.checkbox)
+                                .toggleStyle(.switch)
                             HStack {
                                 Text("Utilisateur").frame(width: 100, alignment: .leading)
                                 TextField("Identifiant SMTP", text: $smtpSettings.credentials.username)
@@ -5596,9 +5704,9 @@ struct ApplicationSettingsView: View {
                             Divider()
                             Text("Déclencheurs").font(.caption.bold())
                             Toggle("Nouvel utilisateur créé", isOn: $smtpSettings.credentials.alertOnNewUser)
-                                .toggleStyle(.checkbox)
+                                .toggleStyle(.switch)
                             Toggle("Changement de statut de facture (Acceptée/Rejetée/Payée/Annulée)", isOn: $smtpSettings.credentials.alertOnInvoiceStatusChange)
-                                .toggleStyle(.checkbox)
+                                .toggleStyle(.switch)
                             HStack {
                                 Button {
                                     smtpSettings.save()
@@ -5760,6 +5868,7 @@ struct ApplicationSettingsView: View {
                                 .frame(width: 140)
                         }
                         Toggle("Inclure l'année", isOn: activeNumberingFormatBinding.includeYear)
+                            .toggleStyle(.switch)
                         HStack {
                             Text("Numéro de début").font(.caption)
                             Stepper(value: activeNumberingFormatBinding.start, in: 1...999999) {
@@ -5767,6 +5876,7 @@ struct ApplicationSettingsView: View {
                             }
                         }
                         Toggle("Séparer par un \"-\"", isOn: activeNumberingFormatBinding.useSeparator)
+                            .toggleStyle(.switch)
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
@@ -6730,12 +6840,40 @@ struct PaymentTermsPresetEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var label: String
     @State private var text: String
+    @State private var ruleKind: DueRuleKind
+    @State private var days: Int
+
+    private enum DueRuleKind: String, CaseIterable, Identifiable {
+        case none = "Aucune (saisie manuelle)"
+        case days = "Jours nets"
+        case endOfMonth = "Fin de mois + jours"
+        var id: String { rawValue }
+    }
 
     init(preset: PaymentTermsPreset, onSave: @escaping (PaymentTermsPreset) -> Void) {
         self.preset = preset
         self.onSave = onSave
         _label = State(initialValue: preset.label)
         _text = State(initialValue: preset.text)
+        switch preset.dueRule {
+        case .none:
+            _ruleKind = State(initialValue: .none)
+            _days = State(initialValue: 30)
+        case .days(let n):
+            _ruleKind = State(initialValue: .days)
+            _days = State(initialValue: n)
+        case .endOfMonthPlusDays(let n):
+            _ruleKind = State(initialValue: .endOfMonth)
+            _days = State(initialValue: n)
+        }
+    }
+
+    private var dueRule: PaymentTermsDueRule {
+        switch ruleKind {
+        case .none: return .none
+        case .days: return .days(days)
+        case .endOfMonth: return .endOfMonthPlusDays(days)
+        }
     }
 
     var body: some View {
@@ -6747,18 +6885,36 @@ struct PaymentTermsPresetEditorSheet: View {
             }
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    Text("Libellé").frame(width: 160, alignment: .leading)
                     TextField("Libellé affiché dans le menu", text: $label).textFieldStyle(.roundedBorder)
                 }
                 HStack {
-                    Text("Texte").frame(width: 100, alignment: .leading)
+                    Text("Texte").frame(width: 160, alignment: .leading)
                     TextField("Texte inséré dans les conditions de paiement", text: $text).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Échéance").frame(width: 160, alignment: .leading)
+                    Picker("", selection: $ruleKind) {
+                        ForEach(DueRuleKind.allCases) { k in Text(k.rawValue).tag(k) }
+                    }
+                    .labelsHidden()
+                }
+                if ruleKind != .none {
+                    HStack {
+                        Text(ruleKind == .days ? "Nombre de jours" : "Jours après fin de mois").frame(width: 160, alignment: .leading)
+                        Stepper(value: $days, in: 0...120) { Text("\(days) j") }
+                    }
+                    Text("Échéance calculée automatiquement pour toute facture utilisant ce préréglage.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("L'échéance reste à saisir manuellement sur chaque facture.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    onSave(PaymentTermsPreset(id: preset.id, label: label, text: text))
+                    onSave(PaymentTermsPreset(id: preset.id, label: label, text: text, dueRule: dueRule))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -6767,7 +6923,7 @@ struct PaymentTermsPresetEditorSheet: View {
             Spacer()
         }
         .padding()
-        .frame(width: 420, height: 260)
+        .frame(width: 440, height: 360)
     }
 }
 
@@ -7950,10 +8106,13 @@ struct OrdersTabView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var quoteStore: QuoteStore
+    @EnvironmentObject var moduleStore: ModuleStore
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var showScanImport = false
+    @State private var showQuotePicker = false
     @State private var statusFilter: OrderStatus? = nil
     @State private var showAdvancedFilters = false
     @State private var advField1: OrderFilterField = .none
@@ -8122,6 +8281,13 @@ struct OrdersTabView: View {
                     } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
                         .buttonStyle(.bordered)
                         .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
+                    if moduleStore.settings.quotesEnabled {
+                        Button {
+                            showQuotePicker = true
+                        } label: { Label("Depuis un devis", systemImage: "doc.text.below.ecg") }
+                            .buttonStyle(.bordered)
+                            .help("Transforme un devis accepté en commande")
+                    }
                     Text("Ventes").font(.title2.bold())
                     Picker("Statut", selection: $statusFilter) {
                         Text("Tous statuts").tag(OrderStatus?.none)
@@ -8277,6 +8443,22 @@ struct OrdersTabView: View {
                 onCancel: { showScanImport = false }
             )
         }
+        .sheet(isPresented: $showQuotePicker) {
+            QuoteToOrderSheet(
+                quotes: scopedOrderableQuotes,
+                onCreate: { quote in
+                    let number = orderStore.nextNumber(companyID: quote.companyID)
+                    let order = quote.toOrder(number: number)
+                    orderStore.upsert(order)
+                    var converted = quote
+                    converted.convertedOrderNumber = order.number
+                    quoteStore.upsert(converted)
+                    selectedID = order.id
+                    showQuotePicker = false
+                },
+                onCancel: { showQuotePicker = false }
+            )
+        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -8284,6 +8466,22 @@ struct OrdersTabView: View {
         if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
             result = result.filter { order in
                 if let cid = order.companyID { return scope.contains(cid) }
+                return false
+            }
+        }
+        return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    /// Devis transformables en commande : acceptés et pas déjà convertis (ni en
+    /// commande, ni directement en facture) — même garde que côté Factures, pour
+    /// qu'un devis n'alimente jamais deux documents de vente à la fois.
+    private var scopedOrderableQuotes: [Quote] {
+        var result = quoteStore.quotes.filter {
+            $0.status == .accepted && $0.convertedOrderNumber == nil && $0.convertedInvoiceNumber == nil
+        }
+        if let scope = auth.visibleOrderCompanyIDs(for: auth.currentUser) {
+            result = result.filter { quote in
+                if let cid = quote.companyID { return scope.contains(cid) }
                 return false
             }
         }
@@ -8322,6 +8520,7 @@ struct QuotesTabView: View {
     @Binding var selectedID: UUID?
     @Binding var rootTab: RootTab
     @Binding var invoiceSelectedID: UUID?
+    @Binding var orderSelectedID: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var statusFilter: QuoteStatus? = nil
@@ -8629,7 +8828,7 @@ struct QuotesTabView: View {
                 }
 
                 if let id = selectedID, quoteStore.quotes.contains(where: { $0.id == id }) {
-                    QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID)
+                    QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID, orderSelectedID: $orderSelectedID)
                         .frame(minWidth: 380)
                 } else {
                     VStack(spacing: 8) {
@@ -8657,9 +8856,12 @@ struct QuoteEditorView: View {
     @Binding var quote: Quote
     @Binding var rootTab: RootTab
     @Binding var invoiceSelectedID: UUID?
+    @Binding var orderSelectedID: UUID?
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @State private var sendingQuoteEmail = false
@@ -8732,7 +8934,7 @@ struct QuoteEditorView: View {
                         .buttonStyle(ToolbarActionButtonStyle(tint: Color(hex: so.hexColor)))
                         .help("Passer au statut « \(so.label) »")
                     }
-                    if quote.status == .accepted {
+                    if quote.status == .accepted && quote.convertedOrderNumber == nil {
                         Button {
                             let number = store.nextNumber(companyID: quote.companyID)
                             let invoice = quote.toInvoice(number: number)
@@ -8746,10 +8948,29 @@ struct QuoteEditorView: View {
                         .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
                         .help("Recopie les lignes du devis dans une nouvelle facture brouillon")
                     }
+                    if quote.status == .accepted && moduleStore.settings.ordersEnabled && quote.convertedInvoiceNumber == nil {
+                        Button {
+                            let number = orderStore.nextNumber(companyID: quote.companyID)
+                            let order = quote.toOrder(number: number)
+                            orderStore.upsert(order)
+                            quote.convertedOrderNumber = order.number
+                            orderSelectedID = order.id
+                            rootTab = .orders
+                        } label: {
+                            Label("Convertir en commande", systemImage: "cart.badge.plus")
+                        }
+                        .buttonStyle(ToolbarActionButtonStyle(tint: .orange, filled: true))
+                        .help("Recopie les lignes du devis dans une nouvelle commande brouillon")
+                    }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
             }
 
+            if let n = quote.convertedOrderNumber {
+                Text("Converti en commande : \(n) (disponible dans l'onglet Ventes)")
+                    .font(.caption).foregroundStyle(.green)
+                    .padding(.horizontal, 12)
+            }
             if let n = quote.convertedInvoiceNumber {
                 Text("Converti en facture : \(n) (disponible dans l'onglet Factures)")
                     .font(.caption).foregroundStyle(.green)

@@ -369,9 +369,10 @@ struct UserManagementView: View {
                                             displayName: displayName, roles: roles, societyIDs: societyIDs,
                                             defaultSellerEntryID: defaultSeller)
                 } catch {
-                    return
+                    return error.localizedDescription
                 }
                 creatingUser = false
+                return nil
             }
         }
         .sheet(item: $editingUser) { user in
@@ -384,9 +385,14 @@ struct UserManagementView: View {
                 updated.defaultSellerEntryID = defaultSeller
                 auth.upsert(updated)
                 if !password.isEmpty {
-                    try? auth.updatePassword(updated, newPassword: password, forceChange: true)
+                    do {
+                        try auth.updatePassword(updated, newPassword: password, forceChange: true)
+                    } catch {
+                        return error.localizedDescription
+                    }
                 }
                 editingUser = nil
+                return nil
             }
         }
     }
@@ -594,7 +600,9 @@ struct CompanyDetailCard: View {
 
 struct UserEditorSheet: View {
     var existing: User?
-    let onSave: (String, String, String, [UserRole], [UUID], UUID?) -> Void
+    /// Retourne un message d'erreur à afficher (et ne ferme pas la feuille) en cas
+    /// d'échec, `nil` en cas de succès (la feuille se ferme alors).
+    let onSave: (String, String, String, [UserRole], [UUID], UUID?) -> String?
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @Environment(\.dismiss) private var dismiss
@@ -605,6 +613,7 @@ struct UserEditorSheet: View {
     @State private var selectedRoles: Set<UserRole> = [.comptable]
     @State private var societyIDs: Set<UUID> = []
     @State private var defaultSellerEntryID: UUID? = nil
+    @State private var saveError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -701,15 +710,18 @@ struct UserEditorSheet: View {
             .padding()
             }
             Divider()
-            if let err = validationError {
+            if let err = validationError ?? saveError {
                 Text(err).font(.caption).foregroundStyle(.red).padding(.horizontal)
             }
             HStack {
                 Spacer()
                 Button("Enregistrer") {
                     let ordered = UserRole.allCases.filter { selectedRoles.contains($0) }
-                    onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, ordered, Array(societyIDs), defaultSellerEntryID)
-                    dismiss()
+                    if let error = onSave(username.trimmingCharacters(in: .whitespaces), displayName, password, ordered, Array(societyIDs), defaultSellerEntryID) {
+                        saveError = error
+                    } else {
+                        dismiss()
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSave)

@@ -308,10 +308,16 @@ public final class ChorusProSettings: ObservableObject {
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.choruspro.credentials.v1") }
+    private var clientSecretKeychainKey: String { env.key("facturx.choruspro.clientSecret.v1") }
+    private var techPasswordKeychainKey: String { env.key("facturx.choruspro.techPassword.v1") }
 
+    /// `clientSecret`/`techPassword` ne sont jamais persistés dans le JSON
+    /// UserDefaults : ils vivent uniquement dans le Keychain (voir `KeychainStore`).
     public init() {
         if let data = defaults.data(forKey: env.key("facturx.choruspro.credentials.v1")),
-           let decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
+            decoded.clientSecret = KeychainStore.get(forKey: env.key("facturx.choruspro.clientSecret.v1")) ?? ""
+            decoded.techPassword = KeychainStore.get(forKey: env.key("facturx.choruspro.techPassword.v1")) ?? ""
             credentials = decoded
         } else {
             credentials = ChorusProCredentials(clientID: "", clientSecret: "")
@@ -319,8 +325,13 @@ public final class ChorusProSettings: ObservableObject {
     }
 
     public func save() {
-        if let data = try? JSONEncoder().encode(credentials) {
+        var toPersist = credentials
+        toPersist.clientSecret = ""
+        toPersist.techPassword = ""
+        if let data = try? JSONEncoder().encode(toPersist) {
             defaults.set(data, forKey: storageKey)
         }
+        KeychainStore.set(credentials.clientSecret, forKey: clientSecretKeychainKey)
+        KeychainStore.set(credentials.techPassword, forKey: techPasswordKeychainKey)
     }
 }

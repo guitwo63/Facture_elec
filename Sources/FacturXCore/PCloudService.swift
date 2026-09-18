@@ -100,17 +100,24 @@ public struct PCloudService {
 
     public func login(credentials: PCloudCredentials) async throws -> String {
         guard credentials.isConfigured else { throw PCloudError.notConfigured }
-        guard var comps = URLComponents(string: "\(baseURL(credentials))/userinfo") else {
+        guard let url = URL(string: "\(baseURL(credentials))/userinfo") else {
             throw PCloudError.invalidResponse
         }
-        comps.queryItems = [
+        // Identifiant et mot de passe passent dans le corps POST (form-urlencoded),
+        // jamais dans l'URL : une URL en query string se retrouve dans les journaux
+        // serveur, le cache réseau et tout proxy/outil de debug local.
+        var bodyComponents = URLComponents()
+        bodyComponents.queryItems = [
             URLQueryItem(name: "username", value: credentials.username),
             URLQueryItem(name: "password", value: credentials.password),
             URLQueryItem(name: "getauth", value: "1"),
             URLQueryItem(name: "logout", value: "1")
         ]
-        guard let url = comps.url else { throw PCloudError.invalidResponse }
-        let (data, _) = try await perform(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyComponents.percentEncodedQuery?.data(using: .utf8)
+        let (data, _) = try await perform(request)
         let json = try decodeJSON(data)
         try checkResult(json)
         guard let auth = json["auth"] as? String else { throw PCloudError.invalidResponse }
@@ -259,10 +266,14 @@ public final class PCloudSettings: ObservableObject {
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.pcloud.credentials.v1") }
+    private var passwordKeychainKey: String { env.key("facturx.pcloud.password.v1") }
 
+    /// Le mot de passe n'est jamais persisté dans le JSON UserDefaults : il vit
+    /// uniquement dans le Keychain (voir `KeychainStore`).
     public init() {
         if let data = defaults.data(forKey: env.key("facturx.pcloud.credentials.v1")),
-           let decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+            decoded.password = KeychainStore.get(forKey: env.key("facturx.pcloud.password.v1")) ?? ""
             credentials = decoded
         } else {
             credentials = PCloudCredentials()
@@ -271,7 +282,8 @@ public final class PCloudSettings: ObservableObject {
 
     public func load() {
         if let data = defaults.data(forKey: storageKey),
-           let decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(PCloudCredentials.self, from: data) {
+            decoded.password = KeychainStore.get(forKey: passwordKeychainKey) ?? ""
             credentials = decoded
         } else {
             credentials = PCloudCredentials()
@@ -279,8 +291,11 @@ public final class PCloudSettings: ObservableObject {
     }
 
     public func save() {
-        if let data = try? JSONEncoder().encode(credentials) {
+        var toPersist = credentials
+        toPersist.password = ""
+        if let data = try? JSONEncoder().encode(toPersist) {
             defaults.set(data, forKey: storageKey)
         }
+        KeychainStore.set(credentials.password, forKey: passwordKeychainKey)
     }
 }

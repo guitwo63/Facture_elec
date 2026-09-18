@@ -1002,10 +1002,14 @@ public final class SuperPDPSettings: ObservableObject {
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.superpdp.credentials.v1") }
+    private var clientSecretKeychainKey: String { env.key("facturx.superpdp.clientSecret.v1") }
 
+    /// `clientSecret` n'est jamais persisté dans le JSON UserDefaults : il vit
+    /// uniquement dans le Keychain (voir `KeychainStore`).
     public init() {
         if let data = defaults.data(forKey: env.key("facturx.superpdp.credentials.v1")),
-           let decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+           var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+            decoded.clientSecret = KeychainStore.get(forKey: env.key("facturx.superpdp.clientSecret.v1")) ?? ""
             credentials = decoded
         } else {
             credentials = SuperPDPCredentials(clientID: "", clientSecret: "")
@@ -1013,8 +1017,11 @@ public final class SuperPDPSettings: ObservableObject {
     }
 
     public func save() {
-        if let data = try? JSONEncoder().encode(credentials) {
+        var toPersist = credentials
+        toPersist.clientSecret = ""
+        if let data = try? JSONEncoder().encode(toPersist) {
             defaults.set(data, forKey: storageKey)
         }
+        KeychainStore.set(credentials.clientSecret, forKey: clientSecretKeychainKey)
     }
 }
