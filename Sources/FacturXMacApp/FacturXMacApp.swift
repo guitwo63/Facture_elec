@@ -2733,6 +2733,7 @@ struct InvoiceEditorView: View {
                             .font(.headline)
                     }
                 }.lockable(fieldLocked)
+                AttachmentsAndCommentSection(attachments: $invoice.attachments, internalComment: $invoice.internalComment, locked: fieldLocked)
                 statusJournalSection
             }.padding()
         }
@@ -8027,6 +8028,95 @@ struct VATRatePicker: View {
     }
 }
 
+/// Pièces jointes + commentaire interne, factorisés car identiques sur facture/commande/devis.
+struct AttachmentsAndCommentSection: View {
+    @Binding var attachments: [Attachment]
+    @Binding var internalComment: String?
+    var locked: Bool = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Pièces jointes", systemImage: "paperclip").font(.headline)
+                    Spacer()
+                    Button {
+                        addAttachments()
+                    } label: { Label("Ajouter…", systemImage: "plus") }
+                        .buttonStyle(.bordered)
+                        .disabled(locked)
+                }
+                if let errorMessage {
+                    Text(errorMessage).font(.caption).foregroundStyle(.red)
+                }
+                if attachments.isEmpty {
+                    Text("Aucune pièce jointe.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(attachments) { att in
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc").foregroundStyle(.secondary)
+                            Text(att.fileName).lineLimit(1)
+                            Spacer()
+                            Text(att.sizeDescription).font(.caption).foregroundStyle(.secondary)
+                            Button {
+                                saveAttachment(att)
+                            } label: { Image(systemName: "square.and.arrow.down") }
+                                .buttonStyle(.borderless)
+                                .help("Enregistrer sous…")
+                            if !locked {
+                                Button(role: .destructive) {
+                                    attachments.removeAll { $0.id == att.id }
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Retirer")
+                            }
+                        }
+                    }
+                }
+                Divider()
+                Label("Commentaire interne (non transmis au client, absent du PDF/XML)", systemImage: "lock.doc")
+                    .font(.caption.bold()).foregroundStyle(.secondary)
+                TextField("Commentaire interne", text: Binding($internalComment, replacingNilWith: ""), axis: .vertical)
+                    .lineLimit(2...5)
+                    .disabled(locked)
+            }.padding(8)
+        }
+    }
+
+    private func addAttachments() {
+        errorMessage = nil
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.title = "Ajouter une pièce jointe"
+        guard panel.runModal() == .OK else { return }
+        var skipped: [String] = []
+        for url in panel.urls {
+            guard let data = try? Data(contentsOf: url) else {
+                skipped.append(url.lastPathComponent)
+                continue
+            }
+            guard data.count <= Attachment.maxSizeBytes else {
+                skipped.append("\(url.lastPathComponent) (> 10 Mo)")
+                continue
+            }
+            attachments.append(Attachment(fileName: url.lastPathComponent, data: data))
+        }
+        if !skipped.isEmpty {
+            errorMessage = "Non ajouté(s) : \(skipped.joined(separator: ", "))."
+        }
+    }
+
+    private func saveAttachment(_ attachment: Attachment) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = attachment.fileName
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? attachment.data.write(to: url)
+    }
+}
+
 struct OrderPartySection: View {
     enum Role {
         case buyer, seller
@@ -9024,6 +9114,9 @@ struct QuoteEditorView: View {
                         .disabled(isLocked)
                 }
                 Section {
+                    AttachmentsAndCommentSection(attachments: $quote.attachments, internalComment: $quote.internalComment, locked: isLocked)
+                }
+                Section {
                     HStack {
                         Text("Total HT")
                         Spacer()
@@ -9446,6 +9539,8 @@ struct OrderEditorView: View {
                         TextField("Notes libres", text: Binding($order.notes, replacingNilWith: ""))
                     }.padding(8)
                 }.lockable(fieldLocked)
+
+                AttachmentsAndCommentSection(attachments: $order.attachments, internalComment: $order.internalComment, locked: fieldLocked)
 
                 GroupBox("Factures et avoirs liés") {
                     VStack(alignment: .leading, spacing: 8) {

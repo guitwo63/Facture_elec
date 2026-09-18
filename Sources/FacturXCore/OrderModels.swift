@@ -148,6 +148,9 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
     public var requestedResponseTypeCode: String
     public var companyID: UUID?
     public var customStatusID: String?
+    public var attachments: [Attachment]
+    /// Distinct de `notes` : remarque interne à l'équipe, jamais incluse dans le XML généré.
+    public var internalComment: String?
 
     public init(
         id: UUID = UUID(),
@@ -170,7 +173,9 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         notes: String? = nil,
         requestedResponseTypeCode: String = "AC",
         companyID: UUID? = nil,
-        customStatusID: String? = nil
+        customStatusID: String? = nil,
+        attachments: [Attachment] = [],
+        internalComment: String? = nil
     ) {
         self.id = id
         self.number = number
@@ -193,12 +198,14 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         self.requestedResponseTypeCode = requestedResponseTypeCode
         self.companyID = companyID
         self.customStatusID = customStatusID
+        self.attachments = attachments
+        self.internalComment = internalComment
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, type, status, issueDate, requestedDeliveryDate, currency, profile, buyer, seller
         case buyerReference, quotationRef, contractRef, blanketOrderRef, previousOrderChangeRef, previousOrderResponseRef
-        case lines, notes, requestedResponseTypeCode, companyID, customStatusID
+        case lines, notes, requestedResponseTypeCode, companyID, customStatusID, attachments, internalComment
     }
 
     public init(from decoder: Decoder) throws {
@@ -224,6 +231,8 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         requestedResponseTypeCode = try c.decodeIfPresent(String.self, forKey: .requestedResponseTypeCode) ?? "AC"
         customStatusID = try c.decodeIfPresent(String.self, forKey: .customStatusID)
         companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
+        attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        internalComment = try c.decodeIfPresent(String.self, forKey: .internalComment)
     }
 
     public var lineTotal: Double {

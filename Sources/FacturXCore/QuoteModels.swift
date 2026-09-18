@@ -68,6 +68,9 @@ public struct Quote: Codable, Hashable, Identifiable {
     public var notes: String?
     public var convertedInvoiceNumber: String?
     public var convertedOrderNumber: String?
+    public var attachments: [Attachment]
+    /// Distinct de `notes` : remarque interne à l'équipe, jamais incluse sur le document.
+    public var internalComment: String?
 
     public init(
         id: UUID = UUID(),
@@ -82,7 +85,9 @@ public struct Quote: Codable, Hashable, Identifiable {
         lines: [InvoiceLine] = [],
         notes: String? = nil,
         convertedInvoiceNumber: String? = nil,
-        convertedOrderNumber: String? = nil
+        convertedOrderNumber: String? = nil,
+        attachments: [Attachment] = [],
+        internalComment: String? = nil
     ) {
         self.id = id
         self.number = number
@@ -97,11 +102,13 @@ public struct Quote: Codable, Hashable, Identifiable {
         self.notes = notes
         self.convertedInvoiceNumber = convertedInvoiceNumber
         self.convertedOrderNumber = convertedOrderNumber
+        self.attachments = attachments
+        self.internalComment = internalComment
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, number, status, issueDate, validUntil, currency, seller, buyer, companyID, lines, notes
-        case convertedInvoiceNumber, convertedOrderNumber
+        case convertedInvoiceNumber, convertedOrderNumber, attachments, internalComment
     }
 
     public init(from decoder: Decoder) throws {
@@ -119,6 +126,8 @@ public struct Quote: Codable, Hashable, Identifiable {
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         convertedInvoiceNumber = try c.decodeIfPresent(String.self, forKey: .convertedInvoiceNumber)
         convertedOrderNumber = try c.decodeIfPresent(String.self, forKey: .convertedOrderNumber)
+        attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        internalComment = try c.decodeIfPresent(String.self, forKey: .internalComment)
     }
 
     public var lineTotal: Double {
