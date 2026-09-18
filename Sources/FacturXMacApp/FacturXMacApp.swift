@@ -3153,7 +3153,7 @@ struct InvoiceEditorView: View {
             superPDPMessage = "Facture déjà déposée sur SUPER PDP (id distant \(rid)). Ré-interrogez le statut plutôt que de redéposer."
             return
         }
-        if invoice.status == .accepted || invoice.status == .paid || invoice.status == .cancelled {
+        if invoice.status == .accepted || invoice.status == .partiallyPaid || invoice.status == .paid || invoice.status == .cancelled {
             superPDPMessage = "Dépôt refusé : la facture est déjà « \(invoice.status.label) ». Un dépôt n'est possible que depuis Brouillon / Validée / Transmise."
             return
         }
@@ -3429,7 +3429,7 @@ struct InvoiceEditorView: View {
     private func sendInvoiceStatusAlertIfNeeded(_ newStatus: InvoiceStatus) {
         let smtp = smtpSettings.credentials
         guard smtp.alertsEnabled, smtp.alertOnInvoiceStatusChange, smtp.isConfigured,
-              [InvoiceStatus.accepted, .disputed, .refused, .paid, .cancelled].contains(newStatus),
+              [InvoiceStatus.accepted, .disputed, .refused, .partiallyPaid, .paid, .cancelled].contains(newStatus),
               let recipient = auth.currentUser?.username else { return }
         let invoiceNumber = invoice.number
         let label = newStatus.label
@@ -6628,7 +6628,7 @@ struct ValueTablesView: View {
             // `Invoice.status` est typé sur l'enum InvoiceStatus, un statut personnalisé ne
             // pourrait donc jamais être assigné à une facture — il n'aurait fait que
             // réapparaître comme entrée orpheline (voir InvoiceStatusStore.load()).
-            Text("Personnalisez le libellé des 8 statuts fonctionnels. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'équivalent envoyé à SUPER PDP ; les transitions affichent le cycle de vie normé.")
+            Text("Personnalisez le libellé des 9 statuts fonctionnels. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'équivalent envoyé à SUPER PDP ; les transitions affichent le cycle de vie normé.")
                 .font(.caption).foregroundStyle(.secondary).padding(12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {

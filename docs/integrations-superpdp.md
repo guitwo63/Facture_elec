@@ -226,7 +226,7 @@ concrets, rencontrés en construisant les sections précédentes :
 **Décision : revenir à un statut fonctionnel réduit et stable, avec une passerelle isolée
 vers le détail des événements PDP.**
 
-### `InvoiceStatus` (8 cas, stable)
+### `InvoiceStatus` (9 cas, stable — voir aussi section 11)
 
 | Statut | Rôle | Verrouille |
 |---|---|---|
@@ -236,7 +236,8 @@ vers le détail des événements PDP.**
 | `accepted` | Acceptée (métier) | oui |
 | `disputed` | Contestée / en litige | oui |
 | `refused` | Refusée (métier), éditable pour réémettre | non |
-| `paid` | Payée | oui |
+| `partiallyPaid` | Payée partiellement (ajouté section 11) | oui |
+| `paid` | Payée (en totalité) | oui |
 | `cancelled` | Annulée (forçage admin) | oui |
 
 ### Codes réforme corrigés au passage (`InvoiceStatusStore.reformCode`)
@@ -247,6 +248,7 @@ vers le détail des événements PDP.**
 | `accepted` | **`fr:205`** | `"fr:207"` (erroné — "Contestée") |
 | `disputed` | `fr:207` | absent |
 | `refused` | `fr:210` | inchangé |
+| `partiallyPaid` | `fr:212` (même code que `paid`, section 11) | n'existait pas |
 | `paid` | `fr:212` | inchangé |
 | `draft`/`issued`/`cancelled` | aucun | `cancelled` avait `"fr:320"` (code inexistant) |
 
@@ -302,3 +304,41 @@ sens ici : un code SUPER PDP pas encore connu de l'app (ex. `fr:220`, ajouté en
 signification publiée au moment de l'écriture) peut être configuré dès que sa signification
 est connue, sans mise à jour de l'app. Les 16 codes officiels connus par défaut (fr:200-213,
 fr:220, fr:501) restent non supprimables ; un code ajouté par l'administrateur l'est.
+
+## 11. Ajout du statut « Payée partiellement » (2026-09-18)
+
+Demande initiale : pouvoir ajouter une nouvelle valeur dans la table des statuts de facture
+(bouton "Nouvelle valeur" retiré section 9). Refusé tel quel — `Invoice.status` est typé sur
+l'enum `InvoiceStatus` fermé, une entrée ajoutée depuis les réglages n'aurait jamais pu être
+assignée à une vraie facture (même problème que le bug des entrées orphelines, section 9).
+Clarifié avec l'utilisateur : il fallait un vrai 9ᵉ cas d'enum, pas une étiquette décorative.
+Statut retenu : **`partiallyPaid`** — l'AIFE distingue `PAYEE_PARTIELLEMENT` de
+`PAYEE_TOTALEMENT`/`ENCAISSEE`, jusque-là confondus dans le seul `paid`.
+
+- **Rang de cycle de vie** : strictement entre `accepted`/`disputed`/`refused` (3) et
+  `paid`/`cancelled` (désormais 5) — `partiallyPaid` prend le rang 4. Nécessaire pour que
+  recevoir "paid" après "partiallyPaid" compte comme un avancement (`isAdvance`, comparaison
+  stricte `>` dans `refreshSuperPDPStatus`/`PDPPeriodicSyncEngine`) plutôt que de rester bloqué.
+- **Transitions** : `accepted → partiallyPaid → paid`, avec `partiallyPaid → disputed`
+  toujours possible (un litige peut survenir après un premier règlement partiel).
+- **Code réforme** : `fr:212`, **le même que `paid`** — la table officielle fr:2XX n'a qu'un
+  événement générique "Paiement reçu", pas de distinction partiel/total au niveau du code
+  réseau (le montant réel se transmettrait via `reportedData`, pas via le statut). Documenté
+  dans `InvoiceStatusStore.reformCode` pour qu'un futur lecteur ne s'étonne pas du doublon.
+- **Réception** : volontairement asymétrique. `SuperPDPStatusCodeStore` fait toujours
+  résoudre `fr:212` reçu vers `.paid` (paiement total) — le statut réseau seul ne dit pas si
+  le montant reçu couvre la facture en entier. `partiallyPaid` reste donc un statut **posé
+  localement par le comptable**, jamais déduit automatiquement d'un événement PDP reçu.
+  Réglable dans Réglages > Tables > Statuts SUPER PDP si SUPER PDP précise un jour la
+  distinction par code.
+- **Verrouillage** : oui, comme tous les statuts post-acceptation.
+- **Pas de suivi de montant** : l'app ne stocke pas "combien reste dû" — `partiallyPaid` est
+  une étiquette de statut, pas un solde. Hors périmètre de cette demande ; à revisiter si le
+  besoin apparaît (nécessiterait un champ dédié sur `Invoice` et une UI de saisie du montant).
+- **Sur une installation existante** : `transitionCodes` est volontairement admin-modifiable
+  (case à cocher dans l'éditeur de statut, Réglages > Tables > Statuts des factures) — `load()`
+  ne le réaligne donc jamais tout seul sur les valeurs par défaut du code (contrairement à
+  `reformCode`, non éditable, réaligné à chaque chargement). Une table déjà personnalisée pour
+  "Acceptée" ne gagne pas automatiquement "Payée partiellement" comme cible : il faut cocher
+  la case manuellement une fois. Seul le nouveau statut lui-même (id inédit) reçoit ses
+  transitions par défaut (`disputed`, `paid`) au premier chargement, comme toute nouvelle ligne.

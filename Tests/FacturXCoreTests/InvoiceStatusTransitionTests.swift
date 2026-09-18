@@ -39,6 +39,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         XCTAssertEqual(store.override(for: .accepted).reformCode, "fr:205")
         XCTAssertEqual(store.override(for: .disputed).reformCode, "fr:207")
         XCTAssertEqual(store.override(for: .refused).reformCode, "fr:210")
+        XCTAssertEqual(store.override(for: .partiallyPaid).reformCode, "fr:212", "même code que .paid : fr:2XX n'a qu'un événement générique \"Paiement reçu\"")
         XCTAssertEqual(store.override(for: .paid).reformCode, "fr:212")
         XCTAssertNil(store.override(for: .draft).reformCode)
         XCTAssertNil(store.override(for: .issued).reformCode)
@@ -83,7 +84,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
 
         let store = InvoiceStatusStore()
-        XCTAssertEqual(store.overrides.count, InvoiceStatus.allCases.count, "seuls les 8 statuts actuels doivent rester")
+        XCTAssertEqual(store.overrides.count, InvoiceStatus.allCases.count, "seuls les statuts actuels doivent rester")
         XCTAssertNil(store.overrides.first { $0.id == "sentToPDP" })
         XCTAssertNil(store.overrides.first { $0.id == "custom-abc123" })
     }
@@ -97,6 +98,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         XCTAssertTrue(InvoiceStatus.sent.locksInvoice)
         XCTAssertTrue(InvoiceStatus.accepted.locksInvoice)
         XCTAssertTrue(InvoiceStatus.disputed.locksInvoice)
+        XCTAssertTrue(InvoiceStatus.partiallyPaid.locksInvoice)
         XCTAssertTrue(InvoiceStatus.paid.locksInvoice)
         XCTAssertTrue(InvoiceStatus.cancelled.locksInvoice)
     }
@@ -114,10 +116,63 @@ final class InvoiceStatusTransitionTests: XCTestCase {
     }
 
     func testLifecycleRankIsMonotonicAlongTheHappyPath() {
-        let happyPath: [InvoiceStatus] = [.draft, .issued, .sent, .accepted, .paid]
+        let happyPath: [InvoiceStatus] = [.draft, .issued, .sent, .accepted, .partiallyPaid, .paid]
         for (a, b) in zip(happyPath, happyPath.dropFirst()) {
             XCTAssertLessThanOrEqual(a.lifecycleRank, b.lifecycleRank, "\(a) devrait précéder ou égaler \(b) dans le cycle de vie")
         }
+    }
+
+    // MARK: - Paiement partiel (2026-09-18)
+
+    /// Ajouté à la demande explicite de l'utilisateur : distingue un paiement partiel d'un
+    /// paiement total (AIFE PAYEE_PARTIELLEMENT vs PAYEE_TOTALEMENT), jusque-là confondus
+    /// dans le seul statut `.paid`.
+    func testAcceptedInvoiceCanBePartiallyPaidThenFullyPaid() {
+        XCTAssertTrue(InvoiceStatus.accepted.allowedTransitions().contains(.partiallyPaid))
+        XCTAssertTrue(InvoiceStatus.partiallyPaid.allowedTransitions().contains(.paid))
+        XCTAssertTrue(InvoiceStatus.partiallyPaid.allowedTransitions().contains(.disputed), "un litige reste possible après un paiement partiel")
+    }
+
+    /// Doit être strictement entre accepted/disputed/refused et paid/cancelled : sinon
+    /// recevoir "paid" de SUPER PDP après "partiallyPaid" ne compterait pas comme un
+    /// avancement (`isAdvance` dans `refreshSuperPDPStatus`/`PDPPeriodicSyncEngine`,
+    /// comparaison stricte `>`), et le statut resterait bloqué à "partiellement payée".
+    func testPartiallyPaidRankSitsStrictlyBetweenAcceptedAndPaid() {
+        XCTAssertGreaterThan(InvoiceStatus.partiallyPaid.lifecycleRank, InvoiceStatus.accepted.lifecycleRank)
+        XCTAssertLessThan(InvoiceStatus.partiallyPaid.lifecycleRank, InvoiceStatus.paid.lifecycleRank)
+    }
+
+    /// Simule une table persistée avant l'ajout de `partiallyPaid` (aucune entrée pour cet
+    /// id, comme sur une installation existante) : `load()` doit l'ajouter avec ses valeurs
+    /// par défaut, sans toucher aux autres lignes déjà présentes.
+    func testLoadAddsANewlyIntroducedStatusWithItsDefaults() throws {
+        let withoutPartiallyPaid = InvoiceStatusStore.defaults.filter { $0.id != InvoiceStatus.partiallyPaid.rawValue }
+        let data = try JSONEncoder().encode(withoutPartiallyPaid)
+        UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
+
+        let store = InvoiceStatusStore()
+        let added = store.override(for: .partiallyPaid)
+        XCTAssertEqual(added.reformCode, "fr:212")
+        XCTAssertEqual(Set(added.transitionCodes), Set([InvoiceStatus.disputed.rawValue, InvoiceStatus.paid.rawValue]))
+    }
+
+    /// `transitionCodes` est admin-modifiable (case à cocher dans l'éditeur de statut,
+    /// Réglages > Tables > Statuts des factures) — contrairement à `reformCode`, `load()` ne
+    /// doit jamais l'écraser au profit des valeurs par défaut du code, sous peine de perdre
+    /// silencieusement une personnalisation existante à chaque redémarrage. Conséquence
+    /// pratique : une table "Acceptée" déjà personnalisée avant l'ajout de `partiallyPaid` ne
+    /// le gagne pas automatiquement comme cible — il faut cocher la case une fois.
+    func testLoadNeverOverwritesExistingCustomizedTransitionCodes() throws {
+        var customized = InvoiceStatusStore.defaults
+        guard let idx = customized.firstIndex(where: { $0.id == InvoiceStatus.accepted.rawValue }) else {
+            return XCTFail("Statut accepted introuvable")
+        }
+        customized[idx].transitionCodes = [InvoiceStatus.paid.rawValue]
+        let data = try JSONEncoder().encode(customized)
+        UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
+
+        let store = InvoiceStatusStore()
+        XCTAssertEqual(store.override(for: .accepted).transitionCodes, [InvoiceStatus.paid.rawValue])
     }
 
     // MARK: - Règle AIFE : accepted ne redevient jamais refused directement

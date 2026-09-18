@@ -439,6 +439,7 @@ public enum InvoiceStatus: String, CaseIterable {
     case accepted
     case disputed
     case refused
+    case partiallyPaid
     case paid
     case cancelled
 
@@ -450,6 +451,7 @@ public enum InvoiceStatus: String, CaseIterable {
         case .accepted: return "Acceptée"
         case .disputed: return "Contestée"
         case .refused: return "Refusée"
+        case .partiallyPaid: return "Payée partiellement"
         case .paid: return "Payée"
         case .cancelled: return "Annulée"
         }
@@ -463,6 +465,7 @@ public enum InvoiceStatus: String, CaseIterable {
         case .accepted: return "checkmark.seal.fill"
         case .disputed: return "exclamationmark.bubble.fill"
         case .refused: return "xmark.octagon.fill"
+        case .partiallyPaid: return "circle.lefthalf.filled"
         case .paid: return "checkmark.circle.fill"
         case .cancelled: return "minus.circle.fill"
         }
@@ -476,6 +479,7 @@ public enum InvoiceStatus: String, CaseIterable {
         case .accepted: return "2E8B57"
         case .disputed: return "D35400"
         case .refused: return "C0392B"
+        case .partiallyPaid: return "6FA287"
         case .paid: return "1E7E34"
         case .cancelled: return "8C8C8C"
         }
@@ -484,13 +488,16 @@ public enum InvoiceStatus: String, CaseIterable {
     public var locksInvoice: Bool {
         switch self {
         case .draft, .refused: return false
-        case .issued, .sent, .accepted, .disputed, .paid, .cancelled: return true
+        case .issued, .sent, .accepted, .disputed, .partiallyPaid, .paid, .cancelled: return true
         }
     }
 
     /// Ordre du cycle de vie (pour empêcher tout rapatriement rétrograde depuis la PDP).
     /// `accepted`/`disputed`/`refused` partagent le même rang : des issues différentes au
-    /// même point du cycle, pas une progression linéaire entre elles.
+    /// même point du cycle, pas une progression linéaire entre elles. `partiallyPaid` est
+    /// strictement après ce palier (un paiement partiel suppose une facture déjà acceptée)
+    /// et strictement avant `paid`/`cancelled`, pour que recevoir un paiement total après un
+    /// paiement partiel compte bien comme un avancement.
     public var lifecycleRank: Int {
         switch self {
         case .draft: return 0
@@ -499,8 +506,9 @@ public enum InvoiceStatus: String, CaseIterable {
         case .accepted: return 3
         case .disputed: return 3
         case .refused: return 3
-        case .paid: return 4
-        case .cancelled: return 4
+        case .partiallyPaid: return 4
+        case .paid: return 5
+        case .cancelled: return 5
         }
     }
 
@@ -517,9 +525,11 @@ public enum InvoiceStatus: String, CaseIterable {
         case .sent:
             return [.accepted, .disputed, .refused]
         case .accepted:
-            return [.disputed, .paid]
+            return [.disputed, .partiallyPaid, .paid]
         case .disputed:
             return [.accepted, .refused]
+        case .partiallyPaid:
+            return [.disputed, .paid]
         case .refused:
             return []
         case .paid:

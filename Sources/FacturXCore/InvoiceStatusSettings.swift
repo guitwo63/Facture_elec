@@ -58,6 +58,11 @@ public final class InvoiceStatusStore: ObservableObject {
         case .accepted: return "fr:205"   // Acceptée (AIFE "APPROUVEE")
         case .disputed: return "fr:207"   // Contestée (AIFE "LITIGEE")
         case .refused: return "fr:210"    // Refusée (AIFE "REFUSEE")
+        // Même code que .paid : la table officielle fr:2XX n'a qu'un événement générique
+        // "Paiement reçu" (AIFE distingue PAYEE_PARTIELLEMENT/PAYEE_TOTALEMENT côté
+        // fonctionnel, mais pas par un code réseau séparé). Le montant réel se distingue
+        // via les données déclarées (`reportedData`) jointes à l'envoi, pas par le code.
+        case .partiallyPaid: return "fr:212"
         case .paid: return "fr:212"       // Paiement reçu (AIFE "ENCAISSEE")
         default: return nil
         }

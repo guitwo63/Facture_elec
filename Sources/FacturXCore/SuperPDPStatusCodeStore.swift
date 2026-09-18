@@ -55,6 +55,10 @@ public final class SuperPDPStatusCodeStore: ObservableObject {
         PDPEventCodeOverride(id: "fr:209", label: "Complétée", isSystemDefined: true),
         PDPEventCodeOverride(id: "fr:210", label: "Refusée", functionalTransition: InvoiceStatus.refused.rawValue, isSystemDefined: true),
         PDPEventCodeOverride(id: "fr:211", label: "Paiement envoyé", isSystemDefined: true),
+        // fr:212 reçu resout toujours vers .paid (paiement total) : le statut réseau seul
+        // ne dit pas si le montant reçu couvre la facture en entier ou non. `.partiallyPaid`
+        // reste donc un statut posé localement par le comptable (jamais déduit d'un
+        // événement PDP reçu) ; réglable ici si SUPER PDP précise un jour la distinction.
         PDPEventCodeOverride(id: "fr:212", label: "Paiement reçu", functionalTransition: InvoiceStatus.paid.rawValue, isSystemDefined: true),
         PDPEventCodeOverride(id: "fr:213", label: "Rejetée (validation technique)", functionalTransition: InvoiceStatus.refused.rawValue, isSystemDefined: true),
         PDPEventCodeOverride(id: "fr:220", label: "Fr:220 (nouveau, signification non encore documentée par SUPER PDP)", isSystemDefined: true),
