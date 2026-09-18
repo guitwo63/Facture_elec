@@ -78,4 +78,68 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         XCTAssertFalse(InvoiceStatus.draft.locksInvoice)
         XCTAssertFalse(InvoiceStatus.rejected.locksInvoice, "un rejet doit rester modifiable pour être corrigé")
     }
+
+    // MARK: - Statuts de réforme ajoutés (fr:201-204, fr:208-209, fr:211, fr:213)
+
+    func testNewReformStatusesHaveTheExpectedReformCode() {
+        let store = InvoiceStatusStore()
+        XCTAssertEqual(store.override(for: .sentToRecipient).reformCode, "fr:201")
+        XCTAssertEqual(store.override(for: .receivedByRecipient).reformCode, "fr:202")
+        XCTAssertEqual(store.override(for: .madeAvailable).reformCode, "fr:203")
+        XCTAssertEqual(store.override(for: .acknowledged).reformCode, "fr:204")
+        XCTAssertEqual(store.override(for: .onHold).reformCode, "fr:208")
+        XCTAssertEqual(store.override(for: .completed).reformCode, "fr:209")
+        XCTAssertEqual(store.override(for: .paymentSent).reformCode, "fr:211")
+        XCTAssertEqual(store.override(for: .rejectedByRecipient).reformCode, "fr:213")
+    }
+
+    /// Les statuts réseau (rapportés automatiquement par SUPER PDP, jamais créés par l'app)
+    /// n'ont aucune transition manuelle configurée par défaut — ils ne s'atteignent qu'en
+    /// recevant le statut réel depuis SUPER PDP (voir InvoiceEditorView.mapPDPStatusToLocal,
+    /// non testable ici : logique UI sans cible de test).
+    func testNetworkOnlyReformStatusesAreNotManuallyReachableByDefault() {
+        XCTAssertEqual(InvoiceStatus.sentToRecipient.allowedTransitions(), [])
+        XCTAssertEqual(InvoiceStatus.receivedByRecipient.allowedTransitions(), [])
+        XCTAssertEqual(InvoiceStatus.madeAvailable.allowedTransitions(), [])
+        XCTAssertEqual(InvoiceStatus.rejectedByRecipient.allowedTransitions(), [])
+    }
+
+    func testNetworkOnlyReformCodesMatchTheOnesFlaggedAsNonCreatable() {
+        for status in [InvoiceStatus.sentToPDP, .sentToRecipient, .receivedByRecipient, .madeAvailable, .rejectedByRecipient] {
+            let code = InvoiceStatusStore.reformCode(for: status)
+            XCTAssertNotNil(code)
+            XCTAssertTrue(InvoiceStatusStore.networkOnlyReformCodes.contains(code!), "\(status) (\(code!)) devrait être marqué non créable via l'API")
+        }
+        // Les codes réellement créables ne doivent pas être marqués à tort comme réseau seul.
+        for status in [InvoiceStatus.acknowledged, .onHold, .accepted, .rejected, .completed, .paymentSent, .paid] {
+            let code = InvoiceStatusStore.reformCode(for: status)
+            XCTAssertNotNil(code)
+            XCTAssertFalse(InvoiceStatusStore.networkOnlyReformCodes.contains(code!), "\(status) (\(code!)) est créable via l'API, ne devrait pas être marqué réseau seul")
+        }
+    }
+
+    /// Les statuts alternatifs à un même point du cycle de vie (accepted/rejected/
+    /// rejectedByRecipient après acknowledged) ne doivent jamais se "rétrograder" l'un
+    /// l'autre : même rang, pour que la synchronisation PDP (qui refuse tout recul) ne
+    /// bloque pas le passage légitime de l'un à l'autre.
+    func testAlternativeOutcomesAtTheSameLifecycleStageShareTheSameRank() {
+        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.rejected.lifecycleRank)
+        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.rejectedByRecipient.lifecycleRank)
+    }
+
+    func testLifecycleRankIsMonotonicAlongTheHappyPath() {
+        let happyPath: [InvoiceStatus] = [
+            .draft, .issued, .sentToPDP, .sentToRecipient, .receivedByRecipient,
+            .madeAvailable, .acknowledged, .accepted, .completed, .paymentSent, .paid
+        ]
+        for (a, b) in zip(happyPath, happyPath.dropFirst()) {
+            XCTAssertLessThanOrEqual(a.lifecycleRank, b.lifecycleRank, "\(a) devrait précéder ou égaler \(b) dans le cycle de vie")
+        }
+    }
+
+    func testAllNewReformStatusesLockTheInvoice() {
+        for status in [InvoiceStatus.sentToRecipient, .receivedByRecipient, .madeAvailable, .acknowledged, .onHold, .rejectedByRecipient, .completed, .paymentSent] {
+            XCTAssertTrue(status.locksInvoice, "\(status) devrait verrouiller la facture, comme les autres statuts transmis")
+        }
+    }
 }

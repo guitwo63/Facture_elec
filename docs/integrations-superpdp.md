@@ -136,3 +136,41 @@ Vérification faite directement dans `Sources/FacturXCore/SuperPDPService.swift`
 - **Gestion fine de l'annuaire SUPER PDP (P4.3)** — CRUD `directory_entries/{id}` : l'app consomme déjà l'annuaire en lecture (recherche) ; créer/gérer ses propres entrées d'annuaire depuis l'app n'apporte de valeur que si l'utilisateur gère l'inscription de plusieurs sociétés lui-même plutôt que via le portail SUPER PDP.
 
 **Recommandation inchangée** : rien dans ce lot ne justifie un développement immédiat sans un besoin utilisateur explicite, à l'exception de l'e-reporting si des flux B2C/B2B-int existent réellement dans l'activité facturée par l'app — dans ce cas, ce serait la seule priorité réglementaire (par opposition à fonctionnelle) de cette liste.
+
+## 7. Mise à jour — complétion de la table des statuts de facture (2026-09-18)
+
+Comparaison de `InvoiceStatus`/`InvoiceStatusStore.reformCode` avec la table officielle
+"Meaning of fr:* statuses" de la doc SUPER PDP (`https://superpdp.tech/openapi`, schéma de
+`POST /v1.beta/invoice_events`) :
+
+| Code officiel | Signification | Créable via l'API | Avant cette mise à jour |
+|---|---|---|---|
+| fr:200 | Déposée | non (posé au dépôt) | `sentToPDP` ✓ |
+| fr:201 | Envoyée | non | **absent** |
+| fr:202 | Reçue | non | **absent** |
+| fr:203 | Mise à disposition | non | **absent** |
+| fr:204 | Accusé de réception | oui | **absent** |
+| fr:205 | Acceptée | oui | absent (voir note ci-dessous) |
+| fr:206 | Partiellement acceptée | oui | utilisé à tort pour `rejected` |
+| fr:207 | Contestée | oui | utilisé à tort pour `accepted` |
+| fr:208 | En attente | oui | **absent** |
+| fr:209 | Complétée | oui | **absent** |
+| fr:210 | Refusée | oui | absent (voir note ci-dessous) |
+| fr:211 | Paiement envoyé | oui | **absent** |
+| fr:212 | Paiement reçu | oui | `paid` ✓ (correct) |
+| fr:213 | Rejetée | non | **absent** |
+| fr:220 | (nouveau 1.33.0, pas encore documenté) | oui | non ajouté (pas de signification publiée) |
+| fr:320 | — n'existe pas dans la table officielle | — | utilisé à tort pour `cancelled` |
+
+**Ajouté dans cette évolution** (statuts manquants uniquement, sans toucher aux codes déjà en
+usage) : `sentToRecipient` (fr:201), `receivedByRecipient` (fr:202), `madeAvailable` (fr:203),
+`acknowledged` (fr:204), `onHold` (fr:208), `completed` (fr:209), `paymentSent` (fr:211),
+`rejectedByRecipient` (fr:213). Les statuts réseau non créables via l'API (fr:200-203, fr:213)
+ne sont accessibles qu'en réception (synchronisation du statut PDP), jamais via une transition
+manuelle — voir `InvoiceStatusStore.networkOnlyReformCodes`.
+
+**Non traité, volontairement séparé** : `accepted`/`rejected` restent sur fr:207/fr:206 (qui
+signifient en réalité "Contestée"/"Partiellement acceptée", pas "Acceptée"/"Rejetée" — les bons
+codes seraient fr:205/fr:210) et `cancelled` reste sur fr:320 (qui n'existe pas du tout dans la
+table officielle). Corriger ces trois codes déjà utilisés en production est un chantier distinct,
+pas fait ici pour ne pas mélanger "compléter la table" et "corriger un mauvais code en usage".

@@ -43,19 +43,36 @@ public final class InvoiceStatusStore: ObservableObject {
     }
 
     /// Code d'événement SUPER PDP associé à chaque statut standard (table officielle
-    /// de l'API SUPER PDP — cf. docs/integrations-superpdp.md). Non modifiable par
-    /// l'utilisateur : c'est cette table, et non la donnée persistée, qui fait foi
-    /// (voir `load()`), pour éviter qu'une valeur erronée reste bloquée en local.
+    /// "Meaning of fr:* statuses" de la doc SUPER PDP — https://superpdp.tech/openapi).
+    /// Non modifiable par l'utilisateur : c'est cette table, et non la donnée persistée,
+    /// qui fait foi (voir `load()`), pour éviter qu'une valeur erronée reste bloquée en
+    /// local. `accepted`/`rejected`/`cancelled` gardent volontairement leurs codes déjà en
+    /// usage (fr:207/fr:206/fr:320) — la correction vers les codes officiellement exacts
+    /// (fr:205/fr:210, et pas d'équivalent réforme pour "Annulée") est un chantier séparé.
     static func reformCode(for status: InvoiceStatus) -> String? {
         switch status {
-        case .paid: return "fr:212"       // Facture encaissée
-        case .cancelled: return "fr:320"  // Facture annulée
-        case .accepted: return "fr:207"   // Accepté par le destinataire
-        case .rejected: return "fr:206"   // Refusé par le destinataire
-        case .sentToPDP: return "200"
+        case .sentToPDP: return "200"            // Déposée — jamais envoyé isolément, voir notifyPDPStatusChange
+        case .sentToRecipient: return "fr:201"   // Envoyée — réseau, non créable via l'API
+        case .receivedByRecipient: return "fr:202" // Reçue — réseau, non créable via l'API
+        case .madeAvailable: return "fr:203"     // Mise à disposition — réseau, non créable via l'API
+        case .acknowledged: return "fr:204"      // Accusé de réception
+        case .onHold: return "fr:208"            // En attente
+        case .accepted: return "fr:207"          // Accepté par le destinataire (code à corriger, voir doc de l'enum)
+        case .rejected: return "fr:206"          // Refusé par le destinataire (code à corriger, voir doc de l'enum)
+        case .rejectedByRecipient: return "fr:213" // Rejetée — réseau, non créable via l'API
+        case .completed: return "fr:209"         // Complétée
+        case .paymentSent: return "fr:211"       // Paiement envoyé
+        case .paid: return "fr:212"              // Facture encaissée
+        case .cancelled: return "fr:320"         // Facture annulée (code invalide côté réforme, voir doc de l'enum)
         default: return nil
         }
     }
+
+    /// Codes réseau que SUPER PDP rapporte automatiquement (déposée exceptée, portée par
+    /// le dépôt lui-même) mais que l'API ne permet pas de créer via `POST /invoice_events`
+    /// (absents de l'énumération `status_code_create` documentée). Un statut associé à l'un
+    /// de ces codes n'est donc jamais envoyé manuellement — seulement reçu en synchronisation.
+    public static let networkOnlyReformCodes: Set<String> = ["200", "fr:200", "fr:201", "fr:202", "fr:203", "fr:213"]
 
     public init() {
         self.overrides = InvoiceStatusStore.defaults
