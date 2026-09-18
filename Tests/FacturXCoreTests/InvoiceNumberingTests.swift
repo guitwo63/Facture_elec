@@ -105,7 +105,12 @@ final class InvoiceNumberingTests: XCTestCase {
     /// milieu de la séquence décale ce compte, et la prochaine facture créée pouvait alors
     /// recevoir un numéro déjà pris par une facture restante de numéro plus élevé — un vrai
     /// doublon de numéro de facture, pas seulement une réutilisation esthétique.
-    func testDeletingAMiddleInvoiceDoesNotProduceADuplicateNumberAfterwards() {
+    ///
+    /// Le comportement voulu est allé plus loin ensuite (retour utilisateur après la
+    /// première correction) : un numéro jamais "consommé" par une facture existante doit
+    /// être recyclé pour la prochaine facture plutôt que de rester à jamais inutilisé —
+    /// voir `testDeletingAMiddleInvoiceRecyclesItsFreedNumber` ci-dessous.
+    func testDeletingAMiddleInvoiceNeverProducesADuplicateNumber() {
         let store = InvoiceStore()
         store.numberPrefix = "FAC"
         store.numberIncludeYear = false
@@ -127,8 +132,29 @@ final class InvoiceNumberingTests: XCTestCase {
         XCTAssertEqual(store.invoices.map(\.number).sorted(), ["FAC0001", "FAC0003"])
 
         let n4 = store.nextNumber()
-        XCTAssertEqual(n4, "FAC0004", "doit repartir après le plus haut numéro existant (FAC0003), pas réutiliser FAC0003")
         XCTAssertFalse(store.invoices.contains { $0.number == n4 }, "le nouveau numéro ne doit jamais déjà exister")
+    }
+
+    /// Le numéro d'une facture supprimée (FAC0002, jamais consommé par une facture restante)
+    /// est recyclé pour la prochaine facture créée, au lieu de toujours repartir après le
+    /// plus haut numéro existant (FAC0003) — demande explicite après test de la première
+    /// version de cette correction.
+    func testDeletingAMiddleInvoiceRecyclesItsFreedNumber() {
+        let store = InvoiceStore()
+        store.numberPrefix = "FAC"
+        store.numberIncludeYear = false
+        store.numberUseSeparator = false
+        let party = InvoiceParty(name: "", street: "", postcode: "", city: "")
+
+        let inv1 = Invoice(number: store.nextNumber(), seller: party, buyer: party)
+        store.upsert(inv1)
+        let inv2 = Invoice(number: store.nextNumber(), seller: party, buyer: party)
+        store.upsert(inv2)
+        let inv3 = Invoice(number: store.nextNumber(), seller: party, buyer: party)
+        store.upsert(inv3)
+
+        store.delete(inv2)
+        XCTAssertEqual(store.nextNumber(), "FAC0002", "FAC0002 est libre (aucune facture restante ne le porte) : il doit être recyclé")
     }
 
     // MARK: - Condition de paiement par défaut

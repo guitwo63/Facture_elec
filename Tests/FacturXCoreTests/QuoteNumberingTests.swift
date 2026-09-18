@@ -68,7 +68,7 @@ final class QuoteNumberingTests: XCTestCase {
         XCTAssertEqual(store.nextNumber(companyID: cid), "DEV0001")
     }
 
-    /// Régression : voir InvoiceNumberingTests.testDeletingAMiddleInvoiceDoesNotProduceADuplicateNumberAfterwards.
+    /// Régression : voir InvoiceNumberingTests.testDeletingAMiddleInvoiceNeverProducesADuplicateNumber.
     func testDeletingAMiddleQuoteDoesNotProduceADuplicateNumberAfterwards() {
         let store = QuoteStore()
         store.numberPrefix = "DEV"
@@ -85,8 +85,25 @@ final class QuoteNumberingTests: XCTestCase {
 
         store.delete(quote2)
         let n4 = store.nextNumber()
-        XCTAssertEqual(n4, "DEV0004")
         XCTAssertFalse(store.quotes.contains { $0.number == n4 })
+    }
+
+    /// Régression : voir InvoiceNumberingTests.testDeletingAMiddleInvoiceRecyclesItsFreedNumber.
+    func testDeletingAMiddleQuoteRecyclesItsFreedNumber() {
+        let store = QuoteStore()
+        store.numberPrefix = "DEV"
+        store.numberIncludeYear = false
+        store.numberUseSeparator = false
+
+        let quote1 = Quote(number: store.nextNumber(), seller: party(), buyer: party())
+        store.upsert(quote1)
+        let quote2 = Quote(number: store.nextNumber(), seller: party(), buyer: party())
+        store.upsert(quote2)
+        let quote3 = Quote(number: store.nextNumber(), seller: party(), buyer: party())
+        store.upsert(quote3)
+
+        store.delete(quote2)
+        XCTAssertEqual(store.nextNumber(), "DEV0002")
     }
 
     func testPersistsNumberingFormatAcrossReload() {
