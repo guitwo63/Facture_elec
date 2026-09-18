@@ -43,6 +43,24 @@ public final class OrderStore: ObservableObject {
         numberStart = defaults.object(forKey: numStartKey) as? Int ?? 1
         numberUseSeparator = defaults.object(forKey: numSepKey) as? Bool ?? true
         migrateBuyerSellerSemanticsIfNeeded()
+        fixInconsistentVATCategories()
+    }
+
+    /// Voir `InvoiceStore.fixInconsistentVATCategories()` — même correction, même bug
+    /// d'origine (sélecteurs de taux ne recalant pas la catégorie de TVA).
+    private func fixInconsistentVATCategories() {
+        var changed = false
+        for idx in orders.indices {
+            for lineIdx in orders[idx].lines.indices {
+                let line = orders[idx].lines[lineIdx]
+                if line.vatCategory != .standard && line.vatRate != 0 {
+                    orders[idx].lines[lineIdx].vatCategory = .standard
+                    orders[idx].lines[lineIdx].vatExemptionReason = nil
+                    changed = true
+                }
+            }
+        }
+        if changed { save() }
     }
 
     /// Avant cette version, `SalesOrder.buyer` recevait notre société et `.seller`

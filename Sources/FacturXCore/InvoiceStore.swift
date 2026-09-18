@@ -83,6 +83,29 @@ public final class InvoiceStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([UUID: InvoiceNumberingFormat].self, from: data) {
             numberFormatOverrides = decoded
         }
+        fixInconsistentVATCategories()
+    }
+
+    /// Corrige les lignes dont la catégorie de TVA est restée non standard (ex. "Z") alors
+    /// que le taux est non nul — séquelle du bug (corrigé le 2026-09-18) où certains
+    /// sélecteurs de taux (assistant "Facture guidée", devis) ne recalaient pas la catégorie
+    /// au changement de taux, produisant des factures rejetées par le validateur EN16931
+    /// (BR-Z-05/BR-Z-09) sans que l'UI ne permette de voir/corriger la catégorie devenue
+    /// incohérente (le sélecteur de catégorie n'est visible qu'à taux 0 %). Idempotent :
+    /// rejoué à chaque chargement plutôt que gardé derrière un drapeau one-shot.
+    private func fixInconsistentVATCategories() {
+        var changed = false
+        for idx in invoices.indices {
+            for lineIdx in invoices[idx].lines.indices {
+                let line = invoices[idx].lines[lineIdx]
+                if line.vatCategory != .standard && line.vatRate != 0 {
+                    invoices[idx].lines[lineIdx].vatCategory = .standard
+                    invoices[idx].lines[lineIdx].vatExemptionReason = nil
+                    changed = true
+                }
+            }
+        }
+        if changed { save() }
     }
 
     public func save() {

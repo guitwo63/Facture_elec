@@ -21,6 +21,24 @@ public final class QuoteStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([Quote].self, from: data) {
             quotes = decoded
         }
+        fixInconsistentVATCategories()
+    }
+
+    /// Voir `InvoiceStore.fixInconsistentVATCategories()` — même correction. Un devis n'émet
+    /// pas de XML lui-même, mais toInvoice()/toOrder() recopient les lignes telles quelles.
+    private func fixInconsistentVATCategories() {
+        var changed = false
+        for idx in quotes.indices {
+            for lineIdx in quotes[idx].lines.indices {
+                let line = quotes[idx].lines[lineIdx]
+                if line.vatCategory != .standard && line.vatRate != 0 {
+                    quotes[idx].lines[lineIdx].vatCategory = .standard
+                    quotes[idx].lines[lineIdx].vatExemptionReason = nil
+                    changed = true
+                }
+            }
+        }
+        if changed { save() }
     }
 
     public func save() {

@@ -176,6 +176,64 @@ final class VATCategoryTests: XCTestCase {
         XCTAssertTrue(xml.contains("<ram:ExemptionReason>Livraison intracommunautaire, article 262 ter I du CGI</ram:ExemptionReason>"))
     }
 
+    // MARK: - Migration des données existantes (InvoiceStore/OrderStore/QuoteStore)
+
+    /// Régression concrète : une facture créée avant le correctif du 2026-09-18 avait une
+    /// ligne à vatRate=20 mais vatCategory=.zeroRated (rejetée BR-Z-05/BR-Z-09 par SUPER PDP).
+    /// Comme le sélecteur de catégorie n'est visible qu'à taux 0 %, rien dans l'UI ne
+    /// permettait de voir ni corriger cette incohérence déjà enregistrée — d'où la migration
+    /// automatique au chargement, plutôt qu'une correction manuelle ligne par ligne.
+    func testInvoiceStoreAutoCorrectsInconsistentCategoryOnLoad() {
+        let key = "facturx.invoices.v1"
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let seedStore = InvoiceStore()
+        var invoice = seedStore.newDraft()
+        invoice.lines = [InvoiceLine(name: "Ligne corrompue", quantity: 1, unitPrice: 100, vatRate: 20,
+                                      vatCategory: .zeroRated, vatExemptionReason: "reliquat incohérent")]
+        seedStore.upsert(invoice)
+
+        let reloaded = InvoiceStore()
+        let fixedLine = reloaded.invoices.first(where: { $0.id == invoice.id })?.lines.first
+        XCTAssertEqual(fixedLine?.vatCategory, .standard)
+        XCTAssertNil(fixedLine?.vatExemptionReason)
+    }
+
+    func testOrderStoreAutoCorrectsInconsistentCategoryOnLoad() {
+        let key = "orderx.orders.v1"
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let seedStore = OrderStore()
+        var order = seedStore.newDraft()
+        order.lines = [InvoiceLine(name: "Ligne corrompue", quantity: 1, unitPrice: 100, vatRate: 20,
+                                    vatCategory: .reverseCharge, vatExemptionReason: "reliquat incohérent")]
+        seedStore.upsert(order)
+
+        let reloaded = OrderStore()
+        let fixedLine = reloaded.orders.first(where: { $0.id == order.id })?.lines.first
+        XCTAssertEqual(fixedLine?.vatCategory, .standard)
+        XCTAssertNil(fixedLine?.vatExemptionReason)
+    }
+
+    func testQuoteStoreAutoCorrectsInconsistentCategoryOnLoad() {
+        let key = "facturx.quotes.v1"
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+
+        let seedStore = QuoteStore()
+        var quote = seedStore.newDraft(seller: party("Vendeur"))
+        quote.lines = [InvoiceLine(name: "Ligne corrompue", quantity: 1, unitPrice: 100, vatRate: 20,
+                                    vatCategory: .export, vatExemptionReason: "reliquat incohérent")]
+        seedStore.upsert(quote)
+
+        let reloaded = QuoteStore()
+        let fixedLine = reloaded.quotes.first(where: { $0.id == quote.id })?.lines.first
+        XCTAssertEqual(fixedLine?.vatCategory, .standard)
+        XCTAssertNil(fixedLine?.vatExemptionReason)
+    }
+
     func testOrderXMLLineUsesTheLinesActualCategory() throws {
         let order = SalesOrder(
             number: "CMD-1", buyer: party("A"), seller: party("V"),
