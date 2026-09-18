@@ -237,22 +237,144 @@ struct LoginView: View {
     }
 }
 
+/// Écran plein cadre affiché à la place du reste de l'application tant que
+/// l'email du compte connecté n'est pas validé (voir `RootView.body`). Seule
+/// la saisie du code et son renvoi sont accessibles ; la déconnexion permet de
+/// changer de compte.
+struct EmailVerificationGateView: View {
+    let user: User
+    @EnvironmentObject var auth: AuthStore
+    @State private var code = ""
+    @State private var errorMessage: String?
+    @State private var infoMessage: String?
+    @State private var verifying = false
+    @State private var resending = false
+
+    /// Anti-spam simple côté UI : un nouvel envoi n'est proposé que 60 s après le
+    /// précédent (le compte lui-même n'a pas de limite côté serveur).
+    private var resendAvailable: Bool {
+        guard let sentAt = auth.users.first(where: { $0.id == user.id })?.emailVerificationSentAt else { return true }
+        return Date().timeIntervalSince(sentAt) > 60
+    }
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: "envelope.badge.shield.half.filled")
+                    .font(.system(size: 56))
+                    .foregroundStyle(Color.orange)
+                Text("Validez votre adresse email").font(.title.bold())
+                Text("Un code a été envoyé à \(user.username).\nSaisissez-le ci-dessous pour activer votre compte.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            VStack(spacing: 12) {
+                TextField("Code de validation", text: $code)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+                    .multilineTextAlignment(.center)
+                    .submitLabel(.go)
+                    .onSubmit { verify() }
+                if let err = errorMessage {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+                if let info = infoMessage {
+                    Text(info).font(.caption).foregroundStyle(.green)
+                }
+                Button {
+                    verify()
+                } label: {
+                    HStack {
+                        if verifying { ProgressView().controlSize(.small).tint(.white) }
+                        Label("Valider", systemImage: "checkmark.circle.fill")
+                    }
+                    .frame(width: 220)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || verifying)
+                Button {
+                    resend()
+                } label: {
+                    HStack {
+                        if resending { ProgressView().controlSize(.small) }
+                        Text("Renvoyer le code")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(resending || !resendAvailable)
+            }
+            Spacer()
+            Button("Se déconnecter", role: .destructive) { auth.logout() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private func verify() {
+        verifying = true
+        errorMessage = nil
+        infoMessage = nil
+        do {
+            try auth.verifyEmail(code: code, for: user)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        verifying = false
+    }
+
+    private func resend() {
+        resending = true
+        errorMessage = nil
+        infoMessage = nil
+        Task {
+            do {
+                try await auth.sendEmailVerificationCode(to: user)
+                infoMessage = "Un nouveau code a été envoyé."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            resending = false
+        }
+    }
+}
+
 // MARK: - Journal d'audit (B1)
 
 struct AuditLogView: View {
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var actionLabels: AuditActionLabelStore
     @State private var query = ""
     @State private var typeFilter: AuditObjectType? = nil
     @State private var statusOnly = false
 
+    private var isAdmin: Bool { auth.currentUser?.isAdmin == true }
+
+    /// Types d'objets visibles selon le rôle : un non-admin ne doit pas voir les
+    /// événements liés aux comptes utilisateurs (créations, verrouillages…), qui
+    /// relèvent de l'administration et pas du suivi métier des documents.
+    private var visibleObjectTypes: [AuditObjectType] {
+        AuditObjectType.allCases.filter { isAdmin || $0 != .user }
+    }
+
+    /// Entrées visibles pour le rôle courant, avant recherche/filtre de type.
+    private var visibleEntries: [AuditLogEntry] {
+        let all = auth.audit.entries
+        return isAdmin ? all : all.filter { $0.objectType != .user }
+    }
+
     var filtered: [AuditLogEntry] {
-        var result = auth.audit.entries
+        var result = visibleEntries
         if let t = typeFilter { result = result.filter { $0.objectType == t } }
         if statusOnly { result = result.filter { $0.action == "status_change" } }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
         return result.filter {
             $0.actor.lowercased().contains(q) || $0.action.lowercased().contains(q)
+            || actionLabels.label(for: $0.action).lowercased().contains(q)
             || $0.target.lowercased().contains(q) || $0.details.lowercased().contains(q)
             || ($0.objectCode ?? "").lowercased().contains(q)
             || ($0.statusFrom ?? "").lowercased().contains(q) || ($0.statusTo ?? "").lowercased().contains(q)
@@ -264,19 +386,21 @@ struct AuditLogView: View {
             HStack {
                 Text("Journal d'audit").font(.title2.bold())
                 Spacer()
-                Text("\(auth.audit.entries.count) / \(auth.audit.maxEntries)")
+                Text("\(visibleEntries.count) / \(auth.audit.maxEntries)")
                     .font(.caption).foregroundStyle(.secondary)
-                Button(role: .destructive) {
-                    auth.audit.clear()
-                } label: { Label("Vider", systemImage: "trash") }
-                    .buttonStyle(.bordered)
+                if isAdmin {
+                    Button(role: .destructive) {
+                        auth.audit.clear()
+                    } label: { Label("Vider", systemImage: "trash") }
+                        .buttonStyle(.bordered)
+                }
             }.padding(10)
             HStack {
                 TextField("Rechercher", text: $query)
                     .textFieldStyle(.roundedBorder)
                 Picker("Type", selection: $typeFilter) {
                     Text("Tous").tag(AuditObjectType?.none)
-                    ForEach(AuditObjectType.allCases, id: \.self) { t in
+                    ForEach(visibleObjectTypes, id: \.self) { t in
                         Text(t.label).tag(AuditObjectType?.some(t))
                     }
                 }
@@ -295,7 +419,7 @@ struct AuditLogView: View {
                 }.width(90)
                 TableColumn("Acteur") { e in Text(e.actor).font(.caption) }.width(120)
                 TableColumn("Code") { e in Text(e.objectCode ?? e.target).font(.caption) }.width(120)
-                TableColumn("Action") { e in Text(e.action).font(.caption) }.width(120)
+                TableColumn("Action") { e in Text(actionLabels.label(for: e.action)).font(.caption) }.width(160)
                 TableColumn("Détails") { e in
                     if e.action == "status_change" {
                         Text("\(e.statusFrom ?? "?") → \(e.statusTo ?? "?")")
@@ -441,6 +565,9 @@ struct UserManagementView: View {
                         }
                     }
                     Spacer()
+                    Image(systemName: user.emailVerified ? "checkmark.seal.fill" : "checkmark.seal")
+                        .foregroundStyle(user.emailVerified ? .green : .gray)
+                        .help(user.emailVerified ? "Email validé" : "Email non validé")
                 }
                 .opacity(user.isActive ? 1 : 0.6)
                 .padding(.vertical, 2)
@@ -479,6 +606,8 @@ struct UserDetailCard: View {
     @EnvironmentObject var auth: AuthStore
     @State private var newPw = ""
     @State private var newPwConfirm = ""
+    @State private var resendingVerification = false
+    @State private var verificationMessage: String?
 
     var body: some View {
         GroupBox("Utilisateur : \(user.effectiveDisplayName)") {
@@ -503,6 +632,37 @@ struct UserDetailCard: View {
                             Text("connexion bloquée").font(.caption).foregroundStyle(.red)
                         }
                     }
+                }
+                LabeledContent("Email") {
+                    HStack(spacing: 8) {
+                        Label(user.emailVerified ? "Validé" : "Non validé",
+                              systemImage: user.emailVerified ? "checkmark.seal.fill" : "checkmark.seal")
+                            .foregroundStyle(user.emailVerified ? .green : .gray)
+                        if !user.emailVerified {
+                            Button {
+                                resendVerification()
+                            } label: {
+                                HStack {
+                                    if resendingVerification { ProgressView().controlSize(.small) }
+                                    Text("Renvoyer l'email de validation")
+                                }
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .disabled(resendingVerification)
+                            Button("Marquer comme validé") {
+                                var u = user
+                                u.emailVerified = true
+                                u.emailVerificationCode = nil
+                                u.emailVerificationCodeExpiresAt = nil
+                                onChange(u)
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .help("Validation manuelle si l'envoi d'email n'est pas utilisable pour ce compte")
+                        }
+                    }
+                }
+                if let msg = verificationMessage {
+                    Text(msg).font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
                 Text("Sociétés du périmètre").font(.headline)
@@ -572,6 +732,20 @@ struct UserDetailCard: View {
                 }
             }
             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func resendVerification() {
+        resendingVerification = true
+        verificationMessage = nil
+        Task {
+            do {
+                try await auth.sendEmailVerificationCode(to: user)
+                verificationMessage = "Email de validation renvoyé."
+            } catch {
+                verificationMessage = error.localizedDescription
+            }
+            resendingVerification = false
         }
     }
 }

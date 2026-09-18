@@ -157,6 +157,24 @@ final class InvoiceNumberingTests: XCTestCase {
         XCTAssertEqual(store.nextNumber(), "FAC0002", "FAC0002 est libre (aucune facture restante ne le porte) : il doit être recyclé")
     }
 
+    // MARK: - Condition de paiement par défaut
+
+    func testNewDraftDefaultsToThirtyDaysNetWhenSellerHasNoOwnTerms() {
+        let store = InvoiceStore()
+        let draft = store.newDraft()
+        XCTAssertEqual(draft.paymentTerms, "Paiement à 30 jours")
+    }
+
+    func testNewDraftUsesSellersOwnPaymentTermsWhenSet() {
+        let directory = PartyDirectory()
+        var entry = DirectoryEntry(kind: .societe, party: InvoiceParty(name: "Vendeur", street: "", postcode: "", city: ""))
+        entry.party.paymentTerms = "Comptant"
+        directory.upsert(entry)
+        let store = InvoiceStore()
+        let draft = store.newDraft(directory: directory, preferredSellerEntryID: entry.id)
+        XCTAssertEqual(draft.paymentTerms, "Comptant", "la condition propre à la société prime sur le défaut 30 jours")
+    }
+
     func testNoOverridesMeansExistingSingleSocietyBehaviorIsUnchanged() {
         // Une installation existante (une seule société, jamais de réglage par société créé)
         // ne doit voir aucune différence de comportement après cette évolution.

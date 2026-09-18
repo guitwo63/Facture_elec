@@ -140,6 +140,7 @@ struct FacturXMacApp: App {
     @StateObject private var statusStore = OrderStatusStore.shared
     @StateObject private var invoiceStatusStore = InvoiceStatusStore.shared
     @StateObject private var paymentTermsStore = PaymentTermsPresetStore.shared
+    @StateObject private var auditActionLabelStore = AuditActionLabelStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -164,6 +165,7 @@ struct FacturXMacApp: App {
                 .environmentObject(statusStore)
                 .environmentObject(invoiceStatusStore)
                 .environmentObject(paymentTermsStore)
+                .environmentObject(auditActionLabelStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -356,28 +358,20 @@ struct TreasuryDashboardView: View {
         return sentInvoices.filter { range.contains($0.issueDate) }
     }
 
-    private var caFacture: Double {
-        periodInvoices.reduce(0) { $0 + signedAmount($1) }
-    }
-
-    private var encaisse: Double {
-        periodInvoices.filter { $0.status == .paid }.reduce(0) { $0 + signedAmount($1) }
-    }
-
-    private var enRetard: Double {
-        sentInvoices.filter(\.isOverdue).reduce(0) { $0 + signedAmount($1) }
-    }
-
-    private var enAttente: Double {
-        sentInvoices.filter { $0.status != .paid && !$0.isOverdue }.reduce(0) { $0 + signedAmount($1) }
-    }
-
+    private var caFactureInvoices: [Invoice] { periodInvoices }
+    private var encaisseInvoices: [Invoice] { periodInvoices.filter { $0.status == .paid } }
+    private var enRetardInvoices: [Invoice] { sentInvoices.filter(\.isOverdue) }
+    private var enAttenteInvoices: [Invoice] { sentInvoices.filter { $0.status != .paid && !$0.isOverdue } }
     /// Factures au statut « Validée (non envoyée) » : verrouillées côté saisie mais pas
     /// encore engagées vis-à-vis du client — exclues de `sentInvoices`, donc absentes
     /// des autres KPI. Utile pour repérer les factures prêtes qui attendent l'envoi.
-    private var validatedNotSent: Double {
-        activeInvoices.filter { $0.status == .issued }.reduce(0) { $0 + signedAmount($1) }
-    }
+    private var validatedNotSentInvoices: [Invoice] { activeInvoices.filter { $0.status == .issued } }
+
+    private var caFacture: Double { caFactureInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var encaisse: Double { encaisseInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var enRetard: Double { enRetardInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var enAttente: Double { enAttenteInvoices.reduce(0) { $0 + signedAmount($1) } }
+    private var validatedNotSent: Double { validatedNotSentInvoices.reduce(0) { $0 + signedAmount($1) } }
 
     private var byClient: [ClientBalance] {
         var byName: [String: (outstanding: Double, overdue: Double)] = [:]
@@ -418,11 +412,11 @@ struct TreasuryDashboardView: View {
                     }
                 }
                 HStack(spacing: 16) {
-                    kpiCard("CA facturé — \(period.rawValue)", caFacture, color: .blue, icon: "chart.line.uptrend.xyaxis")
-                    kpiCard("Encaissé — \(period.rawValue)", encaisse, color: .green, icon: "checkmark.circle.fill")
-                    kpiCard("En attente", enAttente, color: .orange, icon: "hourglass")
-                    kpiCard("En retard", enRetard, color: .red, icon: "exclamationmark.triangle.fill")
-                    kpiCard("Validées, non envoyées", validatedNotSent, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
+                    kpiCard("CA facturé — \(period.rawValue)", caFacture, invoices: caFactureInvoices, color: .blue, icon: "chart.line.uptrend.xyaxis")
+                    kpiCard("Encaissé — \(period.rawValue)", encaisse, invoices: encaisseInvoices, color: .green, icon: "checkmark.circle.fill")
+                    kpiCard("En attente", enAttente, invoices: enAttenteInvoices, color: .orange, icon: "hourglass")
+                    kpiCard("En retard", enRetard, invoices: enRetardInvoices, color: .red, icon: "exclamationmark.triangle.fill")
+                    kpiCard("Validées, non envoyées", validatedNotSent, invoices: validatedNotSentInvoices, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
                 }
                 GroupBox("Par client — montant dû") {
                     if byClient.isEmpty {
@@ -452,18 +446,26 @@ struct TreasuryDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private func kpiCard(_ title: String, _ amount: Double, color: Color, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func kpiCard(_ title: String, _ amount: Double, invoices: [Invoice], color: Color, icon: String) -> some View {
+        let invoiceCount = invoices.filter { !$0.type.isCreditNote }.count
+        let creditNoteCount = invoices.filter { $0.type.isCreditNote }.count
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Image(systemName: icon).foregroundStyle(color)
                 Text(title).font(.caption).foregroundStyle(.secondary)
             }
             Text(String(format: "%.2f %@", amount, currency))
                 .font(.title2.bold())
+            Text("\(pluralized(invoiceCount, "facture", "factures")) · \(pluralized(creditNoteCount, "avoir", "avoirs"))")
+                .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.12)))
+    }
+
+    private func pluralized(_ count: Int, _ singular: String, _ plural: String) -> String {
+        "\(count) \(count > 1 ? plural : singular)"
     }
 }
 
@@ -503,6 +505,12 @@ struct RootView: View {
         Group {
             if auth.currentUser == nil {
                 LoginView()
+            } else if let user = auth.currentUser, !user.emailVerified, !auth.testBypassSecurity {
+                // Toutes les fonctions de l'application sont bloquées tant que l'email du
+                // compte n'est pas validé — seule cette fenêtre (saisie/renvoi du code) est
+                // accessible. `testBypassSecurity` contourne ce blocage, comme pour
+                // `mustChangePassword` dans LoginView, pour ne pas gêner la mise au point.
+                EmailVerificationGateView(user: user)
             } else {
                 mainBody
                     .onChange(of: appEnv.mode) { _ in
@@ -552,8 +560,14 @@ struct RootView: View {
         let k = appEnv.key("facturx.choruspro.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
            var decoded = try? JSONDecoder().decode(ChorusProCredentials.self, from: data) {
-            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")) ?? ""
-            decoded.techPassword = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")) ?? ""
+            // Migration one-shot depuis le Keychain (retour arrière du stockage des secrets,
+            // voir `ChorusProSettings.init()`) : ne s'applique qu'aux champs encore vides.
+            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.clientSecret.v1")), !migrated.isEmpty {
+                decoded.clientSecret = migrated
+            }
+            if decoded.techPassword.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.choruspro.techPassword.v1")), !migrated.isEmpty {
+                decoded.techPassword = migrated
+            }
             return decoded
         }
         return ChorusProCredentials(clientID: "", clientSecret: "")
@@ -563,7 +577,9 @@ struct RootView: View {
         let k = appEnv.key("facturx.superpdp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
            var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
-            decoded.clientSecret = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")) ?? ""
+            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.superpdp.clientSecret.v1")), !migrated.isEmpty {
+                decoded.clientSecret = migrated
+            }
             return decoded
         }
         return SuperPDPCredentials(clientID: "", clientSecret: "")
@@ -573,7 +589,9 @@ struct RootView: View {
         let k = appEnv.key("facturx.smtp.credentials.v1")
         if let data = UserDefaults.standard.data(forKey: k),
            var decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
-            decoded.password = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")) ?? ""
+            if decoded.password.isEmpty, let migrated = KeychainStore.get(forKey: appEnv.key("facturx.smtp.password.v1")), !migrated.isEmpty {
+                decoded.password = migrated
+            }
             return decoded
         }
         return SMTPCredentials()
@@ -1653,6 +1671,7 @@ struct InvoicesTabView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    ScrollViewReader { listProxy in
                     List(filteredInvoices, selection: Binding(
                         get: { selectedID },
                         set: { id in selectedID = id }
@@ -1704,6 +1723,22 @@ struct InvoicesTabView: View {
                         }
                     }
                     .frame(minWidth: 180, idealWidth: 230, maxWidth: 270)
+                    .onChange(of: selectedID) { newID in
+                        // À la création d'une facture (insérée en tête de liste), le haut de la
+                        // nouvelle ligne pouvait rester hors champ si la liste était défilée plus
+                        // bas — on recentre explicitement sur la sélection. Le défilement est
+                        // différé au prochain tour de boucle : appelé de façon synchrone depuis
+                        // ce onChange, il s'exécute encore pendant le rappel délégué de la
+                        // NSTableView sous-jacente et AppKit journalise une opération réentrante
+                        // ("WARNING: Application performed a reentrant operation in its
+                        // NSTableView delegate").
+                        if let newID {
+                            DispatchQueue.main.async {
+                                withAnimation { listProxy.scrollTo(newID, anchor: .top) }
+                            }
+                        }
+                    }
+                    }
                 }
 
                 if let id = selectedID,
@@ -2067,7 +2102,9 @@ struct InvoiceEditorView: View {
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
+    @EnvironmentObject var actionLabelStore: AuditActionLabelStore
     @State private var sendingInvoiceEmail = false
+    @State private var showResendEmailConfirm = false
     @State private var invoiceEmailMessage: String?
     @State private var exportError: String?
     @State private var exportedURL: URL?
@@ -2282,7 +2319,18 @@ struct InvoiceEditorView: View {
                     }
                     ForEach(configuredTransitions, id: \.self) { s in
                         Button {
-                            invoice.status = s
+                            // « Transmise au PDP » ne doit jamais être qu'une étiquette : passer
+                            // ce statut sans réellement déposer laissait croire la facture
+                            // transmise alors qu'elle ne l'était pas, tout en la verrouillant
+                            // (statut verrouillant) — ce qui bloquait ensuite le vrai bouton
+                            // "Super PDP" (dépôt), y compris pour un administrateur. Le seul
+                            // chemin valide vers ce statut est donc le dépôt réel.
+                            if s == .sentToPDP, superPDPSettings.credentials.usePDP,
+                               (invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty {
+                                depositToSuperPDP()
+                            } else {
+                                invoice.status = s
+                            }
                         } label: {
                             Label(s.label, systemImage: s.systemImage)
                         }
@@ -2297,7 +2345,13 @@ struct InvoiceEditorView: View {
                             depositToSuperPDP()
                         } label: { Label("Super PDP", systemImage: "paperplane.fill") }
                             .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
-                            .disabled(fieldLocked || statusLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured || !isAdmin)
+                            // `fieldLocked` intègre déjà `statusLocked` (verrouillé sauf
+                            // administrateur ayant confirmé "Modifier quand même") : le vérifier
+                            // une seconde fois ici rendait ce bouton définitivement inaccessible
+                            // dès que le statut verrouille la facture, même pour un administrateur
+                            // — empêchant justement de corriger une facture restée bloquée à tort
+                            // au statut « Transmise au PDP » sans dépôt réel.
+                            .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured || !isAdmin)
                             .help(isAdmin
                                   ? "Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)"
                                   : "Réservé aux administrateurs : dépôt réglementaire sur SUPER PDP (Plateforme Agréée)")
@@ -2358,7 +2412,11 @@ struct InvoiceEditorView: View {
                 if emailTemplateStore.globalEnabled {
                     Divider().frame(height: 20)
                     Button {
-                        sendInvoiceEmail()
+                        if invoice.lastEmailSentAt != nil {
+                            showResendEmailConfirm = true
+                        } else {
+                            sendInvoiceEmail()
+                        }
                     } label: {
                         if sendingInvoiceEmail {
                             HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Envoi…") }
@@ -2378,6 +2436,17 @@ struct InvoiceEditorView: View {
                           : !smtpSettings.credentials.isConfigured
                           ? "Configurez l'envoi d'email (Réglages) pour envoyer la facture"
                           : "Envoyer la facture par email au client")
+                    .confirmationDialog(
+                        "Cette facture a déjà été envoyée le \(invoice.lastEmailSentAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "")",
+                        isPresented: $showResendEmailConfirm, titleVisibility: .visible
+                    ) {
+                        Button("Envoyer quand même") { sendInvoiceEmail() }
+                        Button("Annuler", role: .cancel) {}
+                    }
+                    if let sentAt = invoice.lastEmailSentAt {
+                        Text("Envoyée le \(sentAt.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
 
                     if invoice.isOverdue {
                         Divider().frame(height: 20)
@@ -2831,7 +2900,7 @@ struct InvoiceEditorView: View {
                     }.padding(8)
                 }.lockable(fieldLocked)
 
-                GroupBox("Paiement") {
+                GroupBox("Coordonnées bancaires") {
                     VStack(alignment: .leading, spacing: 8) {
                         if let iban = invoice.paymentIBAN, !iban.isEmpty {
                             HStack(spacing: 3) {
@@ -2848,8 +2917,6 @@ struct InvoiceEditorView: View {
                         if (invoice.paymentIBAN ?? "").isEmpty && (invoice.paymentBIC ?? "").isEmpty {
                             Text("Aucune coordonnée bancaire renseignée.").font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("Conditions de paiement : modifiables dans l'en-tête ci-dessus.")
-                            .font(.caption2).foregroundStyle(.tertiary)
                     }.padding(8)
                 }.lockable(fieldLocked)
 
@@ -3280,6 +3347,7 @@ struct InvoiceEditorView: View {
             do {
                 try await SMTPService().send(to: recipient, subject: email.subject, body: email.body, credentials: credentials)
                 invoiceEmailMessage = "Facture envoyée à \(recipient)."
+                invoice.lastEmailSentAt = Date()
             } catch {
                 invoiceEmailMessage = "Échec envoi : \(error.localizedDescription)"
             }
@@ -3475,7 +3543,7 @@ struct InvoiceEditorView: View {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
                                 }
                             } else {
-                                Text(e.action == "invoice_created" ? "Création" : e.action == "invoice_updated" ? "Modification" : e.action == "invoice_deleted" ? "Suppression" : e.action == "pdp_deposit_sent" ? "Dépôt PDP envoyé" : e.action == "pdp_deposit_error" ? "Dépôt PDP échoué" : e.action == "pdp_status_received" ? "Statut PDP reçu" : e.action == "pdp_status_sent" ? "Statut PDP envoyé" : e.action == "pdp_status_error" ? "Interrogation PDP échouée" : e.action == "pdp_status_send_error" ? "Envoi statut PDP échoué" : e.action)
+                                Text(actionLabelStore.label(for: e.action))
                                     .font(.caption)
                                 if !e.details.isEmpty {
                                     Text(e.details).font(.caption2).foregroundStyle(.secondary)
@@ -3616,6 +3684,8 @@ struct PartySection: View {
     @State private var duplicateMatches: [PartyDirectory.DuplicateMatch]?
     @State private var lookingUpElectronicAddress = false
     @State private var electronicAddressLookupNote: String?
+    @State private var electronicAddressChoices: [SuperPDPDirectoryEntry] = []
+    @State private var pendingPartyForAddressChoice: InvoiceParty?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -3719,6 +3789,30 @@ struct PartySection: View {
                 }
             }.padding(20).frame(minWidth: 360)
         }
+        .sheet(isPresented: Binding(
+            get: { !electronicAddressChoices.isEmpty },
+            set: { if !$0 { electronicAddressChoices = []; pendingPartyForAddressChoice = nil } }
+        )) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Plusieurs adresses électroniques trouvées").font(.headline).padding(12)
+                Text("Ce SIREN/SIRET correspond à plusieurs établissements sur SUPER PDP. Choisissez celle à enregistrer pour ce tiers.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
+                Divider().padding(.top, 8)
+                List(electronicAddressChoices) { entry in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(entry.name ?? entry.routingAddress ?? "(sans nom)").font(.body.bold())
+                        Text(entry.routingAddress ?? "").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        if let addr = entry.addressLine, !addr.isEmpty {
+                            Text([addr, entry.postcode, entry.city].compactMap { $0 }.joined(separator: " "))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { applyElectronicAddressChoice(entry) }
+                }
+            }
+            .frame(width: 420, height: 340)
+        }
         .alert("Tiers potentiellement en doublon", isPresented: Binding(
             get: { duplicateMatches != nil },
             set: { if !$0 { duplicateMatches = nil; pendingEntry = nil } }
@@ -3767,7 +3861,18 @@ struct PartySection: View {
         Task {
             do {
                 let results = try await SuperPDPService().searchRecipient(siretOrSiren: query, credentials: superPDPSettings.credentials)
-                if let match = results.first(where: { ($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty == false }) {
+                let withAddress = results.filter { !($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+                let distinctAddresses = Set(withAddress.map { $0.routingAddress ?? "" })
+                if distinctAddresses.count > 1 {
+                    // Plusieurs adresses électroniques différentes trouvées pour ce SIREN/SIRET
+                    // (plusieurs établissements, par ex.) : on ne peut pas en choisir une au
+                    // hasard, l'utilisateur doit trancher — au lieu de prendre silencieusement
+                    // la première, ce qui pouvait enregistrer la mauvaise adresse.
+                    lookingUpElectronicAddress = false
+                    pendingPartyForAddressChoice = p
+                    electronicAddressChoices = withAddress
+                    return
+                } else if let match = withAddress.first {
                     p.endpointID = match.routingAddress
                     p.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
                     electronicAddressLookupNote = "Adresse électronique trouvée sur SUPER PDP."
@@ -3782,8 +3887,33 @@ struct PartySection: View {
         }
     }
 
+    /// Choix retenu quand plusieurs adresses électroniques étaient disponibles pour le même
+    /// SIREN/SIRET (plusieurs établissements) : reprend le flux normal avec l'adresse choisie.
+    private func applyElectronicAddressChoice(_ match: SuperPDPDirectoryEntry) {
+        guard var p = pendingPartyForAddressChoice else { return }
+        p.endpointID = match.routingAddress
+        p.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
+        electronicAddressChoices = []
+        pendingPartyForAddressChoice = nil
+        finishSaveToDirectory(p)
+    }
+
     private func finishSaveToDirectory(_ p: InvoiceParty) {
-        let entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        var entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        // L'adresse électronique trouvée était appliquée à `party.endpointID` mais jamais
+        // recopiée dans `routingAddresses` (la liste gérée depuis la fiche tiers) : elle
+        // semblait alors ne "rien avoir enregistré" une fois le tiers ouvert, malgré un
+        // endpointID bien présent en mémoire au moment de la sauvegarde.
+        let siren = (p.siren ?? "").filter { $0.isNumber }
+        let siret = (p.siret ?? "").filter { $0.isNumber }
+        let endpoint = (p.endpointID ?? "").trimmingCharacters(in: .whitespaces)
+        if !endpoint.isEmpty, !siren.isEmpty {
+            let format: RoutingAddressFormat = siret.count == 14 ? .sirenSiret : .siren
+            entry.routingAddresses = [PartyRoutingAddress(
+                format: format, siren: siren, siret: siret.count == 14 ? siret : nil,
+                label: "SUPER PDP", isActive: true, isDefault: true
+            )]
+        }
         let dup = directory.findDuplicates(of: entry)
         if dup.isEmpty {
             directory.upsert(entry)
@@ -4484,6 +4614,8 @@ struct DirectoryDetailView: View {
                         }
                         }
                         Divider()
+                        HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Contact(s)").font(.headline)
                             Spacer()
@@ -4542,9 +4674,11 @@ struct DirectoryDetailView: View {
                             if let ce = entry.party.contactEmail, !ce.isEmpty { detailRow("Email", ce) }
                             if let cp = entry.party.contactPhone, !cp.isEmpty { detailRow("Téléphone", cp) }
                         }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                         if entry.kind != .fournisseur {
-                        Divider()
+                        VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Adresses de facturation électronique").font(.headline)
                             Spacer()
@@ -4597,6 +4731,9 @@ struct DirectoryDetailView: View {
                             }
                             .padding(8)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+                        }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         }
 
@@ -4780,6 +4917,20 @@ struct DirectoryEditorView: View {
         }
         .padding(16)
         .frame(minWidth: 560, minHeight: 560)
+        .onChange(of: entry.routingAddresses) { _ in
+            // L'identifiant électronique affiché sur la fiche (BT-49/34, champ "Ident. élec.")
+            // et la liste "Adresses de facturation électronique" ci-dessus pouvaient diverger :
+            // modifier la liste (ajout, suppression, changement de défaut) ne rafraîchissait
+            // jamais le champ sur le tiers, qui restait sur son ancienne valeur saisie ou
+            // choisie précédemment. Recalé automatiquement sur l'adresse par défaut active.
+            if let def = entry.defaultRoutingAddress, def.isActive {
+                let composed = def.composedAddress.trimmingCharacters(in: .whitespaces)
+                if !composed.isEmpty {
+                    entry.party.endpointID = composed
+                    entry.party.endpointSchemeID = "0225"
+                }
+            }
+        }
         .alert("Tiers potentiellement en doublon", isPresented: Binding(
             get: { duplicateMatches != nil },
             set: { if !$0 { duplicateMatches = nil } }
@@ -5140,10 +5291,16 @@ struct SettingsTabView: View {
         if auth.currentUser?.isAdmin == true {
             items.append(contentsOf: [
                 TabItem(index: 1, label: "Tables", icon: "tablecells"),
-                TabItem(index: 2, label: "Application", icon: "gearshape.2"),
-                TabItem(index: 3, label: "Journal", icon: "clock.arrow.circlepath"),
-                TabItem(index: 4, label: "Données", icon: "externaldrive.fill")
+                TabItem(index: 2, label: "Application", icon: "gearshape.2")
             ])
+        }
+        // Le journal (historique des statuts) est utile à tous les rôles, pas
+        // seulement à l'administrateur : un comptable doit pouvoir suivre le
+        // cycle de vie des factures/commandes/devis. `AuditLogView` masque de
+        // son côté les entrées liées aux comptes utilisateurs pour les non-admins.
+        items.append(TabItem(index: 3, label: "Journal", icon: "clock.arrow.circlepath"))
+        if auth.currentUser?.isAdmin == true {
+            items.append(TabItem(index: 4, label: "Données", icon: "externaldrive.fill"))
         }
         return items
     }
@@ -6107,6 +6264,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     case units
     case countries
     case endpointSchemes
+    case auditActionLabels
 
     var id: String { rawValue }
 
@@ -6122,6 +6280,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .units: return "Unités"
         case .countries: return "Pays"
         case .endpointSchemes: return "Schémas d'identifiant"
+        case .auditActionLabels: return "Libellés du journal"
         }
     }
 
@@ -6137,12 +6296,13 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .units: return "ruler"
         case .countries: return "globe"
         case .endpointSchemes: return "number"
+        case .auditActionLabels: return "list.bullet.clipboard"
         }
     }
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors: return true
+        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels: return true
         default: return false
         }
     }
@@ -6155,6 +6315,7 @@ struct ValueTablesView: View {
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
+    @EnvironmentObject var actionLabelStore: AuditActionLabelStore
     @State private var selectedTable: ValueTable = .orderStatuses
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
@@ -6272,6 +6433,48 @@ struct ValueTablesView: View {
         case .units: refPanel(NormRefs.units)
         case .countries: refPanel(NormRefs.countries)
         case .endpointSchemes: refPanel(NormRefs.endpointSchemes)
+        case .auditActionLabels: auditActionLabelsPanel
+        }
+    }
+
+    private var filteredAuditActionLabels: [AuditActionLabel] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let sorted = actionLabelStore.overrides.sorted { $0.label < $1.label }
+        guard !q.isEmpty else { return sorted }
+        return sorted.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    private var auditActionLabelsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Libellés du journal").font(.title3.bold())
+                Spacer()
+                Button {
+                    actionLabelStore.resetToDefaults()
+                } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
+                    .buttonStyle(.bordered)
+            }
+            .padding(12)
+            Divider()
+            Text("Libellé affiché dans le journal (Réglages > Journal, et le journal de chaque facture/commande/devis) pour chaque code technique d'événement.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredAuditActionLabels) { item in
+                        HStack(spacing: 10) {
+                            Text(item.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .frame(width: 220, alignment: .leading)
+                            TextField("Libellé", text: Binding(
+                                get: { item.label },
+                                set: { actionLabelStore.upsert(AuditActionLabel(id: item.id, label: $0)) }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding(12)
+            }
         }
     }
 
@@ -7578,7 +7781,11 @@ struct PartyEditorView: View {
     @State private var dinumLoading = false
     @State private var dinumError: String?
     @State private var lastSearchKey: String = ""
+    @State private var superPDPLookupLoading = false
+    @State private var superPDPLookupNote: String?
+    @State private var superPDPAddressChoices: [SuperPDPDirectoryEntry] = []
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
+    @EnvironmentObject var superPDPSettings: SuperPDPSettings
 
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     private var paymentTermsPresetIDBinding: Binding<String?> {
@@ -7736,7 +7943,24 @@ struct PartyEditorView: View {
                     } else {
                         TextField("Auto depuis SIREN si vide", text: Binding($party.endpointID, replacingNilWith: ""))
                         NormRefPicker("Scheme", options: NormRefs.endpointSchemes, code: $party.endpointSchemeID).frame(width: 180)
+                        if !locked, superPDPSettings.credentials.isConfigured {
+                            Button {
+                                lookupSuperPDPElectronicAddress()
+                            } label: {
+                                if superPDPLookupLoading {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "magnifyingglass.circle.fill").font(.title3)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(superPDPLookupLoading || !canLookupSuperPDPElectronicAddress)
+                            .help("Rechercher l'adresse électronique sur SUPER PDP à partir du SIREN/SIRET")
+                        }
                     }
+                }
+                if !locked, linkedEntry == nil, let note = superPDPLookupNote {
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
                 }
             }
             if isMultiContact {
@@ -7975,6 +8199,86 @@ struct PartyEditorView: View {
                 }
             }
         }
+        .sheet(isPresented: Binding(
+            get: { !superPDPAddressChoices.isEmpty },
+            set: { if !$0 { superPDPAddressChoices = [] } }
+        )) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Plusieurs adresses électroniques trouvées").font(.headline).padding(12)
+                Text("Ce SIREN/SIRET correspond à plusieurs établissements sur SUPER PDP. Choisissez l'adresse à utiliser.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+                Divider()
+                List(superPDPAddressChoices) { entry in
+                    Button {
+                        applySuperPDPMatch(entry)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.name ?? entry.routingAddress ?? "—").font(.body.weight(.medium))
+                            Text(entry.routingAddress ?? "").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(minWidth: 420, minHeight: 320)
+        }
+    }
+
+    private var canLookupSuperPDPElectronicAddress: Bool {
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        let siret = (party.siret ?? "").filter { $0.isNumber }
+        return siren.count == 9 || siret.count == 14
+    }
+
+    /// Recherche manuelle de l'adresse électronique SUPER PDP pour le SIREN/SIRET saisi —
+    /// même logique que `PartySection.saveToDirectory()`, mais déclenchée explicitement ici
+    /// car cette vue sert aussi à la création directe d'un tiers depuis l'Annuaire, un
+    /// chemin qui ne passait jusque-là par aucune recherche automatique.
+    private func lookupSuperPDPElectronicAddress() {
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        let siret = (party.siret ?? "").filter { $0.isNumber }
+        guard superPDPSettings.credentials.isConfigured, siren.count == 9 || siret.count == 14 else { return }
+        superPDPLookupLoading = true
+        superPDPLookupNote = nil
+        let query = siret.count == 14 ? siret : siren
+        Task {
+            do {
+                let results = try await SuperPDPService().searchRecipient(siretOrSiren: query, credentials: superPDPSettings.credentials)
+                let withAddress = results.filter { !($0.routingAddress ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+                let distinctAddresses = Set(withAddress.map { $0.routingAddress ?? "" })
+                if distinctAddresses.count > 1 {
+                    superPDPAddressChoices = withAddress
+                } else if let match = withAddress.first {
+                    applySuperPDPMatch(match)
+                    superPDPLookupNote = "Adresse électronique trouvée sur SUPER PDP."
+                } else {
+                    superPDPLookupNote = "Aucune adresse électronique trouvée sur SUPER PDP pour ce SIREN/SIRET."
+                }
+            } catch {
+                superPDPLookupNote = "Recherche SUPER PDP indisponible : \(error.localizedDescription)"
+            }
+            superPDPLookupLoading = false
+        }
+    }
+
+    private func applySuperPDPMatch(_ match: SuperPDPDirectoryEntry) {
+        guard let addr = match.routingAddress?.trimmingCharacters(in: .whitespaces), !addr.isEmpty else { return }
+        party.endpointID = addr
+        party.endpointSchemeID = match.routingScheme?.trimmingCharacters(in: .whitespaces).isEmpty == false ? match.routingScheme! : "0225"
+        let siren = (party.siren ?? "").filter { $0.isNumber }
+        let siret = (party.siret ?? "").filter { $0.isNumber }
+        if !siren.isEmpty {
+            let format: RoutingAddressFormat = siret.count == 14 ? .sirenSiret : .siren
+            let newAddress = PartyRoutingAddress(
+                format: format, siren: siren, siret: siret.count == 14 ? siret : nil,
+                label: "SUPER PDP", isActive: true, isDefault: routingAddresses.isEmpty
+            )
+            if !routingAddresses.contains(where: { $0.composedAddress == newAddress.composedAddress }) {
+                routingAddresses.append(newAddress)
+            }
+        }
+        superPDPAddressChoices = []
     }
 
     private func scheduleDinumSearch() {

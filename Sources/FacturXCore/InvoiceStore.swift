@@ -210,6 +210,9 @@ public final class InvoiceStore: ObservableObject {
             }
             return resolveDefaultSeller(from: dir) ?? myCompany
         }()
+        // À défaut d'une condition propre à la société émettrice, "30 jours net" sert de
+        // condition standard par défaut plutôt qu'un champ vide à chaque nouvelle facture.
+        let defaultPaymentTerms = PaymentTermsPresetStore.defaults.first(where: { $0.id == "net30" })?.text ?? "Paiement à 30 jours"
         return Invoice(
             number: nextNumber(companyID: companyID),
             profile: sellerEntry?.profile ?? .en16931,
@@ -219,7 +222,7 @@ public final class InvoiceStore: ObservableObject {
             lines: [InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20)],
             paymentIBAN: seller.iban,
             paymentBIC: seller.bic,
-            paymentTerms: seller.paymentTerms
+            paymentTerms: seller.paymentTerms ?? defaultPaymentTerms
         )
     }
 
