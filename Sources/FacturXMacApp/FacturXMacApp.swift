@@ -1708,9 +1708,16 @@ struct InvoicesTabView: View {
                     .onChange(of: selectedID) { newID in
                         // À la création d'une facture (insérée en tête de liste), le haut de la
                         // nouvelle ligne pouvait rester hors champ si la liste était défilée plus
-                        // bas — on recentre explicitement sur la sélection.
+                        // bas — on recentre explicitement sur la sélection. Le défilement est
+                        // différé au prochain tour de boucle : appelé de façon synchrone depuis
+                        // ce onChange, il s'exécute encore pendant le rappel délégué de la
+                        // NSTableView sous-jacente et AppKit journalise une opération réentrante
+                        // ("WARNING: Application performed a reentrant operation in its
+                        // NSTableView delegate").
                         if let newID {
-                            withAnimation { listProxy.scrollTo(newID, anchor: .top) }
+                            DispatchQueue.main.async {
+                                withAnimation { listProxy.scrollTo(newID, anchor: .top) }
+                            }
                         }
                     }
                     }
@@ -5248,10 +5255,16 @@ struct SettingsTabView: View {
         if auth.currentUser?.isAdmin == true {
             items.append(contentsOf: [
                 TabItem(index: 1, label: "Tables", icon: "tablecells"),
-                TabItem(index: 2, label: "Application", icon: "gearshape.2"),
-                TabItem(index: 3, label: "Journal", icon: "clock.arrow.circlepath"),
-                TabItem(index: 4, label: "Données", icon: "externaldrive.fill")
+                TabItem(index: 2, label: "Application", icon: "gearshape.2")
             ])
+        }
+        // Le journal (historique des statuts) est utile à tous les rôles, pas
+        // seulement à l'administrateur : un comptable doit pouvoir suivre le
+        // cycle de vie des factures/commandes/devis. `AuditLogView` masque de
+        // son côté les entrées liées aux comptes utilisateurs pour les non-admins.
+        items.append(TabItem(index: 3, label: "Journal", icon: "clock.arrow.circlepath"))
+        if auth.currentUser?.isAdmin == true {
+            items.append(TabItem(index: 4, label: "Données", icon: "externaldrive.fill"))
         }
         return items
     }
