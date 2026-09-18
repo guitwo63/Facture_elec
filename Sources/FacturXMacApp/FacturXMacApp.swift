@@ -6450,6 +6450,7 @@ extension DirectoryEntryKind: Identifiable {
 
 enum ValueTable: String, CaseIterable, Identifiable {
     case invoiceStatuses
+    case purchaseInvoiceStatuses
     case orderStatuses
     case quoteStatuses
     case paymentTerms
@@ -6467,6 +6468,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .invoiceStatuses: return "Statuts des factures"
+        case .purchaseInvoiceStatuses: return "Statuts des factures d'achat"
         case .orderStatuses: return "Statuts des commandes"
         case .quoteStatuses: return "Statuts des devis"
         case .paymentTerms: return "Conditions de paiement"
@@ -6484,6 +6486,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .invoiceStatuses: return "doc.text.fill"
+        case .purchaseInvoiceStatuses: return "cart.badge.clock"
         case .orderStatuses: return "list.bullet.rectangle"
         case .quoteStatuses: return "doc.text.below.ecg"
         case .paymentTerms: return "banknote"
@@ -6500,7 +6503,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels, .superPDPStatusCodes: return true
+        case .invoiceStatuses, .purchaseInvoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels, .superPDPStatusCodes: return true
         default: return false
         }
     }
@@ -6509,6 +6512,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 struct ValueTablesView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var purchaseInvoiceStatusStore: PurchaseInvoiceStatusStore
     @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
@@ -6521,6 +6525,7 @@ struct ValueTablesView: View {
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
     @State private var editingInvoiceStatus: InvoiceStatusOverride?
+    @State private var editingPurchaseInvoiceStatus: PurchaseInvoiceStatusOverride?
     @State private var editingQuoteStatus: QuoteStatusOverride?
     @State private var editingTag: PartyTag?
     @State private var editingPaymentTerm: PaymentTermsPreset?
@@ -6558,6 +6563,14 @@ struct ValueTablesView: View {
                 if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     invoiceStatusStore.overrides[i] = updated
                     invoiceStatusStore.save()
+                }
+            }
+        }
+        .sheet(item: $editingPurchaseInvoiceStatus) { override in
+            PurchaseInvoiceStatusEditorSheet(override: override) { updated in
+                if let i = purchaseInvoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    purchaseInvoiceStatusStore.overrides[i] = updated
+                    purchaseInvoiceStatusStore.save()
                 }
             }
         }
@@ -6635,6 +6648,7 @@ struct ValueTablesView: View {
     private var valuesPanel: some View {
         switch selectedTable {
         case .invoiceStatuses: invoiceStatusesPanel
+        case .purchaseInvoiceStatuses: purchaseInvoiceStatusesPanel
         case .orderStatuses: orderStatusesPanel
         case .quoteStatuses: quoteStatusesPanel
         case .paymentTerms: paymentTermsPanel
@@ -6884,6 +6898,96 @@ struct ValueTablesView: View {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return invoiceStatusStore.overrides }
         return invoiceStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
+    }
+
+    // MARK: - Statuts des factures d'achat
+
+    private var purchaseInvoiceStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des factures d'achat").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            // Même raison que pour la table des statuts de facture : PurchaseInvoice.status
+            // est typé sur l'enum PurchaseInvoiceStatus, un statut personnalisé ne pourrait
+            // jamais être assigné à une facture d'achat.
+            Text("Personnalisez le libellé des 8 statuts fonctionnels. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'événement envoyé à SUPER PDP pour informer le fournisseur ; les transitions affichent le workflow de validation.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredPurchaseInvoiceStatuses) { override in
+                        purchaseInvoiceStatusRow(override)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func purchaseInvoiceStatusRow(_ override: PurchaseInvoiceStatusOverride) -> some View {
+        let transitionLabels: [String] = override.transitionCodes.compactMap { code in
+            purchaseInvoiceStatusStore.overrides.first { $0.id == code }?.label
+                ?? PurchaseInvoiceStatus(rawValue: code)?.label
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: override.systemImage)
+                    .frame(width: 22)
+                    .foregroundStyle(Color(hex: override.hexColor))
+                Text(override.label).font(.body)
+                if override.isReformStatus {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(override.reformCode ?? "")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.12)))
+                    .help("Statut lié à la réforme (PDP) — code \(override.reformCode ?? ""). Non supprimable, libellé modifiable.")
+                    Label("Envoyé à SUPER PDP", systemImage: "arrow.up.circle")
+                        .font(.caption2.bold())
+                        .foregroundStyle(Color.orange)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.orange.opacity(0.12)))
+                        .help("L'app transmet ce statut à SUPER PDP pour informer le fournisseur (bouton de transition dans la fiche facture d'achat).")
+                } else {
+                    Text("hors réforme")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button {
+                    editingPurchaseInvoiceStatus = override
+                } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Modifier le libellé")
+            }
+            if !transitionLabels.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Transitions : " + transitionLabels.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    private var filteredPurchaseInvoiceStatuses: [PurchaseInvoiceStatusOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return purchaseInvoiceStatusStore.overrides }
+        return purchaseInvoiceStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
     }
 
     private var orderStatusesPanel: some View {
@@ -7560,6 +7664,100 @@ struct InvoiceStatusEditorSheet: View {
                 Button("Enregistrer") {
                     let ordered = InvoiceStatus.allCases.map { $0.rawValue }.filter { transitionCodes.contains($0) }
                     onSave(InvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: ordered))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 460, height: 460)
+    }
+}
+
+/// Pendant de `InvoiceStatusEditorSheet` côté achats — copie structurelle, retypée sur
+/// `PurchaseInvoiceStatus`/`PurchaseInvoiceStatusOverride`.
+struct PurchaseInvoiceStatusEditorSheet: View {
+    var override: PurchaseInvoiceStatusOverride
+    let onSave: (PurchaseInvoiceStatusOverride) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var systemImage: String
+    @State private var hexColor: String
+    @State private var transitionCodes: Set<String>
+
+    private var currentStatus: PurchaseInvoiceStatus? { PurchaseInvoiceStatus(rawValue: override.id) }
+    private var possibleTargets: [PurchaseInvoiceStatus] { PurchaseInvoiceStatus.allCases.filter { $0.rawValue != override.id } }
+
+    init(override: PurchaseInvoiceStatusOverride, onSave: @escaping (PurchaseInvoiceStatusOverride) -> Void) {
+        self.override = override
+        self.onSave = onSave
+        _label = State(initialValue: override.label)
+        _systemImage = State(initialValue: override.systemImage)
+        _hexColor = State(initialValue: override.hexColor)
+        _transitionCodes = State(initialValue: Set(override.transitionCodes))
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le statut de facture d'achat").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            if override.isReformStatus {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                    Text("Statut de réforme (PDP) — code \(override.reformCode ?? ""). Seul le libellé est modifiable.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.1)))
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Icône SF").frame(width: 100, alignment: .leading)
+                    TextField("Icône SF", text: $systemImage).textFieldStyle(.roundedBorder)
+                        .disabled(override.isReformStatus)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                    .disabled(override.isReformStatus)
+                }
+            }
+            if currentStatus != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transitions autorisées vers…").font(.subheadline.bold())
+                    Text("Statuts accessibles depuis « \(label) » via les boutons d'action de la facture d'achat (un administrateur peut toujours forcer les autres).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(possibleTargets, id: \.self) { target in
+                        Toggle(isOn: Binding(
+                            get: { transitionCodes.contains(target.rawValue) },
+                            set: { isOn in
+                                if isOn { transitionCodes.insert(target.rawValue) }
+                                else { transitionCodes.remove(target.rawValue) }
+                            }
+                        )) {
+                            Label(target.label, systemImage: target.systemImage)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    let ordered = PurchaseInvoiceStatus.allCases.map { $0.rawValue }.filter { transitionCodes.contains($0) }
+                    onSave(PurchaseInvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: ordered))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
