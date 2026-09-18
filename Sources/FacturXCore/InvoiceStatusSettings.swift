@@ -82,9 +82,14 @@ public final class InvoiceStatusStore: ObservableObject {
             for s in InvoiceStatus.allCases {
                 byID[s.rawValue]?.reformCode = InvoiceStatusStore.reformCode(for: s)
             }
+            // Un id qui ne correspond à aucun cas actuel de l'enum — un ancien statut
+            // retiré d'une version précédente (ex. "sentToPDP"/"rejected" avant le passage
+            // au modèle réduit à 8 statuts) — ne doit jamais réapparaître : il ne peut de
+            // toute façon jamais être assigné à une facture (`Invoice.status` est typé sur
+            // l'enum actuel). Avant ce correctif, ces entrées orphelines étaient traitées
+            // comme des valeurs "personnalisées" et resurgissaient indéfiniment.
             overrides = InvoiceStatus.allCases.compactMap { byID[$0.rawValue] }
-            let standard = Set(InvoiceStatus.allCases.map { $0.rawValue })
-            overrides.append(contentsOf: decoded.filter { !standard.contains($0.id) })
+            save()
         }
     }
 

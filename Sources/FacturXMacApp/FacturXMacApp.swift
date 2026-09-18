@@ -6525,15 +6525,14 @@ struct ValueTablesView: View {
             HStack {
                 Text("Statuts des factures").font(.title3.bold())
                 Spacer()
-                Button {
-                    let id = "custom-\(UUID().uuidString.prefix(8))"
-                    invoiceStatusStore.append(InvoiceStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
-                } label: { Label("Nouvelle valeur", systemImage: "plus") }
-                    .buttonStyle(.borderedProminent)
             }
             .padding(12)
             Divider()
-            Text("Personnalisez le libellé des statuts. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'équivalent envoyé/rapatrié vers la PDP ; les transitions affichent le cycle de vie normé.")
+            // Pas de bouton "Nouvelle valeur" ici (contrairement aux autres tables) :
+            // `Invoice.status` est typé sur l'enum InvoiceStatus, un statut personnalisé ne
+            // pourrait donc jamais être assigné à une facture — il n'aurait fait que
+            // réapparaître comme entrée orpheline (voir InvoiceStatusStore.load()).
+            Text("Personnalisez le libellé des 8 statuts fonctionnels. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'équivalent envoyé à SUPER PDP ; les transitions affichent le cycle de vie normé.")
                 .font(.caption).foregroundStyle(.secondary).padding(12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {

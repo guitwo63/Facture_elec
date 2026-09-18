@@ -69,6 +69,25 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         XCTAssertEqual(store.overrides.count, countBefore, "Un statut de réforme ne doit jamais être supprimable")
     }
 
+    /// Régression : après le passage au modèle réduit (8 statuts), une table déjà
+    /// persistée avec les anciens statuts détaillés (ou une valeur "personnalisée" créée
+    /// via l'ancien bouton "Nouvelle valeur") faisait réapparaître ces entrées orphelines
+    /// indéfiniment — `load()` les traitait comme des valeurs "personnalisées" à préserver
+    /// alors qu'elles ne correspondent plus à aucun cas de l'enum actuel et ne peuvent
+    /// jamais être assignées à une facture.
+    func testLoadDropsOrphanedEntriesFromARemovedEnumCase() throws {
+        var stale = InvoiceStatusStore.defaults
+        stale.append(InvoiceStatusOverride(id: "sentToPDP", label: "Transmise au PDP", systemImage: "paperplane.fill", hexColor: "B07A2A", reformCode: "200"))
+        stale.append(InvoiceStatusOverride(id: "custom-abc123", label: "Archivée", systemImage: "doc", hexColor: "6E6E73"))
+        let data = try JSONEncoder().encode(stale)
+        UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
+
+        let store = InvoiceStatusStore()
+        XCTAssertEqual(store.overrides.count, InvoiceStatus.allCases.count, "seuls les 8 statuts actuels doivent rester")
+        XCTAssertNil(store.overrides.first { $0.id == "sentToPDP" })
+        XCTAssertNil(store.overrides.first { $0.id == "custom-abc123" })
+    }
+
     /// Régression : une facture "Validée (non envoyée)" restait modifiable comme un
     /// brouillon — seuls accepted/paid/cancelled verrouillaient. issued et sent doivent
     /// verrouiller aussi, sinon une facture déjà transmise peut être modifiée en silence
