@@ -6540,6 +6540,14 @@ struct ValueTablesView: View {
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.12)))
                     .help("Statut lié à la réforme (PDP) — code \(override.reformCode ?? ""). Non supprimable, libellé modifiable.")
+                    if let direction = pdpDirection(for: override) {
+                        Label(direction.label, systemImage: direction.systemImage)
+                            .font(.caption2.bold())
+                            .foregroundStyle(direction.color)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(direction.color.opacity(0.12)))
+                            .help(direction.help)
+                    }
                 } else {
                     Text("hors réforme")
                         .font(.caption2)
@@ -6576,6 +6584,35 @@ struct ValueTablesView: View {
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    /// Sens de circulation du statut avec SUPER PDP : "Envoyé" pour un code que l'app peut
+    /// transmettre (bouton de transition, `notifyPDPStatusChange`) ; "Reçu" pour un code
+    /// réseau que seule SUPER PDP émet (`InvoiceStatusStore.networkOnlyReformCodes`),
+    /// jamais créé par l'app — visible uniquement en synchronisant le statut distant.
+    /// `sentToPDP` (fr:200) est un cas particulier : envoyé, mais implicitement par le
+    /// dépôt lui-même plutôt que par un événement de statut séparé.
+    private func pdpDirection(for override: InvoiceStatusOverride) -> (label: String, systemImage: String, color: Color, help: String)? {
+        guard let code = override.reformCode else { return nil }
+        if InvoiceStatusStore.networkOnlyReformCodes.contains(code) {
+            return (
+                "Reçu de SUPER PDP", "arrow.down.circle",
+                Color.blue,
+                "Rapporté automatiquement par SUPER PDP — l'app ne peut pas créer ce statut elle-même, il n'apparaît qu'en synchronisant le statut distant."
+            )
+        } else if override.id == InvoiceStatus.sentToPDP.rawValue {
+            return (
+                "Envoyé (via le dépôt)", "arrow.up.circle",
+                Color.orange,
+                "Posé automatiquement par le dépôt Factur-X — jamais envoyé séparément comme événement de statut."
+            )
+        } else {
+            return (
+                "Envoyé à SUPER PDP", "arrow.up.circle",
+                Color.orange,
+                "L'app peut transmettre ce statut à SUPER PDP (bouton de transition dans la fiche facture)."
+            )
+        }
     }
 
     private var filteredInvoiceStatuses: [InvoiceStatusOverride] {
