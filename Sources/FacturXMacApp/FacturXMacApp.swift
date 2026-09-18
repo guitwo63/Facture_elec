@@ -2297,8 +2297,10 @@ struct InvoiceEditorView: View {
                             depositToSuperPDP()
                         } label: { Label("Super PDP", systemImage: "paperplane.fill") }
                             .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
-                            .disabled(fieldLocked || statusLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured)
-                            .help("Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)")
+                            .disabled(fieldLocked || statusLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured || !isAdmin)
+                            .help(isAdmin
+                                  ? "Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)"
+                                  : "Réservé aux administrateurs : dépôt réglementaire sur SUPER PDP (Plateforme Agréée)")
                     }
                 }
 
