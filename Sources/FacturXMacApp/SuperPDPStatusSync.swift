@@ -73,7 +73,10 @@ final class PDPPeriodicSyncEngine: ObservableObject {
     /// Exposé séparément de `start()` pour permettre un déclenchement immédiat (bouton
     /// "Synchroniser maintenant" dans Réglages) sans attendre le prochain cycle.
     func runOnce(store: InvoiceStore, credentials: SuperPDPCredentials) async {
-        guard credentials.isConfigured else { return }
+        // `usePDP` coupe TOUTES les fonctions PDP, y compris ce cycle en arrière-plan —
+        // sans quoi désactiver le bouton dans Réglages n'empêchait pas l'app d'interroger
+        // SUPER PDP en silence pour des identifiants restés `isConfigured`.
+        guard credentials.usePDP, credentials.isConfigured else { return }
         let candidates = store.invoices.filter { invoice in
             guard let rid = invoice.superPDPRemoteID, !rid.isEmpty else { return false }
             return !PDPStatusMapper.terminalStatuses.contains(invoice.status)
