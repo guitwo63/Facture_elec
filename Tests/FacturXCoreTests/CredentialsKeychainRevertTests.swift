@@ -10,16 +10,27 @@ final class CredentialsKeychainRevertTests: XCTestCase {
 
     private let env = AppEnvironment.shared
 
-    override func tearDown() {
-        for key in [
-            "facturx.smtp.credentials.v1", "facturx.smtp.password.v1",
-            "facturx.pcloud.credentials.v1", "facturx.pcloud.password.v1",
-            "facturx.choruspro.credentials.v1", "facturx.choruspro.clientSecret.v1", "facturx.choruspro.techPassword.v1",
-            "facturx.superpdp.credentials.v1", "facturx.superpdp.clientSecret.v1"
-        ] {
+    private let allKeys = [
+        "facturx.smtp.credentials.v1", "facturx.smtp.password.v1", "facturx.smtp.keychainCleanupDone.v1",
+        "facturx.pcloud.credentials.v1", "facturx.pcloud.password.v1", "facturx.pcloud.keychainCleanupDone.v1",
+        "facturx.choruspro.credentials.v1", "facturx.choruspro.clientSecret.v1", "facturx.choruspro.techPassword.v1", "facturx.choruspro.keychainCleanupDone.v1",
+        "facturx.superpdp.credentials.v1", "facturx.superpdp.clientSecret.v1", "facturx.superpdp.keychainCleanupDone.v1"
+    ]
+
+    private func clearAllKeys() {
+        for key in allKeys {
             UserDefaults.standard.removeObject(forKey: env.key(key))
             KeychainStore.delete(forKey: env.key(key))
         }
+    }
+
+    override func setUp() {
+        super.setUp()
+        clearAllKeys()
+    }
+
+    override func tearDown() {
+        clearAllKeys()
         super.tearDown()
     }
 
@@ -33,6 +44,21 @@ final class CredentialsKeychainRevertTests: XCTestCase {
 
         let settings = SMTPSettings()
         XCTAssertEqual(settings.credentials.password, "s3cret-smtp")
+    }
+
+    /// La migration ne doit jamais se rejouer une fois le drapeau posé — sinon l'app
+    /// retoucherait le Keychain à chaque lancement (signature ad hoc instable d'une build
+    /// à l'autre, voir le commentaire de `SMTPSettings.init()`), ce qui redéclenchait la
+    /// demande d'autorisation d'accès au Keychain à chaque fois.
+    func testSMTPSettingsNeverRetriesKeychainMigrationOnceFlagIsSet() throws {
+        _ = SMTPSettings() // premier init : pose le drapeau (aucune entrée Keychain à ce stade)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: env.key("facturx.smtp.keychainCleanupDone.v1")))
+
+        // Une entrée Keychain apparaît "après coup" (ne devrait jamais arriver en pratique,
+        // mais vérifie que le drapeau empêche bien toute nouvelle tentative de lecture).
+        KeychainStore.set("late-entry", forKey: env.key("facturx.smtp.password.v1"))
+        let second = SMTPSettings()
+        XCTAssertEqual(second.credentials.password, "", "le drapeau déjà posé doit empêcher toute nouvelle lecture du Keychain")
     }
 
     func testSMTPSettingsSavePersistsPasswordInPlainUserDefaultsAndClearsKeychain() throws {

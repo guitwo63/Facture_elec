@@ -299,33 +299,51 @@ public final class SMTPSettings: ObservableObject {
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.smtp.credentials.v1") }
     private var passwordKeychainKey: String { env.key("facturx.smtp.password.v1") }
+    private var keychainCleanupDoneKey: String { env.key("facturx.smtp.keychainCleanupDone.v1") }
 
     /// Retour arrière volontaire (2026-09-18) : le mot de passe vivait dans le Keychain,
     /// mais l'app n'est signée qu'en "ad hoc" (pas de compte Apple Developer) — une
     /// signature ad hoc change à chaque reconstruction du binaire, et macOS refuse alors
-    /// l'accès à l'entrée Keychain créée par la version précédente. Résultat : le mot de
-    /// passe semblait "effacé" à chaque mise à jour de l'app. Retour au stockage en clair
-    /// dans UserDefaults ; à reconsidérer si l'app passe un jour en mode SaaS (signature
-    /// stable / autre mécanisme de secret). `decoded.password` reste vide pour une
-    /// installation qui a connu la période Keychain (le champ était blanchi avant
-    /// persistance) : on retente alors une lecture Keychain une seule fois pour ne pas
-    /// perdre silencieusement un mot de passe déjà saisi.
+    /// l'accès à l'entrée Keychain créée par la version précédente (ou redemande
+    /// l'autorisation). Résultat : le mot de passe semblait "effacé", et l'app redemandait
+    /// l'accès au Keychain à chaque lancement. Retour au stockage en clair dans
+    /// UserDefaults ; à reconsidérer si l'app passe un jour en mode SaaS (signature stable
+    /// / autre mécanisme de secret).
     public init() {
+        var decoded: SMTPCredentials
         if let data = defaults.data(forKey: env.key("facturx.smtp.credentials.v1")),
-           var decoded = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
-            if decoded.password.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.smtp.password.v1")), !migrated.isEmpty {
-                decoded.password = migrated
-            }
-            credentials = decoded
+           let fromDisk = try? JSONDecoder().decode(SMTPCredentials.self, from: data) {
+            decoded = fromDisk
         } else {
-            credentials = SMTPCredentials()
+            decoded = SMTPCredentials()
         }
+        Self.migrateFromKeychainOnce(
+            into: &decoded,
+            passwordKeychainKey: env.key("facturx.smtp.password.v1"),
+            keychainCleanupDoneKey: env.key("facturx.smtp.keychainCleanupDone.v1"),
+            defaults: defaults
+        )
+        credentials = decoded
+    }
+
+    /// Ne touche au Keychain qu'une seule fois, jamais plus ensuite (drapeau posé qu'un
+    /// mot de passe y ait été trouvé ou non) : c'est cet appel unique, et non plus un
+    /// appel à chaque lancement/sauvegarde, qui pouvait redéclencher indéfiniment la
+    /// demande d'autorisation d'accès au Keychain (signature ad hoc instable, voir
+    /// commentaire de `init()`). `static` (plutôt qu'une méthode d'instance) car appelée
+    /// depuis `init()` avant que tous les stockages propriétés ne soient initialisés.
+    private static func migrateFromKeychainOnce(into credentials: inout SMTPCredentials, passwordKeychainKey: String, keychainCleanupDoneKey: String, defaults: UserDefaults) {
+        guard !defaults.bool(forKey: keychainCleanupDoneKey) else { return }
+        if credentials.password.isEmpty, let migrated = KeychainStore.get(forKey: passwordKeychainKey), !migrated.isEmpty {
+            credentials.password = migrated
+        }
+        KeychainStore.delete(forKey: passwordKeychainKey)
+        defaults.set(true, forKey: keychainCleanupDoneKey)
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
-        KeychainStore.delete(forKey: passwordKeychainKey)
     }
 }

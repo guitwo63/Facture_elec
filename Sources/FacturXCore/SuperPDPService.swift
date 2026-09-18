@@ -1003,30 +1003,42 @@ public final class SuperPDPSettings: ObservableObject {
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.superpdp.credentials.v1") }
     private var clientSecretKeychainKey: String { env.key("facturx.superpdp.clientSecret.v1") }
+    private var keychainCleanupDoneKey: String { env.key("facturx.superpdp.keychainCleanupDone.v1") }
 
     /// Retour arrière volontaire (2026-09-18) — voir le commentaire équivalent dans
     /// `SMTPSettings.init()` : l'app n'étant signée qu'en "ad hoc", une entrée Keychain
     /// créée par une build devient inaccessible à la build suivante (signature différente
-    /// à chaque reconstruction), ce qui faisait apparaître le mot de passe SUPER PDP comme
-    /// "effacé" à chaque mise à jour. Retour au stockage en clair dans UserDefaults ; à
-    /// reconsidérer si l'app passe un jour en mode SaaS. Migration one-shot depuis le
-    /// Keychain si le champ est vide, pour ne pas perdre un secret déjà saisi.
+    /// à chaque reconstruction) — le mot de passe SUPER PDP semblait "effacé", et l'app
+    /// redemandait l'autorisation d'accès au Keychain à chaque lancement. Retour au
+    /// stockage en clair dans UserDefaults ; à reconsidérer si l'app passe un jour en mode
+    /// SaaS.
     public init() {
+        var decoded: SuperPDPCredentials
         if let data = defaults.data(forKey: env.key("facturx.superpdp.credentials.v1")),
-           var decoded = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
-            if decoded.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: env.key("facturx.superpdp.clientSecret.v1")), !migrated.isEmpty {
-                decoded.clientSecret = migrated
-            }
-            credentials = decoded
+           let fromDisk = try? JSONDecoder().decode(SuperPDPCredentials.self, from: data) {
+            decoded = fromDisk
         } else {
-            credentials = SuperPDPCredentials(clientID: "", clientSecret: "")
+            decoded = SuperPDPCredentials(clientID: "", clientSecret: "")
         }
+        Self.migrateFromKeychainOnce(into: &decoded, clientSecretKeychainKey: env.key("facturx.superpdp.clientSecret.v1"), keychainCleanupDoneKey: env.key("facturx.superpdp.keychainCleanupDone.v1"), defaults: defaults)
+        credentials = decoded
+    }
+
+    /// Ne touche au Keychain qu'une seule fois, jamais plus ensuite — voir le commentaire
+    /// équivalent dans `SMTPSettings.migrateFromKeychainOnce`. `static` car appelée depuis
+    /// `init()` avant que toutes les propriétés stockées ne soient initialisées.
+    private static func migrateFromKeychainOnce(into credentials: inout SuperPDPCredentials, clientSecretKeychainKey: String, keychainCleanupDoneKey: String, defaults: UserDefaults) {
+        guard !defaults.bool(forKey: keychainCleanupDoneKey) else { return }
+        if credentials.clientSecret.isEmpty, let migrated = KeychainStore.get(forKey: clientSecretKeychainKey), !migrated.isEmpty {
+            credentials.clientSecret = migrated
+        }
+        KeychainStore.delete(forKey: clientSecretKeychainKey)
+        defaults.set(true, forKey: keychainCleanupDoneKey)
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
-        KeychainStore.delete(forKey: clientSecretKeychainKey)
     }
 }
