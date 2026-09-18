@@ -11,7 +11,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
     func testDefaultTransitionsMatchStandardLifecycle() {
         let store = InvoiceStatusStore()
         XCTAssertEqual(store.allowedTransitions(from: .draft, isAdmin: false), [.issued])
-        XCTAssertEqual(store.allowedTransitions(from: .issued, isAdmin: false), [.sentToPDP, .rejected])
+        XCTAssertEqual(store.allowedTransitions(from: .issued, isAdmin: false), [.sent, .refused])
         XCTAssertEqual(store.allowedTransitions(from: .paid, isAdmin: false), [])
     }
 
@@ -30,12 +30,19 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         XCTAssertEqual(store.allowedTransitions(from: .draft, isAdmin: false), [.cancelled])
     }
 
-    func testReformCodesAreNonEditableAndAlignedOnOfficialTable() {
+    /// Codes corrigés lors du passage au modèle séparé (statut fonctionnel / journal PDP) :
+    /// avant cette évolution, `accepted`/`rejected` utilisaient à tort fr:207/fr:206
+    /// ("Contestée"/"Partiellement acceptée"), pas leur vrai sens officiel.
+    func testReformCodesAreAlignedOnOfficialTable() {
         let store = InvoiceStatusStore()
-        XCTAssertEqual(store.override(for: .accepted).reformCode, "fr:207")
-        XCTAssertEqual(store.override(for: .rejected).reformCode, "fr:206")
+        XCTAssertEqual(store.override(for: .sent).reformCode, "200")
+        XCTAssertEqual(store.override(for: .accepted).reformCode, "fr:205")
+        XCTAssertEqual(store.override(for: .disputed).reformCode, "fr:207")
+        XCTAssertEqual(store.override(for: .refused).reformCode, "fr:210")
         XCTAssertEqual(store.override(for: .paid).reformCode, "fr:212")
-        XCTAssertEqual(store.override(for: .cancelled).reformCode, "fr:320")
+        XCTAssertNil(store.override(for: .draft).reformCode)
+        XCTAssertNil(store.override(for: .issued).reformCode)
+        XCTAssertNil(store.override(for: .cancelled).reformCode, "aucun code fr:2XX officiel pour \"Annulée\"")
     }
 
     func testLoadRealignsPersistedReformCodeEvenIfStale() throws {
@@ -49,7 +56,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
 
         let store = InvoiceStatusStore()
-        XCTAssertEqual(store.override(for: .accepted).reformCode, "fr:207")
+        XCTAssertEqual(store.override(for: .accepted).reformCode, "fr:205")
     }
 
     func testReformStatusRemainsNonDeletable() {
@@ -63,107 +70,105 @@ final class InvoiceStatusTransitionTests: XCTestCase {
     }
 
     /// Régression : une facture "Validée (non envoyée)" restait modifiable comme un
-    /// brouillon — seuls accepted/paid/cancelled verrouillaient. issued et sentToPDP
-    /// doivent verrouiller aussi, sinon une facture déjà transmise peut être modifiée
-    /// en silence par un utilisateur non admin.
+    /// brouillon — seuls accepted/paid/cancelled verrouillaient. issued et sent doivent
+    /// verrouiller aussi, sinon une facture déjà transmise peut être modifiée en silence
+    /// par un utilisateur non admin.
     func testValidatedAndTransmittedStatusesLockTheInvoice() {
         XCTAssertTrue(InvoiceStatus.issued.locksInvoice)
-        XCTAssertTrue(InvoiceStatus.sentToPDP.locksInvoice)
+        XCTAssertTrue(InvoiceStatus.sent.locksInvoice)
         XCTAssertTrue(InvoiceStatus.accepted.locksInvoice)
+        XCTAssertTrue(InvoiceStatus.disputed.locksInvoice)
         XCTAssertTrue(InvoiceStatus.paid.locksInvoice)
         XCTAssertTrue(InvoiceStatus.cancelled.locksInvoice)
     }
 
-    func testDraftAndRejectedStatusesRemainEditable() {
+    func testDraftAndRefusedStatusesRemainEditable() {
         XCTAssertFalse(InvoiceStatus.draft.locksInvoice)
-        XCTAssertFalse(InvoiceStatus.rejected.locksInvoice, "un rejet doit rester modifiable pour être corrigé")
+        XCTAssertFalse(InvoiceStatus.refused.locksInvoice, "un refus doit rester modifiable pour corriger et réémettre")
     }
 
-    // MARK: - Statuts de réforme ajoutés (fr:201-204, fr:208-209, fr:211, fr:213)
+    // MARK: - Statuts alternatifs au même point du cycle
 
-    func testNewReformStatusesHaveTheExpectedReformCode() {
-        let store = InvoiceStatusStore()
-        XCTAssertEqual(store.override(for: .sentToRecipient).reformCode, "fr:201")
-        XCTAssertEqual(store.override(for: .receivedByRecipient).reformCode, "fr:202")
-        XCTAssertEqual(store.override(for: .madeAvailable).reformCode, "fr:203")
-        XCTAssertEqual(store.override(for: .acknowledged).reformCode, "fr:204")
-        XCTAssertEqual(store.override(for: .onHold).reformCode, "fr:208")
-        XCTAssertEqual(store.override(for: .completed).reformCode, "fr:209")
-        XCTAssertEqual(store.override(for: .paymentSent).reformCode, "fr:211")
-        XCTAssertEqual(store.override(for: .refused).reformCode, "fr:210")
-        XCTAssertEqual(store.override(for: .technicallyRejected).reformCode, "fr:213")
-    }
-
-    /// Les statuts réseau (rapportés automatiquement par SUPER PDP, jamais créés par l'app)
-    /// n'ont aucune transition manuelle configurée par défaut — ils ne s'atteignent qu'en
-    /// recevant le statut réel depuis SUPER PDP (voir InvoiceEditorView.mapPDPStatusToLocal,
-    /// non testable ici : logique UI sans cible de test).
-    func testNetworkOnlyReformStatusesAreNotManuallyReachableByDefault() {
-        XCTAssertEqual(InvoiceStatus.sentToRecipient.allowedTransitions(), [])
-        XCTAssertEqual(InvoiceStatus.receivedByRecipient.allowedTransitions(), [])
-        XCTAssertEqual(InvoiceStatus.madeAvailable.allowedTransitions(), [])
-        XCTAssertEqual(InvoiceStatus.technicallyRejected.allowedTransitions(), [])
-    }
-
-    func testNetworkOnlyReformCodesMatchTheOnesFlaggedAsNonCreatable() {
-        for status in [InvoiceStatus.sentToPDP, .sentToRecipient, .receivedByRecipient, .madeAvailable, .technicallyRejected] {
-            let code = InvoiceStatusStore.reformCode(for: status)
-            XCTAssertNotNil(code)
-            XCTAssertTrue(InvoiceStatusStore.networkOnlyReformCodes.contains(code!), "\(status) (\(code!)) devrait être marqué non créable via l'API")
-        }
-        // Les codes réellement créables ne doivent pas être marqués à tort comme réseau seul.
-        for status in [InvoiceStatus.acknowledged, .onHold, .accepted, .rejected, .refused, .completed, .paymentSent, .paid] {
-            let code = InvoiceStatusStore.reformCode(for: status)
-            XCTAssertNotNil(code)
-            XCTAssertFalse(InvoiceStatusStore.networkOnlyReformCodes.contains(code!), "\(status) (\(code!)) est créable via l'API, ne devrait pas être marqué réseau seul")
-        }
-    }
-
-    /// Les statuts alternatifs à un même point du cycle de vie (accepted/rejected/refused/
-    /// technicallyRejected après acknowledged) ne doivent jamais se "rétrograder" l'un
-    /// l'autre : même rang, pour que la synchronisation PDP (qui refuse tout recul) ne
-    /// bloque pas le passage légitime de l'un à l'autre.
-    func testAlternativeOutcomesAtTheSameLifecycleStageShareTheSameRank() {
-        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.rejected.lifecycleRank)
+    func testAcceptedDisputedRefusedShareTheSameLifecycleRank() {
+        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.disputed.lifecycleRank)
         XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.refused.lifecycleRank)
-        XCTAssertEqual(InvoiceStatus.accepted.lifecycleRank, InvoiceStatus.technicallyRejected.lifecycleRank)
     }
 
     func testLifecycleRankIsMonotonicAlongTheHappyPath() {
-        let happyPath: [InvoiceStatus] = [
-            .draft, .issued, .sentToPDP, .sentToRecipient, .receivedByRecipient,
-            .madeAvailable, .acknowledged, .accepted, .completed, .paymentSent, .paid
-        ]
+        let happyPath: [InvoiceStatus] = [.draft, .issued, .sent, .accepted, .paid]
         for (a, b) in zip(happyPath, happyPath.dropFirst()) {
             XCTAssertLessThanOrEqual(a.lifecycleRank, b.lifecycleRank, "\(a) devrait précéder ou égaler \(b) dans le cycle de vie")
         }
     }
 
-    func testAllNewReformStatusesLockTheInvoice() {
-        for status in [InvoiceStatus.sentToRecipient, .receivedByRecipient, .madeAvailable, .acknowledged, .onHold, .technicallyRejected, .completed, .paymentSent] {
-            XCTAssertTrue(status.locksInvoice, "\(status) devrait verrouiller la facture, comme les autres statuts transmis")
-        }
-    }
-
-    // MARK: - fr:210 "Refusée" (AIFE REFUSEE) — refus métier, distinct du rejet technique
-
-    /// Un refus métier du destinataire doit rester modifiable, comme un rejet technique :
-    /// l'émetteur doit pouvoir corriger et réémettre (nouveau dépôt) sans être bloqué par
-    /// un verrouillage sur l'ancienne facture.
-    func testRefusedStatusRemainsEditable() {
-        XCTAssertFalse(InvoiceStatus.refused.locksInvoice)
-    }
+    // MARK: - Règle AIFE : accepted ne redevient jamais refused directement
 
     /// Règle métier issue des Spécifications Externes AIFE : une facture acceptée/approuvée
-    /// ne redevient jamais "refusée" — seul un avoir permet de corriger une contestation
-    /// tardive après acceptation.
-    func testAcceptedInvoiceCanNeverTransitionToRefused() {
+    /// ne redevient jamais directement "refusée" — une contestation tardive passe par
+    /// "disputed", pas par un refus direct.
+    func testAcceptedInvoiceCanNeverTransitionDirectlyToRefused() {
         XCTAssertFalse(InvoiceStatus.accepted.allowedTransitions().contains(.refused))
+        XCTAssertTrue(InvoiceStatus.accepted.allowedTransitions().contains(.disputed), "une contestation tardive reste possible")
     }
 
     func testRefusedIsReachableFromTheUsualDecisionPoints() {
-        XCTAssertTrue(InvoiceStatus.sentToPDP.allowedTransitions().contains(.refused))
-        XCTAssertTrue(InvoiceStatus.acknowledged.allowedTransitions().contains(.refused))
-        XCTAssertTrue(InvoiceStatus.onHold.allowedTransitions().contains(.refused))
+        XCTAssertTrue(InvoiceStatus.issued.allowedTransitions().contains(.refused))
+        XCTAssertTrue(InvoiceStatus.sent.allowedTransitions().contains(.refused))
+        XCTAssertTrue(InvoiceStatus.disputed.allowedTransitions().contains(.refused))
+    }
+
+    // MARK: - Migration depuis l'ancien modèle détaillé (15 statuts, 2026-09-18)
+
+    /// Un ancien statut réseau (étape intermédiaire de dépôt) doit se recaler sur "sent" —
+    /// sans quoi une facture déjà persistée avec l'un de ces statuts deviendrait
+    /// indécodable (perte silencieuse de toutes les factures du fichier).
+    func testLegacyNetworkStatusesMigrateToSent() throws {
+        for legacy in ["sentToPDP", "sentToRecipient", "receivedByRecipient", "madeAvailable", "acknowledged", "onHold"] {
+            let json = "\"\(legacy)\"".data(using: .utf8)!
+            let decoded = try JSONDecoder().decode(InvoiceStatus.self, from: json)
+            XCTAssertEqual(decoded, .sent, "\(legacy) devrait migrer vers .sent")
+        }
+    }
+
+    func testLegacyRejectionVariantsMigrateToRefused() throws {
+        for legacy in ["rejected", "technicallyRejected"] {
+            let json = "\"\(legacy)\"".data(using: .utf8)!
+            let decoded = try JSONDecoder().decode(InvoiceStatus.self, from: json)
+            XCTAssertEqual(decoded, .refused, "\(legacy) devrait migrer vers .refused")
+        }
+    }
+
+    func testLegacyCompletionVariantsMigrateSensibly() throws {
+        let completed = try JSONDecoder().decode(InvoiceStatus.self, from: "\"completed\"".data(using: .utf8)!)
+        XCTAssertEqual(completed, .accepted)
+        let paymentSent = try JSONDecoder().decode(InvoiceStatus.self, from: "\"paymentSent\"".data(using: .utf8)!)
+        XCTAssertEqual(paymentSent, .paid)
+    }
+
+    func testUnknownStatusMigratesToDraftRatherThanFailingToDecode() throws {
+        let decoded = try JSONDecoder().decode(InvoiceStatus.self, from: "\"some_future_unknown_status\"".data(using: .utf8)!)
+        XCTAssertEqual(decoded, .draft)
+    }
+
+    /// Une facture entière (pas seulement le statut isolé) doit rester décodable avec un
+    /// ancien statut — c'est le scénario réel : le champ est niché dans Invoice.
+    func testInvoiceWithLegacyStatusStillDecodes() throws {
+        let party = InvoiceParty(name: "Test", street: "", postcode: "", city: "")
+        var invoice = Invoice(number: "FAC0001", seller: party, buyer: party)
+        invoice.status = .sent
+        let data = try JSONEncoder().encode(invoice)
+        var text = String(data: data, encoding: .utf8)!
+        text = text.replacingOccurrences(of: "\"status\":\"sent\"", with: "\"status\":\"sentToRecipient\"")
+        let patched = text.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(Invoice.self, from: patched)
+        XCTAssertEqual(decoded.status, .sent)
+    }
+
+    func testKnownStatusesRoundTripUnchanged() throws {
+        for status in InvoiceStatus.allCases {
+            let data = try JSONEncoder().encode(status)
+            let decoded = try JSONDecoder().decode(InvoiceStatus.self, from: data)
+            XCTAssertEqual(decoded, status)
+        }
     }
 }

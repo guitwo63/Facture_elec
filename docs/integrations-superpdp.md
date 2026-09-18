@@ -201,3 +201,88 @@ Règle métier appliquée dans `allowedTransitions()` : une facture acceptée/ap
 (`accepted`) ne redevient jamais "refusée" (`refused`) — seul un avoir permet de corriger une
 contestation tardive après acceptation, conformément à la règle AIFE "Une facture APPROUVEE ne
 peut pas devenir REFUSEE".
+
+## 9. Changement d'architecture — séparation statut fonctionnel / journal PDP (2026-09-18)
+
+Après les sections 7-8, `InvoiceStatus` comptait 15 cas mélangeant trois natures différentes :
+purement local (`draft`/`issued`), télémétrie réseau sans aucune action de l'app
+(`sentToRecipient`/`receivedByRecipient`/`madeAvailable`/`acknowledged`/`onHold`), et décision
+métier (`accepted`/`rejected`/`refused`/`technicallyRejected`). Ça posait plusieurs problèmes
+concrets, rencontrés en construisant les sections précédentes :
+
+- Chaque nouveau code `fr:2XX` touchait ~10 endroits (label, icône, couleur, verrouillage,
+  rang de cycle de vie, transitions, code réforme, `networkOnlyReformCodes`, mapping de
+  réception, menu "Forcer", filtre de liste, table de réglages).
+- `lifecycleRank` (un entier) devait simuler un ordre linéaire sur des issues qui n'en sont
+  pas (`accepted`/`rejected`/`refused`/`technicallyRejected` au même "point" du cycle).
+- La correction fr:206/fr:207 restait bloquée : le code exact envoyé et le statut qui pilote
+  aussi le verrouillage/libellé étaient la même chose, donc corriger l'un risquait l'autre.
+- `technicallyRejected` (fr:213) et `rejected` (fr:206, une fois corrigé) finissaient par
+  représenter presque la même chose — doublon né du couplage statut/code.
+- La doc SUPER PDP le dit elle-même : *"this is not a state machine... presence indicates an
+  event has occurred rather than a current, exclusive state"* — forcer un journal
+  d'événements dans un statut unique va contre la forme de la donnée.
+
+**Décision : revenir à un statut fonctionnel réduit et stable, avec une passerelle isolée
+vers le détail des événements PDP.**
+
+### `InvoiceStatus` (8 cas, stable)
+
+| Statut | Rôle | Verrouille |
+|---|---|---|
+| `draft` | Brouillon | non |
+| `issued` | Validée, non envoyée | oui |
+| `sent` | Envoyée/déposée, pipeline PDP en cours | oui |
+| `accepted` | Acceptée (métier) | oui |
+| `disputed` | Contestée / en litige | oui |
+| `refused` | Refusée (métier), éditable pour réémettre | non |
+| `paid` | Payée | oui |
+| `cancelled` | Annulée (forçage admin) | oui |
+
+### Codes réforme corrigés au passage (`InvoiceStatusStore.reformCode`)
+
+| Statut | Code | Avant (sections 7-8) |
+|---|---|---|
+| `sent` | `200` (implicite, jamais envoyé isolément) | `sentToPDP` → `"200"` (inchangé) |
+| `accepted` | **`fr:205`** | `"fr:207"` (erroné — "Contestée") |
+| `disputed` | `fr:207` | absent |
+| `refused` | `fr:210` | inchangé |
+| `paid` | `fr:212` | inchangé |
+| `draft`/`issued`/`cancelled` | aucun | `cancelled` avait `"fr:320"` (code inexistant) |
+
+La correction fr:207 différée depuis la section 7 est donc faite ici, à l'occasion de la
+reconstruction complète de la table — aucune raison de reporter une correction déjà identifiée
+comme juste quand le modèle est de toute façon réécrit.
+
+### La passerelle (`PDPStatusMapper.functionalTransition(for:)`, dans `SuperPDPStatusSync.swift`)
+
+Le seul endroit à modifier pour ajouter/préciser un code SUPER PDP — un code absent reste
+purement informationnel (visible dans le journal SUPER PDP de la facture) sans forcer de
+changement de statut :
+
+```swift
+case "fr:205": return .accepted
+case "fr:207": return .disputed
+case "fr:206", "fr:210", "fr:213": return .refused
+case "fr:212": return .paid
+case "fr:320", "cancelled": return .cancelled
+default: return nil   // fr:200-204, fr:208, fr:209, fr:211, fr:220… : informatif seulement
+```
+
+### Migration des données déjà persistées
+
+`InvoiceStatus` a un `init(from decoder:)` sur mesure : un statut inconnu (l'un des 7 retirés
+des sections 7-8, ou tout futur cas retiré) se recale sur l'équivalent le plus proche
+(`sentToPDP`/`sentToRecipient`/`receivedByRecipient`/`madeAvailable`/`acknowledged`/`onHold` →
+`sent` ; `rejected`/`technicallyRejected` → `refused` ; `completed` → `accepted` ;
+`paymentSent` → `paid`) plutôt que d'échouer à décoder — une facture existante avec l'un de
+ces statuts ne doit jamais disparaître silencieusement au chargement.
+
+### Ce qui ne change pas
+
+Le journal des événements SUPER PDP (`SuperPDPInvoiceEvent`/`listInvoiceEvents`, le panneau
+"Journal SUPER PDP" de la fiche facture) reste la référence complète et fidèle du détail
+réseau — il n'a jamais eu besoin d'être dupliqué dans `InvoiceStatus`. Le moteur de
+synchronisation périodique (`PDPPeriodicSyncEngine`, section précédente) est inchangé dans sa
+structure ; seule son étape "traduire le code reçu" passe par la passerelle plutôt que par un
+mapping à 15 cibles.

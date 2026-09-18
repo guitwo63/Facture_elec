@@ -2370,13 +2370,13 @@ struct InvoiceEditorView: View {
                     }
                     ForEach(configuredTransitions, id: \.self) { s in
                         Button {
-                            // « Transmise au PDP » ne doit jamais être qu'une étiquette : passer
+                            // « Envoyée / en cours » ne doit jamais être qu'une étiquette : passer
                             // ce statut sans réellement déposer laissait croire la facture
                             // transmise alors qu'elle ne l'était pas, tout en la verrouillant
                             // (statut verrouillant) — ce qui bloquait ensuite le vrai bouton
                             // "Super PDP" (dépôt), y compris pour un administrateur. Le seul
                             // chemin valide vers ce statut est donc le dépôt réel.
-                            if s == .sentToPDP, superPDPSettings.credentials.usePDP,
+                            if s == .sent, superPDPSettings.credentials.usePDP,
                                (invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty {
                                 depositToSuperPDP()
                             } else {
@@ -3186,7 +3186,7 @@ struct InvoiceEditorView: View {
                 if let rid = submission.remoteID, !rid.isEmpty {
                     invoice.superPDPRemoteID = rid
                     if invoice.status == .issued || invoice.status == .draft {
-                        invoice.status = .sentToPDP
+                        invoice.status = .sent
                     }
                     store.upsert(invoice)
                 }
@@ -3237,7 +3237,7 @@ struct InvoiceEditorView: View {
                     enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
                     lastCheckedAt: updated.lastCheckedAt, message: updated.message, direction: .received
                 )
-                if let mapped = PDPStatusMapper.mapPDPStatusToLocal(updated.status) {
+                if let mapped = PDPStatusMapper.functionalTransition(for: updated.status) {
                     // Ne jamais rétrograder le statut local : on n'applique le statut PDP
                     // que s'il représente un avancement dans le cycle de vie (ou une annulation).
                     let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
@@ -3435,7 +3435,7 @@ struct InvoiceEditorView: View {
     private func sendInvoiceStatusAlertIfNeeded(_ newStatus: InvoiceStatus) {
         let smtp = smtpSettings.credentials
         guard smtp.alertsEnabled, smtp.alertOnInvoiceStatusChange, smtp.isConfigured,
-              [.accepted, .rejected, .paid, .cancelled].contains(newStatus),
+              [InvoiceStatus.accepted, .disputed, .refused, .paid, .cancelled].contains(newStatus),
               let recipient = auth.currentUser?.username else { return }
         let invoiceNumber = invoice.number
         let label = newStatus.label
@@ -3452,8 +3452,9 @@ struct InvoiceEditorView: View {
     private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
         guard superPDPSettings.credentials.isConfigured else { return }
-        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode,
-              !InvoiceStatusStore.networkOnlyReformCodes.contains(statusCode) else { return }
+        // "200" (sent) est posé par le dépôt lui-même (voir depositToSuperPDP) — jamais
+        // envoyé séparément comme événement de statut.
+        guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode, statusCode != "200" else { return }
         let detailLabel = newStatus.label
         if !force, let last = lastSentPDPStatusCode, last == statusCode {
             superPDPMessage = "Statut « \(detailLabel) » déjà envoyé à SUPER PDP (code \(statusCode)). Évite l'envoi en double."
@@ -6614,21 +6615,15 @@ struct ValueTablesView: View {
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
     }
 
-    /// Sens de circulation du statut avec SUPER PDP : "Envoyé" pour un code que l'app peut
-    /// transmettre (bouton de transition, `notifyPDPStatusChange`) ; "Reçu" pour un code
-    /// réseau que seule SUPER PDP émet (`InvoiceStatusStore.networkOnlyReformCodes`),
-    /// jamais créé par l'app — visible uniquement en synchronisant le statut distant.
-    /// `sentToPDP` (fr:200) est un cas particulier : envoyé, mais implicitement par le
-    /// dépôt lui-même plutôt que par un événement de statut séparé.
+    /// Sens de circulation du statut fonctionnel avec SUPER PDP : chaque code renvoyé par
+    /// `InvoiceStatusStore.reformCode` est réellement envoyable (voir sa doc) — le détail
+    /// fin des événements réseau reçus (fr:200-204, fr:208, fr:209, fr:211, fr:220…) vit
+    /// dans le journal SUPER PDP de la facture, pas dans cette table. `sent` (fr:200) est
+    /// un cas particulier : envoyé, mais implicitement par le dépôt lui-même plutôt que
+    /// par un événement de statut séparé.
     private func pdpDirection(for override: InvoiceStatusOverride) -> (label: String, systemImage: String, color: Color, help: String)? {
-        guard let code = override.reformCode else { return nil }
-        if InvoiceStatusStore.networkOnlyReformCodes.contains(code) {
-            return (
-                "Reçu de SUPER PDP", "arrow.down.circle",
-                Color.blue,
-                "Rapporté automatiquement par SUPER PDP — l'app ne peut pas créer ce statut elle-même, il n'apparaît qu'en synchronisant le statut distant."
-            )
-        } else if override.id == InvoiceStatus.sentToPDP.rawValue {
+        guard override.reformCode != nil else { return nil }
+        if override.id == InvoiceStatus.sent.rawValue {
             return (
                 "Envoyé (via le dépôt)", "arrow.up.circle",
                 Color.orange,
