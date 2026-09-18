@@ -464,8 +464,8 @@ public enum InvoiceStatus: String, Codable, CaseIterable {
 
     public var locksInvoice: Bool {
         switch self {
-        case .accepted, .paid, .cancelled: return true
-        default: return false
+        case .issued, .sentToPDP, .accepted, .paid, .cancelled: return true
+        case .draft, .rejected: return false
         }
     }
 
@@ -536,6 +536,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
     /// Distinct de `notes` (BT-22, imprimé sur le document) : remarque interne à l'équipe,
     /// jamais incluse dans le PDF/XML généré.
     public var internalComment: String?
+    /// Date du dernier envoi par email au client — pour avertir avant un renvoi accidentel.
+    public var lastEmailSentAt: Date?
 
     public init(
         id: UUID = UUID(),
@@ -567,7 +569,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         superPDPRemoteID: String? = nil,
         optionalFields: [OptionalField] = [],
         attachments: [Attachment] = [],
-        internalComment: String? = nil
+        internalComment: String? = nil,
+        lastEmailSentAt: Date? = nil
     ) {
         self.id = id
         self.number = number
@@ -598,6 +601,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.optionalFields = optionalFields
         self.attachments = attachments
         self.internalComment = internalComment
+        self.lastEmailSentAt = lastEmailSentAt
         self.buyerReference = buyerReference
     }
 
@@ -645,7 +649,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
         case purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
-        case attachments, internalComment
+        case attachments, internalComment, lastEmailSentAt
     }
 
     private enum LegacyReferenceKeys: String, CodingKey {
@@ -685,6 +689,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         optionalFields = try c.decodeIfPresent([OptionalField].self, forKey: .optionalFields) ?? []
         attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
         internalComment = try c.decodeIfPresent(String.self, forKey: .internalComment)
+        lastEmailSentAt = try c.decodeIfPresent(Date.self, forKey: .lastEmailSentAt)
         migrateReference("ram:BuyerReference", legacyBuyerReference)
         migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
         migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))

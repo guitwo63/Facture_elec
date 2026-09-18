@@ -61,4 +61,21 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         store.remove(at: idx)
         XCTAssertEqual(store.overrides.count, countBefore, "Un statut de réforme ne doit jamais être supprimable")
     }
+
+    /// Régression : une facture "Validée (non envoyée)" restait modifiable comme un
+    /// brouillon — seuls accepted/paid/cancelled verrouillaient. issued et sentToPDP
+    /// doivent verrouiller aussi, sinon une facture déjà transmise peut être modifiée
+    /// en silence par un utilisateur non admin.
+    func testValidatedAndTransmittedStatusesLockTheInvoice() {
+        XCTAssertTrue(InvoiceStatus.issued.locksInvoice)
+        XCTAssertTrue(InvoiceStatus.sentToPDP.locksInvoice)
+        XCTAssertTrue(InvoiceStatus.accepted.locksInvoice)
+        XCTAssertTrue(InvoiceStatus.paid.locksInvoice)
+        XCTAssertTrue(InvoiceStatus.cancelled.locksInvoice)
+    }
+
+    func testDraftAndRejectedStatusesRemainEditable() {
+        XCTAssertFalse(InvoiceStatus.draft.locksInvoice)
+        XCTAssertFalse(InvoiceStatus.rejected.locksInvoice, "un rejet doit rester modifiable pour être corrigé")
+    }
 }
