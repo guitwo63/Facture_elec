@@ -76,7 +76,8 @@ public final class QuoteStore: ObservableObject {
 
     /// Format effectif pour une société — voir `InvoiceStore.numberingFormat(for:)`.
     public func numberingFormat(for companyID: UUID?) -> InvoiceNumberingFormat {
-        if let cid = companyID, let override = numberFormatOverrides[cid] { return override }
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let override = numberFormatOverrides[effectiveID] { return override }
         return InvoiceNumberingFormat(prefix: numberPrefix, includeYear: numberIncludeYear, start: numberStart, useSeparator: numberUseSeparator)
     }
 

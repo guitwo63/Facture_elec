@@ -114,10 +114,11 @@ public final class PaymentTermsPresetStore: ObservableObject {
     }
 
     /// Liste effective pour une société : le réglage global, avec les préréglages de la
-    /// société superposés par id. `companyID == nil` retourne toujours le réglage global.
+    /// société superposés par id. `companyID == nil` résout sur la société principale si une
+    /// a été désignée (voir `PartyDirectory.principaleSocieteID`), sinon le réglage global.
     public func list(for companyID: UUID?) -> [PaymentTermsPreset] {
-        guard let companyID else { return presets }
-        return SocietyScopedCatalog.resolvedList(global: presets, overrideForSociety: presetsBySociety[companyID])
+        guard let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID else { return presets }
+        return SocietyScopedCatalog.resolvedList(global: presets, overrideForSociety: presetsBySociety[effectiveID])
     }
 
     /// Commence (ou remplace) la personnalisation de ce préréglage pour cette société.

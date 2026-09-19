@@ -135,7 +135,8 @@ public final class AuditActionLabelStore: ObservableObject {
 
     /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
     public func label(for actionCode: String, companyID: UUID?) -> String {
-        if let companyID, let match = SocietyScopedCatalog.resolvedElement(id: actionCode, overrideForSociety: overridesBySociety[companyID]) {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let match = SocietyScopedCatalog.resolvedElement(id: actionCode, overrideForSociety: overridesBySociety[effectiveID]) {
             return match.label
         }
         return label(for: actionCode)
