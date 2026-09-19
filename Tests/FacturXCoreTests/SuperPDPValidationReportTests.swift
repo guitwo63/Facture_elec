@@ -100,4 +100,57 @@ final class SuperPDPValidationReportTests: XCTestCase {
         XCTAssertFalse(report.isValid)
         XCTAssertTrue(report.errors.isEmpty)
     }
+
+    /// Régression : vue en conditions réelles (tableau de bord SUPER PDP, dépôt
+    /// facture-FA-2026-0011.pdf) sur un rapport is_valid=false dont les 3 échecs visibles au
+    /// tableau de bord ("Message (1/3)"…) n'étaient dans aucun cas sous `failures` — la clé
+    /// effectivement peuplée pour ce validateur était `messages`, jusque-là toujours vide dans
+    /// la réponse de référence et donc jamais lue. L'app affichait "non conforme — 0 erreur(s)",
+    /// sans aucun détail, malgré 3 échecs bien réels et consultables sur le tableau de bord.
+    func testParsesFailuresFromMessagesFieldWhenFailuresIsEmpty() throws {
+        let json = """
+        {
+          "data": [
+            {
+              "is_valid": false,
+              "subreports": [
+                {
+                  "validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/FACTUR-X_EN16931.xslt",
+                  "checks_count": 84,
+                  "failures": [],
+                  "messages": [
+                    {
+                      "message": "[PEPPOL-EN16931-R008]-Document MUST not contain empty elements. (still status warning)",
+                      "raw": "svrl:failed-assert PEPPOL-EN16931-R008",
+                      "location": "/CrossIndustryInvoice/.../PostcodeCode"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        """
+        let report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
+        XCTAssertFalse(report.isValid)
+        XCTAssertEqual(report.errors.count, 1, "le contenu de messages doit être récupéré même quand failures est vide")
+        XCTAssertTrue(report.errors.contains { $0.contains("PEPPOL-EN16931-R008") })
+    }
+
+    /// Un validateur dont failures ET messages sont tous deux peuplés ne doit pas dupliquer
+    /// (comportement pas rencontré en pratique mais gardé prévisible) — chaque entrée compte
+    /// une fois par tableau, les deux tableaux sont simplement concaténés.
+    func testFailuresAndMessagesAreBothReadWithoutCrashingWhenBothPresent() throws {
+        let json = """
+        {"data": [{"is_valid": false, "subreports": [
+          {"validator": "EN16931.xslt", "checks_count": 2,
+           "failures": [{"message": "[BR-1]-A"}],
+           "messages": [{"message": "[BR-2]-B"}]}
+        ]}]}
+        """
+        let report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
+        XCTAssertEqual(report.errors.count, 2)
+        XCTAssertTrue(report.errors.contains { $0.contains("BR-1") })
+        XCTAssertTrue(report.errors.contains { $0.contains("BR-2") })
+    }
 }

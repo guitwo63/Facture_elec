@@ -762,7 +762,7 @@ struct CompanyDetailCard: View {
                 } else {
                     LabeledContent("SIREN") { Text("—").foregroundStyle(.secondary) }
                 }
-                LabeledContent("Type") { Text(entry.kind.label) }
+                LabeledContent("Type") { Text(entry.kindsLabel) }
                 if let city = entry.party.city.trimmingCharacters(in: .whitespaces) as String?, !city.isEmpty {
                     LabeledContent("Ville") { Text(city) }
                 }
@@ -915,7 +915,7 @@ struct UserEditorSheet: View {
     }
 
     private var availableSocieties: [DirectoryEntry] {
-        directory.entries.filter { !$0.isArchived && $0.kind == .societe }
+        directory.entries.filter { !$0.isArchived && $0.kinds.contains(.societe) }
     }
 
     private var validationError: String? {
@@ -1464,7 +1464,7 @@ struct DataPartiesPanel: View {
                     ForEach(filtered) { entry in
                         HStack {
                             Text(entry.displayName).font(.headline)
-                            Text(entry.kind.label).font(.caption).foregroundStyle(.secondary)
+                            Text(entry.kindsLabel).font(.caption).foregroundStyle(.secondary)
                             if let siren = entry.party.siren, !siren.isEmpty {
                                 Text("SIREN \(siren)").font(.caption.monospaced()).foregroundStyle(.secondary)
                             }

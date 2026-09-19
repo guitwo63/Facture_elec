@@ -167,7 +167,7 @@ final class InvoiceNumberingTests: XCTestCase {
 
     func testNewDraftUsesSellersOwnPaymentTermsWhenSet() {
         let directory = PartyDirectory()
-        var entry = DirectoryEntry(kind: .societe, party: InvoiceParty(name: "Vendeur", street: "", postcode: "", city: ""))
+        var entry = DirectoryEntry(kinds: [.societe], party: InvoiceParty(name: "Vendeur", street: "", postcode: "", city: ""))
         entry.party.paymentTerms = "Comptant"
         directory.upsert(entry)
         let store = InvoiceStore()

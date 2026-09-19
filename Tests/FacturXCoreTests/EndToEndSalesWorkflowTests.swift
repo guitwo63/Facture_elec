@@ -72,8 +72,8 @@ final class EndToEndSalesWorkflowTests: XCTestCase {
         let directory = PartyDirectory()
         directory.audit = audit
         directory.actorName = "e2e-test"
-        let company = DirectoryEntry(kind: .societe, party: companyParty())
-        let client = DirectoryEntry(kind: .client, party: clientParty(), note: "Créé par le test bout-en-bout")
+        let company = DirectoryEntry(kinds: [.societe], party: companyParty())
+        let client = DirectoryEntry(kinds: [.client], party: clientParty(), note: "Créé par le test bout-en-bout")
         directory.upsert(company)
         directory.upsert(client)
 

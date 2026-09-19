@@ -887,7 +887,7 @@ struct RootView: View {
     private func maybeShowSetupWizard() {
         guard !setupWizardSkippedThisSession else { return }
         guard auth.currentUser?.isAdmin == true else { return }
-        guard !directory.entries.contains(where: { $0.kind == .societe }) else { return }
+        guard !directory.entries.contains(where: { $0.kinds.contains(.societe) }) else { return }
         showSetupWizard = true
     }
 
@@ -3318,7 +3318,7 @@ struct InvoiceEditorView: View {
         if !preCheck.isValid {
             validation = preCheck
             showValidation = true
-            exportError = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de générer."
+            exportError = "Validation échouée : \(preCheck.totalErrorCount) erreur(s). Corrigez avant de générer."
             return
         }
         do {
@@ -3374,7 +3374,7 @@ struct InvoiceEditorView: View {
         if !preCheck.isValid {
             validation = preCheck
             showValidation = true
-            superPDPMessage = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de déposer."
+            superPDPMessage = "Validation échouée : \(preCheck.totalErrorCount) erreur(s). Corrigez avant de déposer."
             superPDPSubmitting = false
             return
         }
@@ -3613,7 +3613,7 @@ struct InvoiceEditorView: View {
         if !preCheck.isValid {
             validation = preCheck
             showValidation = true
-            superPDPMessage = "Validation locale échouée : \(preCheck.errors.count) erreur(s). Corrigez avant la validation SUPER PDP."
+            superPDPMessage = "Validation locale échouée : \(preCheck.totalErrorCount) erreur(s). Corrigez avant la validation SUPER PDP."
             pdpValidating = false
             return
         }
@@ -3904,6 +3904,24 @@ struct InvoiceEditorView: View {
                         }
                     }
                 }
+                // Le rapport dit non conforme mais n'a donné aucun détail structuré
+                // (`subreports` absent ou vide côté SUPER PDP pour cette réponse précise) —
+                // sans repli, l'utilisateur n'avait aucune piste (juste "0 erreur(s)").
+                // On affiche au moins les champs bruts reçus, utiles pour diagnostiquer.
+                if !report.isValid, report.errors.isEmpty, report.warnings.isEmpty {
+                    Text("Le rapport SUPER PDP ne détaille pas la cause (aucun sous-rapport reçu). Champs bruts de la réponse :")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if report.raw.isEmpty {
+                        Text("(réponse vide)").font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(report.raw.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                            HStack(alignment: .top, spacing: 4) {
+                                Text("\(key) :").font(.caption2.bold()).foregroundStyle(.secondary)
+                                Text(value).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -4146,7 +4164,7 @@ struct PartySection: View {
     }
 
     private func finishSaveToDirectory(_ p: InvoiceParty) {
-        var entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        var entry = DirectoryEntry(kinds: [role.defaultKind], party: p)
         // L'adresse électronique trouvée était appliquée à `party.endpointID` mais jamais
         // recopiée dans `routingAddresses` (la liste gérée depuis la fiche tiers) : elle
         // semblait alors ne "rien avoir enregistré" une fois le tiers ouvert, malgré un
@@ -4206,7 +4224,9 @@ struct PartyPickerSheet: View {
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var active = directory.entries.filter {
-            !$0.isArchived && (role == .seller ? $0.kind == .societe : ($0.kind == .client || $0.kind == .both))
+            guard !$0.isArchived else { return false }
+            if $0.kinds.contains(.interco) { return true }
+            return role == .seller ? $0.kinds.contains(.societe) : $0.kinds.contains(.client)
         }
         if role == .seller, let scope = auth.visibleDirectoryEntryIDs(for: auth.currentUser) {
             active = active.filter { scope.contains($0.id) }
@@ -4272,7 +4292,7 @@ struct PartyPickerSheet: View {
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
                                         }
-                                        Text(entry.kind.label).font(.caption2)
+                                        Text(entry.kindsLabel).font(.caption2)
                                             .padding(.horizontal, 6).padding(.vertical, 1)
                                             .background(.quaternary, in: Capsule())
                                     }
@@ -4430,16 +4450,42 @@ struct PartyImportSheet: View {
     }
 }
 
-enum DirectoryKindFilter: String, CaseIterable, Hashable {
-    case all = "Tous"
-    case clients = "Clients"
-    case fournisseurs = "Fournisseurs"
+/// Puce cliquable partagée par le multi-sélecteur de types (fiche tiers) et le filtre par
+/// type (Annuaire) — même style, logique de bascule laissée à l'appelant car elle diffère
+/// (la fiche impose au moins un type coché, le filtre autorise "aucun" = "Tous").
+private struct KindChipToggle: View {
+    let label: String
+    let isOn: Bool
+    let action: () -> Void
 
-    func matches(_ kind: DirectoryEntryKind) -> Bool {
-        switch self {
-        case .all: return kind != .societe
-        case .clients: return kind == .client || kind == .both
-        case .fournisseurs: return kind == .fournisseur || kind == .both
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.callout)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(isOn ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
+                .overlay(Capsule().stroke(isOn ? Color.accentColor : Color.secondary.opacity(0.4)))
+                .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Une capsule colorée par type cumulé sur un tiers (voir `DirectoryEntry.kinds`) — remplace
+/// la capsule unique d'avant le multi-sélecteur. Vue dédiée (plutôt qu'un `ForEach` inline
+/// dans chaque `HStack` appelante) : le vérificateur de types SwiftUI n'arrivait pas à
+/// résoudre l'expression en un temps raisonnable une fois ce `ForEach` ajouté inline.
+private struct KindBadges: View {
+    let kinds: Set<DirectoryEntryKind>
+    let kindColors: KindColorStore
+    var font: Font = .caption2
+
+    var body: some View {
+        ForEach(DirectoryEntryKind.selectable.filter { kinds.contains($0) }, id: \.self) { kind in
+            Text(kind.label).font(font)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Color(hex: kindColors.hexColor(for: kind)).opacity(0.2), in: Capsule())
+                .foregroundColor(Color(hex: kindColors.hexColor(for: kind)))
         }
     }
 }
@@ -4457,14 +4503,16 @@ struct DirectoryView: View {
     @State private var showExport = false
     @State private var showImport = false
     @State private var importResult: ExportGenerator.PartyImportResult?
-    @State private var kindFilter: DirectoryKindFilter = .all
+    /// Vide = "Tous" (tous les tiers hors sociétés du périmètre, comme avant) ; sinon un
+    /// tiers est visible s'il porte au moins un des types cochés ici.
+    @State private var kindFilters: Set<DirectoryEntryKind> = []
 
     private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var base = directory.entries.filter { showArchived || !$0.isArchived }
-        base = base.filter { kindFilter.matches($0.kind) }
+        base = base.filter { kindFilters.isEmpty ? !$0.kinds.contains(.societe) : !$0.kinds.isDisjoint(with: kindFilters) }
         guard q.isEmpty else {
             return base.filter {
                 $0.displayName.lowercased().contains(q)
@@ -4487,13 +4535,17 @@ struct DirectoryView: View {
                     } label: { Label("Nouveau tiers", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Annuaire des tiers").font(.title2.bold())
-                    Picker("Type", selection: $kindFilter) {
-                        ForEach(DirectoryKindFilter.allCases, id: \.self) { f in
-                            Text(f.rawValue).tag(f)
+                    HStack(spacing: 6) {
+                        KindChipToggle(label: "Tous", isOn: kindFilters.isEmpty) {
+                            kindFilters = []
+                        }
+                        ForEach([DirectoryEntryKind.client, .fournisseur, .interco], id: \.self) { kind in
+                            KindChipToggle(label: kind.label, isOn: kindFilters.contains(kind)) {
+                                if kindFilters.contains(kind) { kindFilters.remove(kind) }
+                                else { kindFilters.insert(kind) }
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 240)
                     Spacer()
                     Button { showImport = true } label: { Label("Importer", systemImage: "square.and.arrow.down") }
                         .buttonStyle(.bordered)
@@ -4542,10 +4594,7 @@ struct DirectoryView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
                                 Text(entry.displayName).font(.headline)
-                                Text(entry.kind.label).font(.caption2)
-                                    .padding(.horizontal, 6).padding(.vertical, 1)
-                                    .background(Color(hex: kindColors.hexColor(for: entry.kind)).opacity(0.2), in: Capsule())
-                                    .foregroundColor(Color(hex: kindColors.hexColor(for: entry.kind)))
+                                KindBadges(kinds: entry.kinds, kindColors: kindColors)
                                 ForEach(entry.tagIDs.compactMap({ id in tagStore.tags.first(where: { $0.id == id }) }), id: \.id) { tag in
                                     Text(tag.name).font(.caption2)
                                         .padding(.horizontal, 6).padding(.vertical, 1)
@@ -4652,7 +4701,7 @@ struct DirectoryView: View {
     }
 
     private func canEditEntry(_ entry: DirectoryEntry) -> Bool {
-        if entry.kind == .societe { return canManageSocietes }
+        if entry.kinds.contains(.societe) { return canManageSocietes }
         return true
     }
 
@@ -4711,10 +4760,7 @@ struct DirectoryDetailView: View {
             VStack(spacing: 0) {
                 HStack {
                     Text(entry.displayName).font(.headline)
-                    Text(entry.kind.label).font(.caption)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Color(hex: kindColors.hexColor(for: entry.kind)).opacity(0.2), in: Capsule())
-                        .foregroundColor(Color(hex: kindColors.hexColor(for: entry.kind)))
+                    KindBadges(kinds: entry.kinds, kindColors: kindColors, font: .caption)
                     Spacer()
                     Button { onEdit(entry) } label: { Label("Modifier", systemImage: "pencil") }
                         .buttonStyle(.bordered)
@@ -4748,7 +4794,7 @@ struct DirectoryDetailView: View {
                         }
                         Divider()
                         Text("Identité").font(.headline)
-                        detailRow("Type", entry.kind.label)
+                        detailRow("Type", entry.kindsLabel)
                         detailRow("Nom", entry.party.name)
                         if !entry.tagIDs.isEmpty {
                             HStack(alignment: .top) {
@@ -4830,7 +4876,7 @@ struct DirectoryDetailView: View {
                         }
 
                         Divider()
-                        if entry.kind != .client {
+                        if entry.isPayee {
                             Text("Coordonnées bancaires").font(.headline)
                         if let iban = entry.party.iban?.trimmingCharacters(in: .whitespaces), !iban.isEmpty {
                             HStack(alignment: .top) {
@@ -4924,7 +4970,7 @@ struct DirectoryDetailView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                        if entry.kind != .fournisseur {
+                        if !entry.isSupplierOnly {
                         VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Adresses de facturation électronique").font(.headline)
@@ -5049,7 +5095,11 @@ struct DirectoryEditorView: View {
     }
 
     init(initialKind: DirectoryEntryKind, defaultCompanyID: UUID? = nil, onSave: @escaping (DirectoryEntry) -> Void) {
-        var initial = DirectoryEntry(kind: initialKind, party: InvoiceParty(name: "", street: "", postcode: "", city: ""))
+        // Une société du périmètre est toujours aussi une partie liée aux autres sociétés
+        // gérées dans l'app (même utilisateur, même périmètre) — cochée Interco par défaut,
+        // modifiable ensuite comme n'importe quel autre type.
+        let initialKinds: Set<DirectoryEntryKind> = initialKind == .societe ? [.societe, .interco] : [initialKind]
+        var initial = DirectoryEntry(kinds: initialKinds, party: InvoiceParty(name: "", street: "", postcode: "", city: ""))
         if initialKind == .client, let cid = defaultCompanyID {
             initial.companyID = cid
         }
@@ -5069,7 +5119,7 @@ struct DirectoryEditorView: View {
     private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     private var availableKinds: [DirectoryEntryKind] {
-        if canManageSocietes { return DirectoryEntryKind.allCases }
+        if canManageSocietes { return DirectoryEntryKind.selectable }
         return [.client]
     }
 
@@ -5112,12 +5162,26 @@ struct DirectoryEditorView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            Picker("Type", selection: $entry.kind) {
-                ForEach(availableKinds, id: \.self) { Text($0.label).tag($0) }
-            }.pickerStyle(.segmented)
-            .disabled(!canManageSocietes && entry.kind == .societe)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Type").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    ForEach(availableKinds, id: \.self) { kind in
+                        KindChipToggle(label: kind.label, isOn: entry.kinds.contains(kind)) {
+                            if entry.kinds.contains(kind) {
+                                // Un tiers doit toujours garder au moins un type — on
+                                // ignore silencieusement le dernier décochage plutôt que
+                                // d'autoriser un ensemble vide dénué de sens.
+                                if entry.kinds.count > 1 { entry.kinds.remove(kind) }
+                            } else {
+                                entry.kinds.insert(kind)
+                            }
+                        }
+                    }
+                    Spacer()
+                }
+            }
 
-            if entry.kind == .client {
+            if entry.kinds.contains(.client) {
                 GroupBox("Société (périmètre)") {
                     HStack {
                         Text("Société").frame(width: 80, alignment: .leading)
@@ -5136,7 +5200,7 @@ struct DirectoryEditorView: View {
             }
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kind == .societe, hideBankDetails: entry.kind == .client, hideElectronicAddress: entry.kind == .fournisseur)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kinds.contains(.societe), hideBankDetails: !entry.isPayee, hideElectronicAddress: entry.isSupplierOnly)
             }
 
             if !tagStore.tags.isEmpty {
@@ -5608,7 +5672,7 @@ struct SocietiesAdminView: View {
     @State private var editingLogoEntry: DirectoryEntry?
 
     private var societies: [DirectoryEntry] {
-        directory.entries.filter { $0.kind == .societe }
+        directory.entries.filter { $0.kinds.contains(.societe) }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
@@ -7512,7 +7576,7 @@ struct ValueTablesView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(DirectoryEntryKind.allCases, id: \.self) { kind in
+                    ForEach(DirectoryEntryKind.selectable, id: \.self) { kind in
                         HStack(spacing: 10) {
                             Circle().fill(Color(hex: kindColors.hexColor(for: kind))).frame(width: 14, height: 14)
                             Text(kind.label).font(.body)

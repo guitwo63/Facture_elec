@@ -100,6 +100,19 @@ public enum EN16931BusinessRules {
             results.append(BusinessRuleResult(ruleId: "BR-S-02", severity: .error,
                 message: "BR-S-02 : Une ligne à TVA standard (BT-151 = S) oblige l'émetteur à avoir un n° TVA (BT-31)."))
         }
+        // Même famille de règle que BR-S-02 ci-dessus (BT-31 obligatoire pour l'émetteur),
+        // pour la catégorie Exonérée (BT-151 = E) au lieu de Taux normal — pas détectée
+        // localement avant cet ajout, découverte seulement au dépôt via la validation
+        // distante SUPER PDP (BR-E-02).
+        let hasExemptLine = invoice.lines.contains { $0.vatCategory == .exempt }
+        if hasExemptLine && sellerVAT.isEmpty {
+            results.append(BusinessRuleResult(ruleId: "BR-E-02", severity: .error,
+                message: "BR-E-02 : Une ligne exonérée de TVA (BT-151 = E) oblige l'émetteur à avoir un n° TVA (BT-31)."))
+        }
+        if !VATNumberValidator.hasValidCountryPrefix(invoice.seller.vatNumber) {
+            results.append(BusinessRuleResult(ruleId: "BR-CO-09", severity: .error,
+                message: "BR-CO-09 : Le n° TVA de l'émetteur (BT-31) doit commencer par un préfixe pays ISO 3166-1 alpha-2 (ex. FR, DE…) — la Grèce peut utiliser « EL »."))
+        }
 
         if buyerName.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-25", severity: .error,
@@ -123,6 +136,10 @@ public enum EN16931BusinessRules {
            !SireneValidator.isValidSiret(invoice.buyer.siret) {
             results.append(BusinessRuleResult(ruleId: "BR-46", severity: .warning,
                 message: "BR-46 : Le SIRET du destinataire doit comporter 14 chiffres et être valide (clé Luhn)."))
+        }
+        if !VATNumberValidator.hasValidCountryPrefix(invoice.buyer.vatNumber) {
+            results.append(BusinessRuleResult(ruleId: "BR-CO-09", severity: .error,
+                message: "BR-CO-09 : Le n° TVA du destinataire (BT-48) doit commencer par un préfixe pays ISO 3166-1 alpha-2 (ex. FR, DE…) — la Grèce peut utiliser « EL »."))
         }
 
         if invoice.lines.isEmpty {

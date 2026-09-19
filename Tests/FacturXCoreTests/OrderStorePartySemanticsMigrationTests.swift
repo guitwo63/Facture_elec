@@ -63,7 +63,7 @@ final class OrderStorePartySemanticsMigrationTests: XCTestCase {
         let store = OrderStore()
         let directory = PartyDirectory()
         let companyEntry = DirectoryEntry(
-            kind: .societe,
+            kinds: [.societe],
             party: InvoiceParty(name: "Mon Entreprise SARL", street: "", postcode: "", city: "")
         )
         directory.entries = [companyEntry]

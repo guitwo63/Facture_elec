@@ -19,7 +19,7 @@ struct SetupWizardView: View {
     }
 
     private var hasSociety: Bool {
-        directory.entries.contains { $0.kind == .societe }
+        directory.entries.contains { $0.kinds.contains(.societe) }
     }
 
     var body: some View {
