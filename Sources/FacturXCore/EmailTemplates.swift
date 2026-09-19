@@ -148,14 +148,21 @@ public final class EmailTemplateStore: ObservableObject {
     public static let shared = EmailTemplateStore()
 
     /// Interrupteur général : désactivé, tous les boutons d'envoi disparaissent de
-    /// l'application, quel que soit l'état de chaque modèle individuel.
+    /// l'application, quel que soit l'état de chaque modèle individuel. Reste global (pas de
+    /// surcharge par société) — c'est un coupe-circuit de la fonctionnalité entière, pas un
+    /// contenu à personnaliser.
     @Published public var globalEnabled: Bool = true
     @Published public var templates: [EmailTemplate]
+    /// Surcharge éparse par société (Réglages > Application > Emails automatiques) — voir
+    /// `SocietyScopedCatalog`. `companyID == nil` résout sur la société principale si une a
+    /// été désignée (voir `PartyDirectory.principaleSocieteID`), sinon `templates`.
+    @Published public var templatesBySociety: [UUID: [EmailTemplate]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var globalKey: String { env.key("facturx.email.templates.enabled.v1") }
     private var templatesKey: String { env.key("facturx.email.templates.v1") }
+    private var templatesBySocietyKey: String { env.key("facturx.email.templates.bysociety.v1") }
 
     public init() {
         self.templates = EmailTemplateKind.allCases.map { EmailTemplate(kind: $0) }
@@ -169,6 +176,10 @@ public final class EmailTemplateStore: ObservableObject {
            !decoded.isEmpty {
             templates = decoded
         }
+        if let data = defaults.data(forKey: templatesBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [EmailTemplate]].self, from: data) {
+            templatesBySociety = decoded
+        }
     }
 
     public func save() {
@@ -176,12 +187,34 @@ public final class EmailTemplateStore: ObservableObject {
         if let data = try? JSONEncoder().encode(templates) {
             defaults.set(data, forKey: templatesKey)
         }
+        if let data = try? JSONEncoder().encode(templatesBySociety) {
+            defaults.set(data, forKey: templatesBySocietyKey)
+        }
     }
 
     /// Le modèle pour un type donné, ou un modèle par défaut si absent (nouveau type
     /// ajouté après coup, jamais persisté chez cet utilisateur).
     public func template(for kind: EmailTemplateKind) -> EmailTemplate {
         templates.first { $0.kind == kind } ?? EmailTemplate(kind: kind)
+    }
+
+    /// Variante par société : la surcharge de `companyID` pour ce type si elle existe, sinon
+    /// celle de la société principale, sinon le réglage global.
+    public func template(for kind: EmailTemplateKind, companyID: UUID?) -> EmailTemplate {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: kind.rawValue, overrideForSociety: templatesBySociety[effectiveID]) {
+            return resolved
+        }
+        return template(for: kind)
+    }
+
+    /// Liste effective pour une société : le réglage global, avec les modèles de la société
+    /// superposés par type. `companyID == nil` résout sur la société principale si une a été
+    /// désignée, sinon le réglage global.
+    public func list(for companyID: UUID?) -> [EmailTemplate] {
+        guard let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID else { return templates }
+        return SocietyScopedCatalog.resolvedList(global: templates, overrideForSociety: templatesBySociety[effectiveID])
     }
 
     public func upsert(_ template: EmailTemplate) {
@@ -193,10 +226,36 @@ public final class EmailTemplateStore: ObservableObject {
         save()
     }
 
+    /// Commence (ou remplace) la personnalisation de ce modèle pour cette société.
+    public func setOverride(_ template: EmailTemplate, companyID: UUID) {
+        var list = templatesBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.kind == template.kind }) {
+            list[idx] = template
+        } else {
+            list.append(template)
+        }
+        templatesBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage hérité (société principale, ou global) pour ce modèle sur cette société.
+    public func removeOverride(kind: EmailTemplateKind, companyID: UUID) {
+        templatesBySociety[companyID]?.removeAll { $0.kind == kind }
+        if templatesBySociety[companyID]?.isEmpty == true {
+            templatesBySociety.removeValue(forKey: companyID)
+        }
+        save()
+    }
+
     /// Ce que doit lire un bouton d'envoi : `true` seulement si l'interrupteur général
     /// ET le modèle concerné sont tous les deux actifs.
     public func isSendEnabled(_ kind: EmailTemplateKind) -> Bool {
         globalEnabled && template(for: kind).enabled
+    }
+
+    /// Variante par société — voir `template(for:companyID:)`.
+    public func isSendEnabled(_ kind: EmailTemplateKind, companyID: UUID?) -> Bool {
+        globalEnabled && template(for: kind, companyID: companyID).enabled
     }
 }
 

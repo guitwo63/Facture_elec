@@ -2696,10 +2696,10 @@ struct InvoiceEditorView: View {
                     }
                     .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
                     .disabled(sendingInvoiceEmail
-                              || !emailTemplateStore.isSendEnabled(.invoiceSent)
+                              || !emailTemplateStore.isSendEnabled(.invoiceSent, companyID: invoice.companyID)
                               || (invoice.buyer.contactEmail ?? "").isEmpty
                               || !smtpSettings.credentials.isConfigured)
-                    .help(!emailTemplateStore.template(for: .invoiceSent).enabled
+                    .help(!emailTemplateStore.template(for: .invoiceSent, companyID: invoice.companyID).enabled
                           ? "Cet email est désactivé (Réglages > Application)"
                           : (invoice.buyer.contactEmail ?? "").isEmpty
                           ? "Aucune adresse email cliente renseignée"
@@ -2739,10 +2739,10 @@ struct InvoiceEditorView: View {
                             }
                             .buttonStyle(ToolbarActionButtonStyle(tint: .red))
                             .disabled(sendingReminder
-                                      || !emailTemplateStore.isSendEnabled(.invoiceReminder)
+                                      || !emailTemplateStore.isSendEnabled(.invoiceReminder, companyID: invoice.companyID)
                                       || (invoice.buyer.contactEmail ?? "").isEmpty
                                       || !smtpSettings.credentials.isConfigured)
-                            .help(!emailTemplateStore.template(for: .invoiceReminder).enabled
+                            .help(!emailTemplateStore.template(for: .invoiceReminder, companyID: invoice.companyID).enabled
                                   ? "Les relances sont désactivées (Réglages > Application)"
                                   : (invoice.buyer.contactEmail ?? "").isEmpty
                                   ? "Aucune adresse email cliente renseignée"
@@ -3578,7 +3578,7 @@ struct InvoiceEditorView: View {
             invoiceEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
             return
         }
-        let template = emailTemplateStore.template(for: .invoiceSent)
+        let template = emailTemplateStore.template(for: .invoiceSent, companyID: invoice.companyID)
         let email = EmailComposer.compose(template: template, variables: [
             "numero": invoice.number,
             "client": invoice.buyer.name,
@@ -5834,10 +5834,39 @@ struct SocietiesAdminView: View {
 /// bouton "Modifier" qui ouvre la fiche d'édition du modèle sélectionné.
 struct EmailTemplatesAdminView: View {
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
+    @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var directory: PartyDirectory
     /// String et non EmailTemplateKind : Table exige que `selection` corresponde au
     /// type de `id` (String, via EmailTemplateKind.rawValue), pas au type de la ligne.
     @State private var selectedKind: String?
     @State private var editingKind: EmailTemplateKind?
+    /// Société dont on édite/consulte les surcharges — `nil` = société principale (ou le
+    /// réglage global si aucune n'est désignée). Même principe que `ValueTablesView`.
+    @State private var societyID: UUID?
+
+    /// Pré-sélectionne le picker société — voir `ValueTablesView.init(initialSocietyID:)`,
+    /// même principe, utilisé par l'écran "Configurer une société" (F.3).
+    init(initialSocietyID: UUID? = nil) {
+        _societyID = State(initialValue: initialSocietyID)
+    }
+
+    private var noSelectionLabel: String {
+        guard let principaleID = directory.principaleSocieteID,
+              let principale = directory.entries.first(where: { $0.id == principaleID }) else {
+            return "Toutes (réglage par défaut)"
+        }
+        return "Société principale : \(principale.displayName)"
+    }
+
+    private func overrideState(for kind: EmailTemplateKind) -> SocietyOverrideState {
+        guard let cid = societyID else { return .none }
+        if emailTemplateStore.templatesBySociety[cid]?.contains(where: { $0.kind == kind }) == true { return .customized }
+        if let principaleID = directory.principaleSocieteID, principaleID != cid,
+           emailTemplateStore.templatesBySociety[principaleID]?.contains(where: { $0.kind == kind }) == true {
+            return .inheritedFromPrincipale
+        }
+        return .none
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -5850,12 +5879,25 @@ struct EmailTemplatesAdminView: View {
                 Text("Activer l'envoi de ces emails").font(.body.weight(.semibold))
             }
             .toggleStyle(.switch)
-            .help("Désactivé, tous les boutons d'envoi disparaissent de l'application, quel que soit le réglage de chaque email ci-dessous.")
+            .help("Désactivé, tous les boutons d'envoi disparaissent de l'application, quel que soit le réglage de chaque email ci-dessous — réglage global, pas par société.")
 
             if !emailTemplateStore.globalEnabled {
                 Label("Tous les boutons d'envoi sont masqués tant que c'est désactivé.", systemImage: "eye.slash")
                     .font(.caption).foregroundStyle(.orange)
             } else {
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Société").font(.caption).foregroundStyle(.secondary)
+                        Picker("Société", selection: $societyID) {
+                            Text(noSelectionLabel).tag(UUID?.none)
+                            ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                                Text(s.displayName).tag(UUID?.some(s.id))
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 260)
+                    }
+                }
                 Table(EmailTemplateKind.allCases, selection: Binding(
                     get: { selectedKind },
                     set: { selectedKind = $0 }
@@ -5865,11 +5907,15 @@ struct EmailTemplatesAdminView: View {
                     }
                     TableColumn("Activé") { kind in
                         Toggle("", isOn: Binding(
-                            get: { emailTemplateStore.template(for: kind).enabled },
+                            get: { emailTemplateStore.template(for: kind, companyID: societyID).enabled },
                             set: { newValue in
-                                var t = emailTemplateStore.template(for: kind)
+                                var t = emailTemplateStore.template(for: kind, companyID: societyID)
                                 t.enabled = newValue
-                                emailTemplateStore.upsert(t)
+                                if let cid = societyID {
+                                    emailTemplateStore.setOverride(t, companyID: cid)
+                                } else {
+                                    emailTemplateStore.upsert(t)
+                                }
                             }
                         ))
                         .toggleStyle(.checkbox)
@@ -5877,9 +5923,17 @@ struct EmailTemplatesAdminView: View {
                     }
                     .width(60)
                     TableColumn("Sujet") { kind in
-                        Text(kind.hasEditableContent ? emailTemplateStore.template(for: kind).subject : "3 modèles selon le niveau d'urgence")
+                        Text(kind.hasEditableContent ? emailTemplateStore.template(for: kind, companyID: societyID).subject : "3 modèles selon le niveau d'urgence")
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
+                    TableColumn("") { kind in
+                        SocietyOverrideBadge(state: overrideState(for: kind)) {
+                            if let cid = societyID {
+                                emailTemplateStore.removeOverride(kind: kind, companyID: cid)
+                            }
+                        }
+                    }
+                    .width(min: 90, ideal: 140)
                 }
                 .frame(minHeight: 160)
 
@@ -5901,7 +5955,7 @@ struct EmailTemplatesAdminView: View {
             }
         }
         .sheet(item: $editingKind) { kind in
-            EmailTemplateEditorSheet(kind: kind)
+            EmailTemplateEditorSheet(kind: kind, societyID: societyID)
         }
     }
 }
@@ -5912,6 +5966,9 @@ struct EmailTemplatesAdminView: View {
 /// qui suppose que l'utilisateur connaît déjà les noms de variables.
 struct EmailTemplateEditorSheet: View {
     let kind: EmailTemplateKind
+    /// `nil` = édite le réglage global (ou celui de la société principale à l'affichage,
+    /// mais l'écriture cible toujours le global quand `nil` — voir `EmailTemplatesAdminView`).
+    var societyID: UUID?
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @Environment(\.dismiss) private var dismiss
     @State private var subject = ""
@@ -5970,10 +6027,14 @@ struct EmailTemplateEditorSheet: View {
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    var t = emailTemplateStore.template(for: kind)
+                    var t = emailTemplateStore.template(for: kind, companyID: societyID)
                     t.subject = subject
                     t.body = emailBody
-                    emailTemplateStore.upsert(t)
+                    if let cid = societyID {
+                        emailTemplateStore.setOverride(t, companyID: cid)
+                    } else {
+                        emailTemplateStore.upsert(t)
+                    }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -5982,7 +6043,7 @@ struct EmailTemplateEditorSheet: View {
         }
         .frame(width: 560, height: 520)
         .onAppear {
-            let t = emailTemplateStore.template(for: kind)
+            let t = emailTemplateStore.template(for: kind, companyID: societyID)
             subject = t.subject
             emailBody = t.body
         }
@@ -6005,8 +6066,6 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var quoteStore: QuoteStore
-    @EnvironmentObject var tagStore: TagStore
-    @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @State private var twoFactorExpanded = false
@@ -6014,7 +6073,6 @@ struct ApplicationSettingsView: View {
     @State private var modulesExpanded = false
     @State private var emailTemplatesExpanded = false
     @State private var societiesExpanded = false
-    @State private var tagsExpanded = false
     @State private var numberingExpanded = false
     @State private var numberingCompanyID: UUID?
     @State private var orderNumberingExpanded = false
@@ -6023,8 +6081,6 @@ struct ApplicationSettingsView: View {
     @State private var quoteNumberingCompanyID: UUID?
     @State private var editingSociety: DirectoryEntry?
     @State private var creatingSociety = false
-    @State private var newTagName = ""
-    @State private var newTagHex = "555555"
 
     var body: some View {
         ScrollView {
@@ -6119,56 +6175,6 @@ struct ApplicationSettingsView: View {
                         .font(.headline)
                 }
 
-                DisclosureGroup(isExpanded: $tagsExpanded) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Définissez des tags personnalisés pour classifier vos tiers. Chaque tier peut porter plusieurs tags.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if tagStore.tags.isEmpty {
-                            Text("Aucun tag défini.").font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            ForEach(tagStore.tags) { tag in
-                                HStack {
-                                    Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
-                                    TextField("Nom du tag", text: Binding(
-                                        get: { tag.name },
-                                        set: { newName in
-                                            var t = tag; t.name = newName; tagStore.upsert(t)
-                                        }
-                                    )).frame(maxWidth: 200)
-                                    ColorPicker("", selection: Binding(
-                                        get: { Color(hex: tag.hexColor) },
-                                        set: { newColor in
-                                            var t = tag; t.hexColor = hexString(from: newColor); tagStore.upsert(t)
-                                        }
-                                    )).labelsHidden().frame(width: 40)
-                                    Button(role: .destructive) {
-                                        tagStore.delete(tag)
-                                    } label: { Image(systemName: "trash") }
-                                        .buttonStyle(.borderless)
-                                }
-                            }
-                        }
-                        Divider()
-                        Text("Ajouter un tag").font(.caption.bold())
-                        HStack {
-                            ColorPicker("", selection: Binding(
-                                get: { Color(hex: newTagHex) },
-                                set: { newTagHex = hexString(from: $0) }
-                            )).labelsHidden().frame(width: 30)
-                            TextField("Nom du nouveau tag", text: $newTagName)
-                            Button {
-                                guard !newTagName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                                tagStore.upsert(PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex))
-                                newTagName = ""
-                                newTagHex = "555555"
-                            } label: { Label("Ajouter", systemImage: "plus.circle.fill") }
-                                .buttonStyle(.borderedProminent)
-                        }
-                    }.padding(8)
-                } label: {
-                    Label("Tags personnalisés", systemImage: "tag")
-                        .font(.headline)
-                }
 
                 DisclosureGroup(isExpanded: $numberingExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -7950,6 +7956,7 @@ struct ConfigureSocieteView: View {
     @State private var selectedSocieteID: UUID?
     @State private var tablesExpanded = true
     @State private var numberingExpanded = false
+    @State private var emailsExpanded = false
 
     private var societies: [DirectoryEntry] {
         auth.visibleSocieties(for: auth.currentUser)
@@ -8012,6 +8019,11 @@ struct ConfigureSocieteView: View {
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                             .padding(.top, 4)
+                        }
+                        DisclosureGroup("Emails automatiques", isExpanded: $emailsExpanded) {
+                            EmailTemplatesAdminView(initialSocietyID: cid)
+                                .id(cid)
+                                .padding(.top, 4)
                         }
                     }
                     .padding(.vertical, 4)
@@ -10775,10 +10787,10 @@ struct QuoteEditorView: View {
                         }
                         .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
                         .disabled(sendingQuoteEmail
-                                  || !emailTemplateStore.isSendEnabled(.quoteSent)
+                                  || !emailTemplateStore.isSendEnabled(.quoteSent, companyID: quote.companyID)
                                   || (quote.buyer.contactEmail ?? "").isEmpty
                                   || !smtpSettings.credentials.isConfigured)
-                        .help(!emailTemplateStore.template(for: .quoteSent).enabled
+                        .help(!emailTemplateStore.template(for: .quoteSent, companyID: quote.companyID).enabled
                               ? "Cet email est désactivé (Réglages > Application)"
                               : (quote.buyer.contactEmail ?? "").isEmpty
                               ? "Aucune adresse email cliente renseignée"
@@ -10920,7 +10932,7 @@ struct QuoteEditorView: View {
             quoteEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
             return
         }
-        let template = emailTemplateStore.template(for: .quoteSent)
+        let template = emailTemplateStore.template(for: .quoteSent, companyID: quote.companyID)
         let email = EmailComposer.compose(template: template, variables: [
             "numero": quote.number,
             "client": quote.buyer.name,
@@ -11438,10 +11450,10 @@ struct OrderEditorView: View {
         }
         .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
         .disabled(sendingOrderEmail != nil
-                  || !emailTemplateStore.isSendEnabled(kind)
+                  || !emailTemplateStore.isSendEnabled(kind, companyID: order.companyID)
                   || (order.buyer.contactEmail ?? "").isEmpty
                   || !smtpSettings.credentials.isConfigured)
-        .help(!emailTemplateStore.template(for: kind).enabled
+        .help(!emailTemplateStore.template(for: kind, companyID: order.companyID).enabled
               ? "Cet email est désactivé (Réglages > Application)"
               : (order.buyer.contactEmail ?? "").isEmpty
               ? "Aucune adresse email cliente renseignée"
@@ -11460,7 +11472,7 @@ struct OrderEditorView: View {
             orderEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
             return
         }
-        let template = emailTemplateStore.template(for: kind)
+        let template = emailTemplateStore.template(for: kind, companyID: order.companyID)
         let email = EmailComposer.compose(template: template, variables: [
             "numero": order.number,
             "client": order.buyer.name,
