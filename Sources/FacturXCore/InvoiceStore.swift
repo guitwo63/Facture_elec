@@ -169,11 +169,11 @@ public final class InvoiceStore: ObservableObject {
         if let prev = previousStatus, prev != invoice.status {
             audit?.recordStatusChange(actor: actorName, objectType: .invoice, objectCode: invoice.number,
                                       statusFrom: prev.label, statusTo: invoice.status.label,
-                                      details: invoice.type.isCreditNote ? "avoir" : "facture")
+                                      details: invoice.type.isCreditNote ? "avoir" : "facture", companyID: invoice.companyID)
         } else {
             audit?.record(actor: actorName, action: isNew ? "invoice_created" : "invoice_updated",
                            target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture",
-                           objectType: .invoice, objectCode: invoice.number)
+                           objectType: .invoice, objectCode: invoice.number, companyID: invoice.companyID)
         }
     }
 
@@ -181,7 +181,7 @@ public final class InvoiceStore: ObservableObject {
         invoices.removeAll { $0.id == invoice.id }
         save()
         audit?.record(actor: actorName, action: "invoice_deleted", target: invoice.number, details: invoice.type.isCreditNote ? "avoir" : "facture",
-                       objectType: .invoice, objectCode: invoice.number)
+                       objectType: .invoice, objectCode: invoice.number, companyID: invoice.companyID)
     }
 
     public func newDraft(directory: PartyDirectory? = nil, companyID: UUID? = nil, preferredSellerEntryID: UUID? = nil) -> Invoice {

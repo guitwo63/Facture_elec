@@ -65,11 +65,11 @@ public final class PurchaseInvoiceStore: ObservableObject {
         save()
         if let prev = previousStatus, prev != record.status {
             audit?.recordStatusChange(actor: actorName, objectType: .purchaseInvoice, objectCode: record.invoice.number,
-                                      statusFrom: prev.label, statusTo: record.status.label, details: "facture d'achat")
+                                      statusFrom: prev.label, statusTo: record.status.label, details: "facture d'achat", companyID: record.invoice.companyID)
         } else {
             audit?.record(actor: actorName, action: isNew ? "purchase_invoice_created" : "purchase_invoice_updated",
                            target: record.invoice.number, details: "facture d'achat",
-                           objectType: .purchaseInvoice, objectCode: record.invoice.number)
+                           objectType: .purchaseInvoice, objectCode: record.invoice.number, companyID: record.invoice.companyID)
         }
     }
 
@@ -77,7 +77,7 @@ public final class PurchaseInvoiceStore: ObservableObject {
         invoices.removeAll { $0.id == record.id }
         save()
         audit?.record(actor: actorName, action: "purchase_invoice_deleted", target: record.invoice.number, details: "facture d'achat",
-                       objectType: .purchaseInvoice, objectCode: record.invoice.number)
+                       objectType: .purchaseInvoice, objectCode: record.invoice.number, companyID: record.invoice.companyID)
     }
 
     /// Nouvelle saisie manuelle : fournisseur vide (à choisir dans l'annuaire), acheteur =
