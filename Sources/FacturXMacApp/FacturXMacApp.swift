@@ -713,7 +713,7 @@ struct RootView: View {
                         moduleButton(t)
                     }
                 }
-                if auth.visibleSocieties(for: auth.currentUser).count > 1 {
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
                     Divider().frame(height: 20).padding(.horizontal, 4)
                     HStack(spacing: 3) {
                         Picker("Société (périmètre)", selection: $activeCompanyID) {
@@ -6879,7 +6879,7 @@ struct ValueTablesView: View {
                     .textFieldStyle(.roundedBorder)
             }
             .padding(10)
-            if selectedTable.isEditable, auth.visibleSocieties(for: auth.currentUser).count > 1 {
+            if selectedTable.isEditable, !auth.visibleSocieties(for: auth.currentUser).isEmpty {
                 HStack(spacing: 6) {
                     Text("Société").font(.caption).foregroundStyle(.secondary)
                     Picker("Société", selection: $tableSocietyID) {
