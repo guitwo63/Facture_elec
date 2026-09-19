@@ -619,7 +619,13 @@ public final class SuperPDPService {
         let subreports = (first["subreports"] as? [Any]) ?? []
         for case let subreport as [String: Any] in subreports {
             let validatorName = (subreport["validator"] as? String) ?? ""
-            let failures = failureMessages(subreport["failures"] as? [Any])
+            // Vu en conditions réelles (tableau de bord SUPER PDP, dépôt facture-FA-2026-0011) :
+            // un rapport is_valid=false dont les 3 échecs visibles au tableau de bord
+            // n'apparaissaient dans aucun des deux tableaux, `failures` ET `messages`, restant
+            // vides selon le validateur — le tableau de bord les affiche sous "Message (n/3)",
+            // laissant penser que le champ réellement peuplé dépend du validateur. On lit donc
+            // les deux et on les fusionne plutôt que de parier sur un seul nom de champ.
+            let failures = failureMessages(subreport["failures"] as? [Any]) + failureMessages(subreport["messages"] as? [Any])
             if validatorName.uppercased().contains("WARNING") {
                 warnings.append(contentsOf: failures)
             } else {

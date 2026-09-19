@@ -3904,6 +3904,24 @@ struct InvoiceEditorView: View {
                         }
                     }
                 }
+                // Le rapport dit non conforme mais n'a donné aucun détail structuré
+                // (`subreports` absent ou vide côté SUPER PDP pour cette réponse précise) —
+                // sans repli, l'utilisateur n'avait aucune piste (juste "0 erreur(s)").
+                // On affiche au moins les champs bruts reçus, utiles pour diagnostiquer.
+                if !report.isValid, report.errors.isEmpty, report.warnings.isEmpty {
+                    Text("Le rapport SUPER PDP ne détaille pas la cause (aucun sous-rapport reçu). Champs bruts de la réponse :")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if report.raw.isEmpty {
+                        Text("(réponse vide)").font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(report.raw.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                            HStack(alignment: .top, spacing: 4) {
+                                Text("\(key) :").font(.caption2.bold()).foregroundStyle(.secondary)
+                                Text(value).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
