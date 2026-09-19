@@ -70,10 +70,13 @@ public final class PaymentTermsPresetStore: ObservableObject {
     public static let shared = PaymentTermsPresetStore()
 
     @Published public var presets: [PaymentTermsPreset]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
+    @Published public var presetsBySociety: [UUID: [PaymentTermsPreset]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.paymentTermsPresets.v1") }
+    private var presetsBySocietyKey: String { env.key("facturx.paymentTermsPresets.bysociety.v1") }
 
     public static var defaults: [PaymentTermsPreset] {
         [
@@ -95,12 +98,47 @@ public final class PaymentTermsPresetStore: ObservableObject {
            !decoded.isEmpty {
             presets = decoded
         }
+        if let data = defaults.data(forKey: presetsBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [PaymentTermsPreset]].self, from: data) {
+            presetsBySociety = decoded
+        }
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(presets) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(presetsBySociety) {
+            defaults.set(data, forKey: presetsBySocietyKey)
+        }
+    }
+
+    /// Liste effective pour une société : le réglage global, avec les préréglages de la
+    /// société superposés par id. `companyID == nil` retourne toujours le réglage global.
+    public func list(for companyID: UUID?) -> [PaymentTermsPreset] {
+        guard let companyID else { return presets }
+        return SocietyScopedCatalog.resolvedList(global: presets, overrideForSociety: presetsBySociety[companyID])
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce préréglage pour cette société.
+    public func setOverride(_ preset: PaymentTermsPreset, companyID: UUID) {
+        var list = presetsBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == preset.id }) {
+            list[idx] = preset
+        } else {
+            list.append(preset)
+        }
+        presetsBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce préréglage sur cette société.
+    public func removeOverride(id: String, companyID: UUID) {
+        presetsBySociety[companyID]?.removeAll { $0.id == id }
+        if presetsBySociety[companyID]?.isEmpty == true {
+            presetsBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 
     public func append(_ preset: PaymentTermsPreset) {
@@ -132,8 +170,13 @@ public final class PaymentTermsPresetStore: ObservableObject {
     /// présélectionner le bon item du menu à l'ouverture de la fiche.
     /// `nil` = aucun préréglage ne correspond (saisie libre, "Personnalisé").
     public func matchingPresetID(for text: String?) -> String? {
+        matchingPresetID(for: text, companyID: nil)
+    }
+
+    /// Variante par société — cherche aussi parmi les préréglages propres à `companyID`.
+    public func matchingPresetID(for text: String?, companyID: UUID?) -> String? {
         let trimmed = text?.trimmingCharacters(in: .whitespaces) ?? ""
         guard !trimmed.isEmpty else { return nil }
-        return presets.first { $0.text == trimmed }?.id
+        return list(for: companyID).first { $0.text == trimmed }?.id
     }
 }

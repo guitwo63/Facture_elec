@@ -413,10 +413,15 @@ public final class TagStore: ObservableObject {
     public static let shared = TagStore()
 
     @Published public var tags: [PartyTag]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`. Une
+    /// société peut personnaliser un tag existant (même id, ex. changer sa couleur) ou en
+    /// ajouter un qui lui est propre.
+    @Published public var tagsBySociety: [UUID: [PartyTag]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.tags.v1") }
+    private var tagsBySocietyKey: String { env.key("facturx.tags.bysociety.v1") }
 
     public init() {
         self.tags = []
@@ -428,11 +433,18 @@ public final class TagStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([PartyTag].self, from: data) {
             tags = decoded
         }
+        if let data = defaults.data(forKey: tagsBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [PartyTag]].self, from: data) {
+            tagsBySociety = decoded
+        }
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(tags) {
             defaults.set(data, forKey: storageKey)
+        }
+        if let data = try? JSONEncoder().encode(tagsBySociety) {
+            defaults.set(data, forKey: tagsBySocietyKey)
         }
     }
 
@@ -449,16 +461,57 @@ public final class TagStore: ObservableObject {
         tags.removeAll { $0.id == tag.id }
         save()
     }
+
+    /// Liste effective pour une société : le réglage global, avec les tags de la société
+    /// superposés par id. `companyID == nil` retourne toujours le réglage global.
+    public func list(for companyID: UUID?) -> [PartyTag] {
+        guard let companyID else { return tags }
+        return SocietyScopedCatalog.resolvedList(global: tags, overrideForSociety: tagsBySociety[companyID])
+    }
+
+    /// Un tag précis par id, résolu pour une société — pour l'affichage d'un tag déjà
+    /// assigné à un tiers (`DirectoryEntry.tagIDs`), qui peut référencer un tag propre à la
+    /// société de ce tiers.
+    public func tag(id: UUID, companyID: UUID?) -> PartyTag? {
+        if let companyID, let match = SocietyScopedCatalog.resolvedElement(id: id, overrideForSociety: tagsBySociety[companyID]) {
+            return match
+        }
+        return tags.first { $0.id == id }
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce tag pour cette société.
+    public func setOverride(_ tag: PartyTag, companyID: UUID) {
+        var list = tagsBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == tag.id }) {
+            list[idx] = tag
+        } else {
+            list.append(tag)
+        }
+        tagsBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce tag sur cette société.
+    public func removeOverride(id: UUID, companyID: UUID) {
+        tagsBySociety[companyID]?.removeAll { $0.id == id }
+        if tagsBySociety[companyID]?.isEmpty == true {
+            tagsBySociety.removeValue(forKey: companyID)
+        }
+        save()
+    }
 }
 
 public final class KindColorStore: ObservableObject {
     public static let shared = KindColorStore()
 
     @Published public var colors: [DirectoryEntryKind: String]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
+    @Published public var colorsBySociety: [UUID: [DirectoryEntryKind: String]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.kindcolors.v1") }
+    private var colorsBySocietyKey: String { env.key("facturx.kindcolors.bysociety.v1") }
 
     public init() {
         self.colors = [
@@ -480,6 +533,10 @@ public final class KindColorStore: ObservableObject {
                 .both: decoded["both"] ?? DirectoryEntryKind.both.defaultHexColor,
             ]
         }
+        if let data = defaults.data(forKey: colorsBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [DirectoryEntryKind: String]].self, from: data) {
+            colorsBySociety = decoded
+        }
     }
 
     public func save() {
@@ -492,9 +549,35 @@ public final class KindColorStore: ObservableObject {
         if let data = try? JSONEncoder().encode(dict) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(colorsBySociety) {
+            defaults.set(data, forKey: colorsBySocietyKey)
+        }
     }
 
     public func hexColor(for kind: DirectoryEntryKind) -> String {
         colors[kind] ?? kind.defaultHexColor
+    }
+
+    /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
+    public func hexColor(for kind: DirectoryEntryKind, companyID: UUID?) -> String {
+        if let companyID, let color = colorsBySociety[companyID]?[kind] {
+            return color
+        }
+        return hexColor(for: kind)
+    }
+
+    /// Commence (ou remplace) la personnalisation de cette couleur pour cette société.
+    public func setOverride(hexColor: String, for kind: DirectoryEntryKind, companyID: UUID) {
+        colorsBySociety[companyID, default: [:]][kind] = hexColor
+        save()
+    }
+
+    /// Revient au réglage global pour cette couleur sur cette société.
+    public func removeOverride(for kind: DirectoryEntryKind, companyID: UUID) {
+        colorsBySociety[companyID]?.removeValue(forKey: kind)
+        if colorsBySociety[companyID]?.isEmpty == true {
+            colorsBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 }
