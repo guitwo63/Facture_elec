@@ -176,6 +176,35 @@ final class VATCategoryTests: XCTestCase {
                      "une ligne exonérée oblige l'émetteur à avoir un n° TVA, comme BR-S-02 pour le taux standard")
     }
 
+    /// Régression : repérée en conditions réelles via SUPER PDP (rejet BR-CO-09) sur une
+    /// facture dont le n° TVA de l'émetteur ne commençait pas par un préfixe pays valide.
+    func testBusinessRulesFlagSellerVATNumberWithInvalidCountryPrefix() {
+        var seller = party("Vendeur")
+        seller.vatNumber = "XX123456789"
+        let inv = Invoice(number: "F-1", seller: seller, buyer: party("Acheteur"),
+                          lines: [InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 20)])
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-CO-09" && $0.severity == .error })
+    }
+
+    func testBusinessRulesFlagBuyerVATNumberWithInvalidCountryPrefix() {
+        var buyer = party("Acheteur")
+        buyer.vatNumber = "12345678901"
+        let inv = Invoice(number: "F-1", seller: party("Vendeur"), buyer: buyer,
+                          lines: [InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 20)])
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-CO-09" && $0.severity == .error })
+    }
+
+    func testBusinessRulesAcceptValidOrMissingVATNumberPrefixes() {
+        var seller = party("Vendeur")
+        seller.vatNumber = "FR12345678901"
+        let inv = Invoice(number: "F-1", seller: seller, buyer: party("Acheteur"),
+                          lines: [InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 20)])
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertFalse(rules.contains { $0.ruleId == "BR-CO-09" })
+    }
+
     func testBusinessRulesDoNotFlagExemptLineWhenSellerHasVATNumber() {
         var seller = party("Vendeur")
         seller.vatNumber = "FR12345678901"
