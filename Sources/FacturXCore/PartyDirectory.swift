@@ -342,6 +342,7 @@ public final class PartyDirectory: ObservableObject {
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.directory.v1") }
+    private var societeIntercoMigratedKey: String { env.key("facturx.directory.societeInterco.migrated.v1") }
     public weak var audit: AuditStore?
     public var actorName: String = "system"
 
@@ -355,6 +356,23 @@ public final class PartyDirectory: ObservableObject {
            let decoded = try? JSONDecoder().decode([DirectoryEntry].self, from: data) {
             entries = decoded.map { migrateContacts($0) }
         }
+        migrateSocieteIntercoIfNeeded()
+    }
+
+    /// Une société du périmètre est toujours aussi une partie liée aux autres sociétés
+    /// gérées dans l'app — voir `DirectoryEditorView.init(initialKind:)` pour les sociétés
+    /// créées après l'ajout du type Interco. Rattrapage unique pour celles déjà existantes,
+    /// jamais rejoué ensuite : l'utilisateur doit pouvoir décocher Interco sur une société
+    /// précise sans se le voir réimposer au lancement suivant.
+    private func migrateSocieteIntercoIfNeeded() {
+        guard !defaults.bool(forKey: societeIntercoMigratedKey) else { return }
+        var changed = false
+        for idx in entries.indices where entries[idx].kinds.contains(.societe) && !entries[idx].kinds.contains(.interco) {
+            entries[idx].kinds.insert(.interco)
+            changed = true
+        }
+        if changed { save() }
+        defaults.set(true, forKey: societeIntercoMigratedKey)
     }
 
     private func migrateContacts(_ entry: DirectoryEntry) -> DirectoryEntry {

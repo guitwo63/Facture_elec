@@ -5077,7 +5077,11 @@ struct DirectoryEditorView: View {
     }
 
     init(initialKind: DirectoryEntryKind, defaultCompanyID: UUID? = nil, onSave: @escaping (DirectoryEntry) -> Void) {
-        var initial = DirectoryEntry(kinds: [initialKind], party: InvoiceParty(name: "", street: "", postcode: "", city: ""))
+        // Une société du périmètre est toujours aussi une partie liée aux autres sociétés
+        // gérées dans l'app (même utilisateur, même périmètre) — cochée Interco par défaut,
+        // modifiable ensuite comme n'importe quel autre type.
+        let initialKinds: Set<DirectoryEntryKind> = initialKind == .societe ? [.societe, .interco] : [initialKind]
+        var initial = DirectoryEntry(kinds: initialKinds, party: InvoiceParty(name: "", street: "", postcode: "", city: ""))
         if initialKind == .client, let cid = defaultCompanyID {
             initial.companyID = cid
         }

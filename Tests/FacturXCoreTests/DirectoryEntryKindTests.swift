@@ -9,6 +9,72 @@ final class DirectoryEntryKindTests: XCTestCase {
         InvoiceParty(name: name, street: "", postcode: "", city: "")
     }
 
+    // MARK: - Rattrapage Interco des sociétés existantes (PartyDirectory)
+
+    private let directoryKeys = [
+        "facturx.directory.v1",
+        "facturx.directory.societeInterco.migrated.v1",
+    ]
+
+    override func setUp() {
+        super.setUp()
+        directoryKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+    }
+
+    override func tearDown() {
+        directoryKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        super.tearDown()
+    }
+
+    private func persistDirectoryEntries(_ entries: [DirectoryEntry]) throws {
+        let data = try JSONEncoder().encode(entries)
+        UserDefaults.standard.set(data, forKey: "facturx.directory.v1")
+    }
+
+    func testLoadAddsIntercoToExistingSocietesMissingIt() throws {
+        let societe = DirectoryEntry(kinds: [.societe], party: party("Société A"))
+        try persistDirectoryEntries([societe])
+
+        let directory = PartyDirectory()
+
+        XCTAssertEqual(directory.entries.first?.kinds, [.societe, .interco])
+    }
+
+    func testLoadDoesNotAffectNonSocieteEntries() throws {
+        let client = DirectoryEntry(kinds: [.client], party: party("Client A"))
+        try persistDirectoryEntries([client])
+
+        let directory = PartyDirectory()
+
+        XCTAssertEqual(directory.entries.first?.kinds, [.client])
+    }
+
+    func testMigrationIsNeverReplayedSoUserCanUncheckIntercoAfterwards() throws {
+        let societe = DirectoryEntry(kinds: [.societe], party: party("Société A"))
+        try persistDirectoryEntries([societe])
+
+        let first = PartyDirectory()
+        XCTAssertEqual(first.entries.first?.kinds, [.societe, .interco], "premier chargement : rattrapage appliqué")
+
+        // L'utilisateur décoche Interco sur cette société après le rattrapage.
+        var edited = first.entries[0]
+        edited.kinds = [.societe]
+        first.upsert(edited)
+
+        let second = PartyDirectory()
+        XCTAssertEqual(second.entries.first?.kinds, [.societe],
+                       "le rattrapage ne doit jamais rejouer — sinon impossible de décocher Interco durablement")
+    }
+
+    func testSocieteAlreadyTaggedIntercoIsUnaffected() throws {
+        let societe = DirectoryEntry(kinds: [.societe, .interco], party: party("Société A"))
+        try persistDirectoryEntries([societe])
+
+        let directory = PartyDirectory()
+
+        XCTAssertEqual(directory.entries.first?.kinds, [.societe, .interco])
+    }
+
     // MARK: - DirectoryEntryKind.selectable
 
     func testSelectableExcludesBothButIncludesInterco() {
