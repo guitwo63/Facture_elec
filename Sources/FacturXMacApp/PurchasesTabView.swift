@@ -18,6 +18,7 @@ struct PurchasesTabView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @Binding var selectedID: UUID?
+    @Binding var companyFilter: UUID?
     @State private var query = ""
     @State private var statusFilter: PurchaseInvoiceStatus? = nil
 
@@ -31,6 +32,9 @@ struct PurchasesTabView: View {
         }
         if let sf = statusFilter {
             result = result.filter { $0.status == sf }
+        }
+        if let cf = companyFilter {
+            result = result.filter { $0.invoice.companyID == cf }
         }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
@@ -46,7 +50,7 @@ struct PurchasesTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let record = store.newManualEntry(directory: directory, companyID: defaultCompanyID())
+                        let record = store.newManualEntry(directory: directory, companyID: companyFilter ?? defaultCompanyID())
                         store.upsert(record)
                         selectedID = record.id
                     } label: { Label("Nouvelle facture d'achat", systemImage: "plus") }
@@ -86,7 +90,7 @@ struct PurchasesTabView: View {
                         Text("Aucune facture d'achat.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle facture d'achat") {
-                            let record = store.newManualEntry(directory: directory, companyID: defaultCompanyID())
+                            let record = store.newManualEntry(directory: directory, companyID: companyFilter ?? defaultCompanyID())
                             store.upsert(record)
                             selectedID = record.id
                         }

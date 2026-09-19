@@ -12,7 +12,8 @@ final class QuoteNumberingTests: XCTestCase {
         "facturx.quotes.number.prefix.v1",
         "facturx.quotes.number.includeyear.v1",
         "facturx.quotes.number.start.v1",
-        "facturx.quotes.number.useseparator.v1"
+        "facturx.quotes.number.useseparator.v1",
+        "facturx.quotes.number.overrides.bysociety.v1"
     ]
 
     override func setUp() {
@@ -119,5 +120,49 @@ final class QuoteNumberingTests: XCTestCase {
         XCTAssertEqual(reloaded.numberIncludeYear, false)
         XCTAssertEqual(reloaded.numberStart, 42)
         XCTAssertEqual(reloaded.numberUseSeparator, false)
+    }
+
+    // MARK: - Format par société (voir InvoiceNumberingTests, même mécanisme)
+
+    func testCompanyWithoutFormatOverrideUsesDefaultFormat() {
+        let store = QuoteStore()
+        store.numberPrefix = "DEV"
+        let cid = UUID()
+        XCTAssertEqual(store.numberingFormat(for: cid).prefix, "DEV")
+        XCTAssertEqual(store.previewNextNumber(companyID: cid), store.previewNextNumber(companyID: nil))
+    }
+
+    func testFormatOverrideAppliesOnlyToItsOwnCompany() {
+        let store = QuoteStore()
+        store.numberPrefix = "DEV"
+        let cidA = UUID()
+        let cidB = UUID()
+        store.numberFormatOverrides[cidA] = InvoiceNumberingFormat(prefix: "ALPHA", includeYear: false, start: 1, useSeparator: false)
+
+        XCTAssertTrue(store.previewNextNumber(companyID: cidA).hasPrefix("ALPHA"))
+        XCTAssertTrue(store.previewNextNumber(companyID: cidB).hasPrefix("DEV"))
+        XCTAssertTrue(store.previewNextNumber(companyID: nil).hasPrefix("DEV"))
+    }
+
+    func testRemovingFormatOverrideRevertsToDefaultFormat() {
+        let store = QuoteStore()
+        store.numberPrefix = "DEV"
+        let cid = UUID()
+        store.numberFormatOverrides[cid] = InvoiceNumberingFormat(prefix: "SPECIAL", includeYear: false, start: 1, useSeparator: false)
+        XCTAssertEqual(store.numberingFormat(for: cid).prefix, "SPECIAL")
+
+        store.numberFormatOverrides.removeValue(forKey: cid)
+        XCTAssertEqual(store.numberingFormat(for: cid).prefix, "DEV")
+    }
+
+    func testFormatOverridesPersistAcrossReload() {
+        let store = QuoteStore()
+        let cid = UUID()
+        store.numberFormatOverrides[cid] = InvoiceNumberingFormat(prefix: "PERSIST", includeYear: true, start: 42, useSeparator: true)
+        store.save()
+
+        let reloaded = QuoteStore()
+        XCTAssertEqual(reloaded.numberFormatOverrides[cid]?.prefix, "PERSIST")
+        XCTAssertEqual(reloaded.numberFormatOverrides[cid]?.start, 42)
     }
 }
