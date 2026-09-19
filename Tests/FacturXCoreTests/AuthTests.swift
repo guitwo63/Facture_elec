@@ -142,6 +142,20 @@ final class AuthTests: XCTestCase {
         XCTAssertNil(store.visibleInvoiceCompanyIDs(for: nil))
     }
 
+    /// Incrément 2.2 du chantier "Réglages par société" — `visibleAuditCompanyIDs` suit
+    /// exactement le même patron que les 4 méthodes `visibleXCompanyIDs` sœurs ci-dessus.
+    func testVisibleAuditCompanyIDs() {
+        let (store, _, entries) = makeDirectoryStore()
+        let s1 = entries[0]
+
+        let admin = User(username: "admin", role: .admin, societyIDs: [])
+        let comptable = User(username: "compta", role: .comptable, societyIDs: [s1.id])
+
+        XCTAssertNil(store.visibleAuditCompanyIDs(for: admin), "Admin: pas de filtre (nil = tout)")
+        XCTAssertEqual(store.visibleAuditCompanyIDs(for: comptable), Set([s1.id]))
+        XCTAssertNil(store.visibleAuditCompanyIDs(for: nil))
+    }
+
     func testVisibleSocietiesScopedForComptable() {
         let (store, directory, entries) = makeDirectoryStore()
         _ = directory  // retient la référence faible attachée à AuthStore

@@ -973,4 +973,10 @@ public final class AuthStore: ObservableObject {
         if user.isAdmin { return nil }
         return Set(user.societyIDs)
     }
+
+    public func visibleAuditCompanyIDs(for user: User?) -> Set<UUID>? {
+        guard let user = user else { return nil }
+        if user.isAdmin { return nil }
+        return Set(user.societyIDs)
+    }
 }
