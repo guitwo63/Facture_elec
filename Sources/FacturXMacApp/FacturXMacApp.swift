@@ -142,6 +142,8 @@ struct FacturXMacApp: App {
     @StateObject private var paymentTermsStore = PaymentTermsPresetStore.shared
     @StateObject private var auditActionLabelStore = AuditActionLabelStore.shared
     @StateObject private var superPDPStatusCodeStore = SuperPDPStatusCodeStore.shared
+    @StateObject private var purchaseInvoiceStore = PurchaseInvoiceStore.shared
+    @StateObject private var purchaseInvoiceStatusStore = PurchaseInvoiceStatusStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -168,6 +170,8 @@ struct FacturXMacApp: App {
                 .environmentObject(paymentTermsStore)
                 .environmentObject(auditActionLabelStore)
                 .environmentObject(superPDPStatusCodeStore)
+                .environmentObject(purchaseInvoiceStore)
+                .environmentObject(purchaseInvoiceStatusStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -178,10 +182,12 @@ struct FacturXMacApp: App {
                     orderStore.audit = AuditStore.shared
                     quoteStore.audit = AuditStore.shared
                     directory.audit = AuditStore.shared
+                    purchaseInvoiceStore.audit = AuditStore.shared
                     store.actorName = auth.currentUser?.username ?? "system"
                     orderStore.actorName = auth.currentUser?.username ?? "system"
                     quoteStore.actorName = auth.currentUser?.username ?? "system"
                     directory.actorName = auth.currentUser?.username ?? "system"
+                    purchaseInvoiceStore.actorName = auth.currentUser?.username ?? "system"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -242,6 +248,7 @@ enum RootTab: String, CaseIterable, Identifiable {
     case quotes = "Devis"
     case orders = "Ventes"
     case invoices = "Factures"
+    case purchases = "Achats"
     case dashboard = "Tableau de bord"
     var id: String { rawValue }
 
@@ -251,6 +258,7 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .quotes: return "doc.text.below.ecg"
         case .orders: return "cart.fill"
         case .invoices: return "doc.text.fill"
+        case .purchases: return "cart.badge.clock"
         case .dashboard: return "gauge"
         }
     }
@@ -258,13 +266,17 @@ enum RootTab: String, CaseIterable, Identifiable {
     static func visible(for role: UserRole?, modules: ModuleSettings = ModuleStore.shared.settings) -> [RootTab] {
         var result: [RootTab]
         switch role {
+        // Le rôle acheteur garde l'onglet Ventes (déjà son point d'entrée avant l'existence
+        // du module Achats) et gagne Achats en plus — jamais retiré un accès existant sans
+        // qu'on le demande explicitement.
         case .acheteur:
-            result = [.orders]
+            result = [.orders, .purchases]
         default:
             result = allCases
         }
         if !modules.ordersEnabled { result.removeAll { $0 == .orders } }
         if !modules.quotesEnabled { result.removeAll { $0 == .quotes } }
+        if !modules.purchasesEnabled { result.removeAll { $0 == .purchases } }
         return result
     }
 }
@@ -490,12 +502,15 @@ struct RootView: View {
     @EnvironmentObject var pcloudSettings: PCloudSettings
     @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var backupStrategyStore: BackupStrategyStore
+    @EnvironmentObject var purchaseInvoiceStore: PurchaseInvoiceStore
+    @EnvironmentObject var purchaseInvoiceStatusStore: PurchaseInvoiceStatusStore
     @StateObject private var pdpSync = PDPPeriodicSyncEngine()
     @State private var tab: RootTab = .invoices
     @State private var didAttemptAutoBackup = false
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
     @State private var selectedQuoteID: UUID?
+    @State private var selectedPurchaseID: UUID?
     @State private var showSettings = false
     @State private var showUserManagement = false
     @State private var showEnvConfirm = false
@@ -538,6 +553,8 @@ struct RootView: View {
         kindColors.load()
         statusStore.load()
         invoiceStatusStore.load()
+        purchaseInvoiceStore.load()
+        purchaseInvoiceStatusStore.load()
         AuditStore.shared.load()
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
@@ -550,13 +567,16 @@ struct RootView: View {
         orderStore.audit = AuditStore.shared
         quoteStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
+        purchaseInvoiceStore.audit = AuditStore.shared
         auth.reloadEnvironment()
         store.actorName = auth.currentUser?.username ?? "system"
         orderStore.actorName = auth.currentUser?.username ?? "system"
         quoteStore.actorName = auth.currentUser?.username ?? "system"
         directory.actorName = auth.currentUser?.username ?? "system"
+        purchaseInvoiceStore.actorName = auth.currentUser?.username ?? "system"
         selectedID = nil
         selectedOrderID = nil
+        selectedPurchaseID = nil
         // Les identifiants SUPER PDP sont propres à l'environnement (test/production) :
         // un cycle de synchronisation en cours avec les anciens identifiants n'a plus de
         // sens après une bascule — on relance avec ceux qui viennent d'être rechargés.
@@ -733,6 +753,8 @@ struct RootView: View {
                 OrdersTabView(selectedID: $selectedOrderID)
             case .quotes:
                 QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID, orderSelectedID: $selectedOrderID)
+            case .purchases:
+                PurchasesTabView(selectedID: $selectedPurchaseID)
             case .directory:
                 DirectoryView()
             case .dashboard:
@@ -5879,6 +5901,9 @@ struct ApplicationSettingsView: View {
                         Toggle("Ventes (commandes)", isOn: $moduleStore.settings.ordersEnabled)
                             .toggleStyle(.switch)
                             .onChange(of: moduleStore.settings.ordersEnabled) { _ in moduleStore.save() }
+                        Toggle("Achats", isOn: $moduleStore.settings.purchasesEnabled)
+                            .toggleStyle(.switch)
+                            .onChange(of: moduleStore.settings.purchasesEnabled) { _ in moduleStore.save() }
                     }.padding(8)
                 } label: {
                     Label("Modules", systemImage: "square.grid.2x2")
