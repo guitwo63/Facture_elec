@@ -5724,6 +5724,23 @@ struct SocietiesAdminView: View {
                     get: { selectedID },
                     set: { selectedID = $0 }
                 )) {
+                    TableColumn("Principale") { e in
+                        Button {
+                            if e.isPrincipale {
+                                directory.clearPrincipale()
+                            } else {
+                                directory.setPrincipale(e.id)
+                            }
+                        } label: {
+                            Image(systemName: e.isPrincipale ? "star.fill" : "star")
+                                .foregroundStyle(e.isPrincipale ? .yellow : .secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(e.isPrincipale
+                            ? "Société principale — sert de repli pour les réglages par société non personnalisés. Cliquer pour retirer."
+                            : "Définir comme société principale")
+                    }
+                    .width(min: 60, ideal: 70)
                     TableColumn("Nom") { e in
                         HStack(spacing: 6) {
                             Text(e.displayName)

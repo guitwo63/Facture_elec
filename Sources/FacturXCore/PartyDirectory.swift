@@ -209,6 +209,10 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var tagIDs: [UUID]
     public var logoData: Data?
     public var profile: FacturXProfile
+    /// Vrai pour au plus une société du périmètre à la fois — sert de repli pour tous les
+    /// réglages par société non personnalisés (voir `PartyDirectory.principaleSocieteID`).
+    /// L'unicité est garantie par `PartyDirectory.setPrincipale(_:)`, pas par ce champ seul.
+    public var isPrincipale: Bool
 
     public init(
         id: UUID = UUID(),
@@ -221,7 +225,8 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         isArchived: Bool = false,
         tagIDs: [UUID] = [],
         logoData: Data? = nil,
-        profile: FacturXProfile = .en16931
+        profile: FacturXProfile = .en16931,
+        isPrincipale: Bool = false
     ) {
         self.id = id
         self.kinds = kinds.isEmpty ? [.client] : kinds
@@ -234,6 +239,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         self.tagIDs = tagIDs
         self.logoData = logoData
         self.profile = profile
+        self.isPrincipale = isPrincipale
     }
 
     public var displayName: String {
@@ -278,7 +284,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kinds, kind, party, companyID, note, routingAddresses, contacts, isArchived, tagIDs, logoData, profile
+        case id, kinds, kind, party, companyID, note, routingAddresses, contacts, isArchived, tagIDs, logoData, profile, isPrincipale
     }
 
     public init(from decoder: Decoder) throws {
@@ -304,6 +310,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         tagIDs = try c.decodeIfPresent([UUID].self, forKey: .tagIDs) ?? []
         logoData = try c.decodeIfPresent(Data.self, forKey: .logoData)
         profile = try c.decodeIfPresent(FacturXProfile.self, forKey: .profile) ?? .en16931
+        isPrincipale = try c.decodeIfPresent(Bool.self, forKey: .isPrincipale) ?? false
     }
 
     /// Écrit uniquement `kinds` (au pluriel) — plus jamais l'ancienne clé `kind` au
@@ -321,6 +328,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         try c.encode(tagIDs, forKey: .tagIDs)
         try c.encodeIfPresent(logoData, forKey: .logoData)
         try c.encode(profile, forKey: .profile)
+        try c.encode(isPrincipale, forKey: .isPrincipale)
     }
 
     public var defaultRoutingAddress: PartyRoutingAddress? {
@@ -392,6 +400,31 @@ public final class PartyDirectory: ObservableObject {
         if let data = try? JSONEncoder().encode(entries) {
             defaults.set(data, forKey: storageKey)
         }
+    }
+
+    /// La société qui sert de repli pour tous les réglages par société non personnalisés
+    /// (remplace l'ancien « défaut global » abstrait — voir `SocietyScopedCatalog`). `nil`
+    /// avant qu'une société principale ait été désignée.
+    public var principaleSocieteID: UUID? {
+        entries.first { $0.kinds.contains(.societe) && $0.isPrincipale }?.id
+    }
+
+    /// Désigne `id` comme société principale, en retirant l'indicateur de toutes les autres
+    /// au préalable — garantit l'unicité au niveau du store plutôt que de faire confiance à
+    /// l'UI seule.
+    public func setPrincipale(_ id: UUID) {
+        for idx in entries.indices {
+            entries[idx].isPrincipale = (entries[idx].id == id)
+        }
+        save()
+    }
+
+    /// Retire l'indicateur de société principale partout (aucune société principale désignée).
+    public func clearPrincipale() {
+        for idx in entries.indices where entries[idx].isPrincipale {
+            entries[idx].isPrincipale = false
+        }
+        save()
     }
 
     public func upsert(_ entry: DirectoryEntry) {
