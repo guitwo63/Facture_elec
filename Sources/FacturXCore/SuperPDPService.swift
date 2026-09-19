@@ -714,6 +714,84 @@ public final class SuperPDPService {
         )
     }
 
+    /// Liste les factures connues de SUPER PDP (émises et/ou reçues) — `GET /v1.beta/invoices`,
+    /// documentée mais jusqu'ici non intégrée (voir `docs/integrations-superpdp.md` §2A).
+    /// Premier appelant : la réception automatique des factures d'achat (module Achats),
+    /// filtrée sur `direction: .received` pour ne récupérer que les factures déposées par
+    /// nos fournisseurs. Même conventions que le reste du fichier : jeton d'abord, enveloppe
+    /// de réponse tolérante (`data`/`invoices`/`results`/tableau brut, comme
+    /// `parseInvoiceEvents`), erreurs `SuperPDPError.decoding`/`.http`.
+    ///
+    /// Le nom exact du paramètre de requête pour filtrer par direction n'est pas confirmé
+    /// contre le spec OpenAPI live (non consulté pour cet ajout) — `direction` est utilisé
+    /// par cohérence avec le champ `direction` déjà renvoyé par `/invoice_events`
+    /// (`mapInvoiceEvent`), à vérifier en conditions réelles.
+    public func listInvoices(direction: SuperPDPDirection? = nil, credentials: SuperPDPCredentials) async throws -> [SuperPDPInvoiceSubmission] {
+        let token = try await fetchToken(credentials: credentials)
+        var endpoint = trimmedBase(credentials) + "/v1.beta/invoices"
+        if let direction {
+            endpoint += "?direction=\(direction.rawValue)"
+        }
+        guard let url = URL(string: endpoint) else {
+            throw SuperPDPError.decoding("URL de liste de factures invalide : \(endpoint)")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw SuperPDPError.decoding("Réponse non HTTP")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        return try parseInvoiceList(data: data, defaultDirection: direction ?? .received)
+    }
+
+    // Accès non-`private` (comme `mapDirectoryEntry`, contrairement à `parseInvoiceEvents`)
+    // délibérément, pour rester testable en isolation via `@testable import` sans dépendre
+    // d'un appel réseau réel — voir `SuperPDPInvoiceListTests`.
+    func parseInvoiceList(data: Data, defaultDirection: SuperPDPDirection) throws -> [SuperPDPInvoiceSubmission] {
+        let obj: Any
+        do {
+            obj = try JSONSerialization.jsonObject(with: data, options: [])
+        } catch {
+            throw SuperPDPError.decoding("\(error)")
+        }
+        var arr: [[String: Any]] = []
+        if let dict = obj as? [String: Any] {
+            if let a = dict["data"] as? [[String: Any]] { arr = a }
+            else if let a = dict["invoices"] as? [[String: Any]] { arr = a }
+            else if let a = dict["results"] as? [[String: Any]] { arr = a }
+        } else if let a = obj as? [[String: Any]] {
+            arr = a
+        }
+        return arr.map { mapInvoiceListItem($0, defaultDirection: defaultDirection) }
+    }
+
+    func mapInvoiceListItem(_ dict: [String: Any], defaultDirection: SuperPDPDirection) -> SuperPDPInvoiceSubmission {
+        func s(_ key: String) -> String? {
+            if let v = dict[key] as? String { return v.isEmpty ? nil : v }
+            if let n = dict[key] as? NSNumber { return n.stringValue }
+            return nil
+        }
+        let remoteID = s("id") ?? s("invoice_id") ?? s("remote_id")
+        let status = s("status") ?? "pending"
+        let directionStr = s("direction")
+        let direction: SuperPDPDirection = directionStr == "sent" ? .sent : (directionStr == "received" ? .received : defaultDirection)
+        return SuperPDPInvoiceSubmission(
+            id: remoteID ?? UUID().uuidString,
+            remoteID: remoteID,
+            status: status,
+            enInvoiceRef: s("en_invoice"),
+            submittedAt: Date(),
+            lastCheckedAt: Date(),
+            message: s("message"),
+            direction: direction
+        )
+    }
+
     public func sendInvoiceEvent(remoteID: String, statusCode: String, credentials: SuperPDPCredentials, reportedData: [[String: Any]]? = nil) async throws {
         let token = try await fetchToken(credentials: credentials)
         let endpoint = trimmedBase(credentials) + "/v1.beta/invoice_events"
