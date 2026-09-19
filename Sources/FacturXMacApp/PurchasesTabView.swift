@@ -20,6 +20,8 @@ struct PurchasesTabView: View {
     @Binding var selectedID: UUID?
     @State private var query = ""
     @State private var statusFilter: PurchaseInvoiceStatus? = nil
+    @State private var companyFilter: UUID? = nil
+    @State private var didInitCompanyFilter = false
 
     var filteredInvoices: [PurchaseInvoice] {
         var result = store.invoices
@@ -31,6 +33,9 @@ struct PurchasesTabView: View {
         }
         if let sf = statusFilter {
             result = result.filter { $0.status == sf }
+        }
+        if let cf = companyFilter {
+            result = result.filter { $0.invoice.companyID == cf }
         }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
@@ -60,6 +65,14 @@ struct PurchasesTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
+                    Picker("Société", selection: $companyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
+                            Text(entry.party.name).tag(UUID?.some(entry.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
                     Spacer()
                 }
                 HStack {
@@ -145,6 +158,12 @@ struct PurchasesTabView: View {
         .onChange(of: filteredInvoices) { newList in
             if let id = selectedID, !newList.contains(where: { $0.id == id }) {
                 selectedID = nil
+            }
+        }
+        .onAppear {
+            if !didInitCompanyFilter {
+                companyFilter = defaultCompanyID()
+                didInitCompanyFilter = true
             }
         }
     }

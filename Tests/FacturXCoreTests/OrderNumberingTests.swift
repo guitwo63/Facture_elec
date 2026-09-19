@@ -13,7 +13,8 @@ final class OrderNumberingTests: XCTestCase {
         "orderx.number.prefix.v1",
         "orderx.number.includeyear.v1",
         "orderx.number.start.v1",
-        "orderx.number.useseparator.v1"
+        "orderx.number.useseparator.v1",
+        "orderx.number.overrides.bysociety.v1"
     ]
 
     override func setUp() {
@@ -92,5 +93,49 @@ final class OrderNumberingTests: XCTestCase {
 
         store.delete(order2)
         XCTAssertEqual(store.nextNumber(), "CD0002")
+    }
+
+    // MARK: - Format par société (voir InvoiceNumberingTests, même mécanisme)
+
+    func testCompanyWithoutFormatOverrideUsesDefaultFormat() {
+        let store = OrderStore()
+        store.numberPrefix = "CD"
+        let cid = UUID()
+        XCTAssertEqual(store.numberingFormat(for: cid).prefix, "CD")
+        XCTAssertEqual(store.previewNextNumber(companyID: cid), store.previewNextNumber(companyID: nil))
+    }
+
+    func testFormatOverrideAppliesOnlyToItsOwnCompany() {
+        let store = OrderStore()
+        store.numberPrefix = "CD"
+        let cidA = UUID()
+        let cidB = UUID()
+        store.numberFormatOverrides[cidA] = InvoiceNumberingFormat(prefix: "ALPHA", includeYear: false, start: 1, useSeparator: false)
+
+        XCTAssertTrue(store.previewNextNumber(companyID: cidA).hasPrefix("ALPHA"))
+        XCTAssertTrue(store.previewNextNumber(companyID: cidB).hasPrefix("CD"))
+        XCTAssertTrue(store.previewNextNumber(companyID: nil).hasPrefix("CD"))
+    }
+
+    func testRemovingFormatOverrideRevertsToDefaultFormat() {
+        let store = OrderStore()
+        store.numberPrefix = "CD"
+        let cid = UUID()
+        store.numberFormatOverrides[cid] = InvoiceNumberingFormat(prefix: "SPECIAL", includeYear: false, start: 1, useSeparator: false)
+        XCTAssertEqual(store.numberingFormat(for: cid).prefix, "SPECIAL")
+
+        store.numberFormatOverrides.removeValue(forKey: cid)
+        XCTAssertEqual(store.numberingFormat(for: cid).prefix, "CD")
+    }
+
+    func testFormatOverridesPersistAcrossReload() {
+        let store = OrderStore()
+        let cid = UUID()
+        store.numberFormatOverrides[cid] = InvoiceNumberingFormat(prefix: "PERSIST", includeYear: true, start: 42, useSeparator: true)
+        store.save()
+
+        let reloaded = OrderStore()
+        XCTAssertEqual(reloaded.numberFormatOverrides[cid]?.prefix, "PERSIST")
+        XCTAssertEqual(reloaded.numberFormatOverrides[cid]?.start, 42)
     }
 }

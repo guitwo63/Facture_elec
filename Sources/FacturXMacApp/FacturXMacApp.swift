@@ -1723,6 +1723,8 @@ struct InvoicesTabView: View {
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
     @State private var statusFilter: InvoiceStatus? = nil
+    @State private var companyFilter: UUID? = nil
+    @State private var didInitCompanyFilter = false
     @State private var showOrderPicker = false
     @State private var showQuotePicker = false
     @State private var showQuickInvoiceWizard = false
@@ -1755,6 +1757,9 @@ struct InvoicesTabView: View {
         if let sf = statusFilter {
             result = result.filter { $0.status == sf }
         }
+        if let cf = companyFilter {
+            result = result.filter { $0.companyID == cf }
+        }
         result = applyAdvancedFilter(result, field: advField1, value: advValue1)
         result = applyAdvancedFilter(result, field: advField2, value: advValue2)
         result = applyAdvancedFilter(result, field: advField3, value: advValue3)
@@ -1772,37 +1777,41 @@ struct InvoicesTabView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 HStack {
-                    Button {
+                    // Bouton scindé : le corps crée directement un brouillon (action la plus
+                    // fréquente), la flèche ouvre les autres origines — remplace 4 boutons
+                    // séparés qui finissaient tronqués dans la barre d'actions.
+                    Menu {
+                        if moduleStore.settings.ordersEnabled {
+                            Button {
+                                showOrderPicker = true
+                            } label: { Label("Depuis une commande", systemImage: "cart") }
+                        }
+                        if moduleStore.settings.quotesEnabled {
+                            Button {
+                                showQuotePicker = true
+                            } label: { Label("Depuis un devis", systemImage: "doc.text.below.ecg") }
+                                .help("Convertit un devis accepté en facture")
+                        }
+                        Button {
+                            showScanImport = true
+                        } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
+                            .help("Importer la photo/le scan d'un devis signé ou d'un bon de commande client pour pré-remplir une facture")
+                    } label: {
+                        Label("Nouvelle facture", systemImage: "plus")
+                    } primaryAction: {
                         let draft = store.newDraft(companyID: defaultCompanyID(),
                                                    preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
                         store.upsert(draft)
                         selectedID = draft.id
-                    } label: { Label("Nouvelle facture", systemImage: "plus") }
-                        .buttonStyle(.borderedProminent)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Nouvelle facture vierge — flèche pour créer depuis une commande, un devis, ou en scannant un document")
                     Text("Factures").font(.title2.bold())
-                    if moduleStore.settings.ordersEnabled {
-                        Button {
-                            showOrderPicker = true
-                        } label: { Label("Depuis une commande", systemImage: "cart") }
-                            .buttonStyle(.bordered)
-                    }
-                    if moduleStore.settings.quotesEnabled {
-                        Button {
-                            showQuotePicker = true
-                        } label: { Label("Depuis un devis", systemImage: "doc.text.below.ecg") }
-                            .buttonStyle(.bordered)
-                            .help("Convertit un devis accepté en facture")
-                    }
                     Button {
                         showQuickInvoiceWizard = true
                     } label: { Label("Facture guidée", systemImage: "wand.and.stars") }
                         .buttonStyle(.bordered)
                         .help("Créer une facture en quelques étapes avec le minimum d'informations")
-                    Button {
-                        showScanImport = true
-                    } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
-                        .buttonStyle(.bordered)
-                        .help("Importer la photo/le scan d'un devis signé ou d'un bon de commande client pour pré-remplir une facture")
                     Picker("Filtre", selection: $typeFilter) {
                         ForEach(InvoiceTypeFilter.allCases, id: \.self) { f in
                             Text(f.rawValue).tag(f)
@@ -1818,6 +1827,14 @@ struct InvoicesTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
+                    Picker("Société", selection: $companyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
+                            Text(entry.party.name).tag(UUID?.some(entry.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
                     Spacer()
                     Menu {
                         ForEach(QuickExport.Format.allCases, id: \.self) { f in
@@ -2041,6 +2058,12 @@ struct InvoicesTabView: View {
         .onChange(of: selectedID) { id in
             if let id = id, !filteredInvoices.contains(where: { $0.id == id }) {
                 selectedID = nil
+            }
+        }
+        .onAppear {
+            if !didInitCompanyFilter {
+                companyFilter = defaultCompanyID()
+                didInitCompanyFilter = true
             }
         }
     }
@@ -5880,6 +5903,8 @@ struct ApplicationSettingsView: View {
     @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
     @EnvironmentObject var auth: AuthStore
@@ -5892,6 +5917,10 @@ struct ApplicationSettingsView: View {
     @State private var tagsExpanded = false
     @State private var numberingExpanded = false
     @State private var numberingCompanyID: UUID?
+    @State private var orderNumberingExpanded = false
+    @State private var orderNumberingCompanyID: UUID?
+    @State private var quoteNumberingExpanded = false
+    @State private var quoteNumberingCompanyID: UUID?
     @State private var editingSociety: DirectoryEntry?
     @State private var creatingSociety = false
     @State private var newTagName = ""
@@ -6097,6 +6126,118 @@ struct ApplicationSettingsView: View {
                         .font(.headline)
                 }
 
+                DisclosureGroup(isExpanded: $orderNumberingExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Même principe que pour les factures : le compteur est toujours indépendant par société émettrice, le format (préfixe, année, séparateur) peut l'être aussi si besoin.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        let societies = auth.visibleSocieties(for: auth.currentUser)
+                        if !societies.isEmpty {
+                            Picker("Société", selection: $orderNumberingCompanyID) {
+                                Text("Toutes (format par défaut)").tag(UUID?.none)
+                                ForEach(societies) { c in
+                                    Text(c.displayName).tag(UUID?.some(c.id))
+                                }
+                            }
+                            if let cid = orderNumberingCompanyID {
+                                if orderStore.numberFormatOverrides[cid] == nil {
+                                    HStack(spacing: 6) {
+                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                        Button("Personnaliser pour cette société") {
+                                            orderStore.numberFormatOverrides[cid] = orderStore.numberingFormat(for: nil)
+                                            orderStore.save()
+                                        }.buttonStyle(.link).font(.caption2)
+                                    }
+                                } else {
+                                    Button("Revenir au format par défaut", role: .destructive) {
+                                        orderStore.numberFormatOverrides.removeValue(forKey: cid)
+                                        orderStore.save()
+                                    }.buttonStyle(.link).font(.caption2)
+                                }
+                            }
+                        }
+                        HStack {
+                            Text("Préfixe texte").font(.caption)
+                            TextField("ex. CD", text: activeOrderNumberingFormatBinding.prefix)
+                                .frame(width: 140)
+                        }
+                        Toggle("Inclure l'année", isOn: activeOrderNumberingFormatBinding.includeYear)
+                            .toggleStyle(.switch)
+                        HStack {
+                            Text("Numéro de début").font(.caption)
+                            Stepper(value: activeOrderNumberingFormatBinding.start, in: 1...999999) {
+                                Text("\(activeOrderNumberingFormatBinding.wrappedValue.start)")
+                            }
+                        }
+                        Toggle("Séparer par un \"-\"", isOn: activeOrderNumberingFormatBinding.useSeparator)
+                            .toggleStyle(.switch)
+                        Divider()
+                        HStack {
+                            Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
+                            Text(orderStore.previewNextNumber(companyID: orderNumberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
+                            Spacer()
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Numérotation des commandes", systemImage: "number")
+                        .font(.headline)
+                }
+
+                DisclosureGroup(isExpanded: $quoteNumberingExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Même principe que pour les factures : le compteur est toujours indépendant par société émettrice, le format (préfixe, année, séparateur) peut l'être aussi si besoin.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        let societies = auth.visibleSocieties(for: auth.currentUser)
+                        if !societies.isEmpty {
+                            Picker("Société", selection: $quoteNumberingCompanyID) {
+                                Text("Toutes (format par défaut)").tag(UUID?.none)
+                                ForEach(societies) { c in
+                                    Text(c.displayName).tag(UUID?.some(c.id))
+                                }
+                            }
+                            if let cid = quoteNumberingCompanyID {
+                                if quoteStore.numberFormatOverrides[cid] == nil {
+                                    HStack(spacing: 6) {
+                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                        Button("Personnaliser pour cette société") {
+                                            quoteStore.numberFormatOverrides[cid] = quoteStore.numberingFormat(for: nil)
+                                            quoteStore.save()
+                                        }.buttonStyle(.link).font(.caption2)
+                                    }
+                                } else {
+                                    Button("Revenir au format par défaut", role: .destructive) {
+                                        quoteStore.numberFormatOverrides.removeValue(forKey: cid)
+                                        quoteStore.save()
+                                    }.buttonStyle(.link).font(.caption2)
+                                }
+                            }
+                        }
+                        HStack {
+                            Text("Préfixe texte").font(.caption)
+                            TextField("ex. DEV", text: activeQuoteNumberingFormatBinding.prefix)
+                                .frame(width: 140)
+                        }
+                        Toggle("Inclure l'année", isOn: activeQuoteNumberingFormatBinding.includeYear)
+                            .toggleStyle(.switch)
+                        HStack {
+                            Text("Numéro de début").font(.caption)
+                            Stepper(value: activeQuoteNumberingFormatBinding.start, in: 1...999999) {
+                                Text("\(activeQuoteNumberingFormatBinding.wrappedValue.start)")
+                            }
+                        }
+                        Toggle("Séparer par un \"-\"", isOn: activeQuoteNumberingFormatBinding.useSeparator)
+                            .toggleStyle(.switch)
+                        Divider()
+                        HStack {
+                            Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
+                            Text(quoteStore.previewNextNumber(companyID: quoteNumberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
+                            Spacer()
+                        }
+                    }.padding(8)
+                } label: {
+                    Label("Numérotation des devis", systemImage: "number")
+                        .font(.headline)
+                }
+
                 Divider()
                 HStack {
                     Text("Facture_elec v\(AppVersion.current) — © 2026 \(AppVersion.copyrightHolder) — \(AppVersion.licenseName)")
@@ -6156,6 +6297,46 @@ struct ApplicationSettingsView: View {
                     store.numberUseSeparator = newValue.useSeparator
                 }
                 store.save()
+            }
+        )
+    }
+
+    private var activeOrderNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
+        Binding(
+            get: {
+                guard let cid = orderNumberingCompanyID else { return orderStore.numberingFormat(for: nil) }
+                return orderStore.numberFormatOverrides[cid] ?? orderStore.numberingFormat(for: nil)
+            },
+            set: { newValue in
+                if let cid = orderNumberingCompanyID {
+                    orderStore.numberFormatOverrides[cid] = newValue
+                } else {
+                    orderStore.numberPrefix = newValue.prefix
+                    orderStore.numberIncludeYear = newValue.includeYear
+                    orderStore.numberStart = newValue.start
+                    orderStore.numberUseSeparator = newValue.useSeparator
+                }
+                orderStore.save()
+            }
+        )
+    }
+
+    private var activeQuoteNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
+        Binding(
+            get: {
+                guard let cid = quoteNumberingCompanyID else { return quoteStore.numberingFormat(for: nil) }
+                return quoteStore.numberFormatOverrides[cid] ?? quoteStore.numberingFormat(for: nil)
+            },
+            set: { newValue in
+                if let cid = quoteNumberingCompanyID {
+                    quoteStore.numberFormatOverrides[cid] = newValue
+                } else {
+                    quoteStore.numberPrefix = newValue.prefix
+                    quoteStore.numberIncludeYear = newValue.includeYear
+                    quoteStore.numberStart = newValue.start
+                    quoteStore.numberUseSeparator = newValue.useSeparator
+                }
+                quoteStore.save()
             }
         )
     }
@@ -9288,6 +9469,8 @@ struct OrdersTabView: View {
     @State private var showScanImport = false
     @State private var showQuotePicker = false
     @State private var statusFilter: OrderStatus? = nil
+    @State private var companyFilter: UUID? = nil
+    @State private var didInitCompanyFilter = false
     @State private var showAdvancedFilters = false
     @State private var advField1: OrderFilterField = .none
     @State private var advValue1 = ""
@@ -9306,6 +9489,9 @@ struct OrdersTabView: View {
         }
         if let sf = statusFilter {
             result = result.filter { $0.status == sf }
+        }
+        if let cf = companyFilter {
+            result = result.filter { $0.companyID == cf }
         }
         result = applyAdvancedFilter(result, field: advField1, value: advValue1)
         result = applyAdvancedFilter(result, field: advField2, value: advValue2)
@@ -9444,24 +9630,26 @@ struct OrdersTabView: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 HStack {
-                    Button {
+                    Menu {
+                        Button {
+                            showScanImport = true
+                        } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
+                            .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
+                        if moduleStore.settings.quotesEnabled {
+                            Button {
+                                showQuotePicker = true
+                            } label: { Label("Depuis un devis", systemImage: "doc.text.below.ecg") }
+                                .help("Transforme un devis accepté en commande")
+                        }
+                    } label: {
+                        Label("Nouvelle commande", systemImage: "plus")
+                    } primaryAction: {
                         let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
                         orderStore.upsert(draft)
                         selectedID = draft.id
-                    } label: { Label("Nouvelle commande", systemImage: "plus") }
-                        .buttonStyle(.borderedProminent)
-                    Button {
-                        showScanImport = true
-                    } label: { Label("Scanner un document", systemImage: "doc.viewfinder") }
-                        .buttonStyle(.bordered)
-                        .help("Importer la photo/le scan d'un bon de commande ou d'un devis fournisseur pour pré-remplir une commande")
-                    if moduleStore.settings.quotesEnabled {
-                        Button {
-                            showQuotePicker = true
-                        } label: { Label("Depuis un devis", systemImage: "doc.text.below.ecg") }
-                            .buttonStyle(.bordered)
-                            .help("Transforme un devis accepté en commande")
                     }
+                    .buttonStyle(.borderedProminent)
+                    .help("Nouvelle commande vierge — flèche pour créer depuis un devis, ou en scannant un document")
                     Text("Ventes").font(.title2.bold())
                     Picker("Statut", selection: $statusFilter) {
                         Text("Tous statuts").tag(OrderStatus?.none)
@@ -9471,6 +9659,14 @@ struct OrdersTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
+                    Picker("Société", selection: $companyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
+                            Text(entry.party.name).tag(UUID?.some(entry.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
                     Spacer()
                     Menu {
                         ForEach(QuickExport.OrderFormat.allCases, id: \.self) { f in
@@ -9637,6 +9833,12 @@ struct OrdersTabView: View {
                 onCancel: { showQuotePicker = false }
             )
         }
+        .onAppear {
+            if !didInitCompanyFilter {
+                companyFilter = defaultOrderCompanyID()
+                didInitCompanyFilter = true
+            }
+        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -9702,6 +9904,8 @@ struct QuotesTabView: View {
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var statusFilter: QuoteStatus? = nil
+    @State private var companyFilter: UUID? = nil
+    @State private var didInitCompanyFilter = false
     @State private var showAdvancedFilters = false
     @State private var advField1: QuoteFilterField = .none
     @State private var advValue1 = ""
@@ -9720,6 +9924,9 @@ struct QuotesTabView: View {
         }
         if let sf = statusFilter {
             result = result.filter { $0.status == sf }
+        }
+        if let cf = companyFilter {
+            result = result.filter { $0.companyID == cf }
         }
         result = applyAdvancedFilter(result, field: advField1, value: advValue1)
         result = applyAdvancedFilter(result, field: advField2, value: advValue2)
@@ -9880,6 +10087,14 @@ struct QuotesTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
+                    Picker("Société", selection: $companyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
+                            Text(entry.party.name).tag(UUID?.some(entry.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
                     Spacer()
                     Menu {
                         ForEach(QuickExport.QuoteFormat.allCases, id: \.self) { f in
@@ -10020,6 +10235,12 @@ struct QuotesTabView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            }
+        }
+        .onAppear {
+            if !didInitCompanyFilter {
+                companyFilter = defaultCompanyID()
+                didInitCompanyFilter = true
             }
         }
     }
