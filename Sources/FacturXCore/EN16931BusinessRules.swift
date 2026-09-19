@@ -100,6 +100,15 @@ public enum EN16931BusinessRules {
             results.append(BusinessRuleResult(ruleId: "BR-S-02", severity: .error,
                 message: "BR-S-02 : Une ligne à TVA standard (BT-151 = S) oblige l'émetteur à avoir un n° TVA (BT-31)."))
         }
+        // Même famille de règle que BR-S-02 ci-dessus (BT-31 obligatoire pour l'émetteur),
+        // pour la catégorie Exonérée (BT-151 = E) au lieu de Taux normal — pas détectée
+        // localement avant cet ajout, découverte seulement au dépôt via la validation
+        // distante SUPER PDP (BR-E-02).
+        let hasExemptLine = invoice.lines.contains { $0.vatCategory == .exempt }
+        if hasExemptLine && sellerVAT.isEmpty {
+            results.append(BusinessRuleResult(ruleId: "BR-E-02", severity: .error,
+                message: "BR-E-02 : Une ligne exonérée de TVA (BT-151 = E) oblige l'émetteur à avoir un n° TVA (BT-31)."))
+        }
 
         if buyerName.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-25", severity: .error,

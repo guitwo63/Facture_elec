@@ -162,6 +162,31 @@ final class VATCategoryTests: XCTestCase {
                      "toute catégorie non standard implique un taux nul, même quand le motif d'exonération est renseigné")
     }
 
+    /// Régression : repérée en conditions réelles via SUPER PDP (rejet BR-E-02) sur une
+    /// facture avec une ligne exonérée dont l'émetteur n'avait pas de n° TVA — le validateur
+    /// local ne couvrait déjà ce cas que pour la catégorie standard (BR-S-02), pas pour
+    /// Exonérée, découvert seulement au dépôt via la validation distante.
+    func testBusinessRulesFlagExemptLineWithoutSellerVATNumber() {
+        let inv = sampleInvoice(lines: [
+            InvoiceLine(name: "Prestation exonérée", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .exempt,
+                        vatExemptionReason: "Exonération, article 293 B du CGI")
+        ])
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-E-02" && $0.severity == .error },
+                     "une ligne exonérée oblige l'émetteur à avoir un n° TVA, comme BR-S-02 pour le taux standard")
+    }
+
+    func testBusinessRulesDoNotFlagExemptLineWhenSellerHasVATNumber() {
+        var seller = party("Vendeur")
+        seller.vatNumber = "FR12345678901"
+        let inv = Invoice(number: "F-1", seller: seller, buyer: party("Acheteur"), lines: [
+            InvoiceLine(name: "Prestation exonérée", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .exempt,
+                        vatExemptionReason: "Exonération, article 293 B du CGI")
+        ])
+        let rules = EN16931BusinessRules.evaluate(invoice: inv)
+        XCTAssertFalse(rules.contains { $0.ruleId == "BR-E-02" })
+    }
+
     // MARK: - CIIXMLGenerator / OrderCIOXMLGenerator
 
     func testXMLLineAndBreakdownUseTheLinesActualCategoryNotHardcodedS() throws {
