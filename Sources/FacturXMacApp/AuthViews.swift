@@ -347,9 +347,11 @@ struct EmailVerificationGateView: View {
 struct AuditLogView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var actionLabels: AuditActionLabelStore
+    @EnvironmentObject var directory: PartyDirectory
     @State private var query = ""
     @State private var typeFilter: AuditObjectType? = nil
     @State private var statusOnly = false
+    @State private var companyFilter: UUID?
 
     private var isAdmin: Bool { auth.currentUser?.isAdmin == true }
 
@@ -360,15 +362,23 @@ struct AuditLogView: View {
         AuditObjectType.allCases.filter { isAdmin || $0 != .user }
     }
 
-    /// Entrées visibles pour le rôle courant, avant recherche/filtre de type.
+    /// Entrées visibles pour le rôle courant, avant recherche/filtre de type ou de société —
+    /// c'est la frontière de sécurité (ce que l'utilisateur PEUT voir), pas le filtre choisi
+    /// (ce qu'il choisit d'afficher parmi ça). Une entrée sans société (`companyID == nil`,
+    /// connexion/2FA/gestion utilisateurs/sauvegarde globale) reste toujours visible — elle
+    /// ne relève d'aucun périmètre société à restreindre.
     private var visibleEntries: [AuditLogEntry] {
         let all = auth.audit.entries
-        return isAdmin ? all : all.filter { $0.objectType != .user }
+        let roleFiltered = isAdmin ? all : all.filter { $0.objectType != .user }
+        let scopeIDs = auth.visibleAuditCompanyIDs(for: auth.currentUser)
+        guard let scopeIDs else { return roleFiltered }
+        return roleFiltered.filter { $0.companyID == nil || scopeIDs.contains($0.companyID!) }
     }
 
     var filtered: [AuditLogEntry] {
         var result = visibleEntries
         if let t = typeFilter { result = result.filter { $0.objectType == t } }
+        if let cid = companyFilter { result = result.filter { $0.companyID == cid } }
         if statusOnly { result = result.filter { $0.action == "status_change" } }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return result }
@@ -405,6 +415,15 @@ struct AuditLogView: View {
                     }
                 }
                 .pickerStyle(.menu).frame(width: 160)
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                    Picker("Société", selection: $companyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                            Text(s.displayName).tag(UUID?.some(s.id))
+                        }
+                    }
+                    .pickerStyle(.menu).frame(width: 180)
+                }
                 Toggle("Statuts uniquement", isOn: $statusOnly)
             }
             .padding(.horizontal, 10).padding(.bottom, 8)
