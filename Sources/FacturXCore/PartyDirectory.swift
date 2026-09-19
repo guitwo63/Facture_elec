@@ -4,6 +4,12 @@ public enum DirectoryEntryKind: String, Codable, CaseIterable {
     case client
     case societe
     case fournisseur
+    case interco
+    /// Ancien cas "Client / Fournisseur" d'avant le multi-sélecteur — conservé uniquement
+    /// pour décoder les anciennes données (`DirectoryEntry.kind` au singulier) et les
+    /// anciennes préférences de couleur ; jamais proposé à la sélection ni assigné à un
+    /// nouveau tiers (voir `DirectoryEntryKind.selectable`). Un tiers "both" existant est
+    /// développé en `[.client, .fournisseur]` dès la lecture — voir `DirectoryEntry.init(from:)`.
     case both
 
     public var label: String {
@@ -11,6 +17,7 @@ public enum DirectoryEntryKind: String, Codable, CaseIterable {
         case .client: return "Client"
         case .societe: return "Société"
         case .fournisseur: return "Fournisseur"
+        case .interco: return "Interco"
         case .both: return "Client / Fournisseur"
         }
     }
@@ -20,8 +27,15 @@ public enum DirectoryEntryKind: String, Codable, CaseIterable {
         case .client: return "2A6EBB"
         case .societe: return "2E8B57"
         case .fournisseur: return "B07A2A"
+        case .interco: return "1E8A8A"
         case .both: return "8A4FBD"
         }
+    }
+
+    /// Les types proposés à la sélection sur un tiers — exclut `.both`, remplacé par la
+    /// combinaison `.client` + `.fournisseur` depuis le passage au multi-sélecteur.
+    public static var selectable: [DirectoryEntryKind] {
+        allCases.filter { $0 != .both }
     }
 
     public init(from decoder: Decoder) throws {
@@ -182,7 +196,10 @@ public struct PartyContact: Codable, Hashable, Identifiable {
 
 public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var id: UUID
-    public var kind: DirectoryEntryKind
+    /// Un tiers peut cumuler plusieurs types (ex. Client + Interco) depuis le passage au
+    /// multi-sélecteur — voir `DirectoryEntryKind.selectable`. Jamais vide en pratique
+    /// (`init(from:)` retombe sur `[.client]` si rien n'est décodable).
+    public var kinds: Set<DirectoryEntryKind>
     public var party: InvoiceParty
     public var companyID: UUID?
     public var note: String?
@@ -195,7 +212,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
 
     public init(
         id: UUID = UUID(),
-        kind: DirectoryEntryKind = .client,
+        kinds: Set<DirectoryEntryKind> = [.client],
         party: InvoiceParty,
         companyID: UUID? = nil,
         note: String? = nil,
@@ -207,7 +224,7 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         profile: FacturXProfile = .en16931
     ) {
         self.id = id
-        self.kind = kind
+        self.kinds = kinds.isEmpty ? [.client] : kinds
         self.party = party
         self.companyID = companyID
         self.note = note
@@ -223,6 +240,26 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         party.name.trimmingCharacters(in: .whitespaces).isEmpty
             ? "(sans nom)"
             : party.name
+    }
+
+    /// Libellés de tous les types cumulés, dans l'ordre de `DirectoryEntryKind.selectable`
+    /// (donc jamais "Client / Fournisseur" : voir la note sur `.both`).
+    public var kindsLabel: String {
+        DirectoryEntryKind.selectable.filter { kinds.contains($0) }.map(\.label).joined(separator: " / ")
+    }
+
+    /// Vrai si ce tiers peut être payé (fournisseur ou société émettrice) — condition
+    /// d'affichage des coordonnées bancaires sur sa fiche.
+    public var isPayee: Bool {
+        kinds.contains(.fournisseur) || kinds.contains(.societe)
+    }
+
+    /// Vrai si ce tiers n'a aucune capacité de destinataire (ni client, ni société) en plus
+    /// de fournisseur — condition de masquage de l'adresse de facturation électronique, qui
+    /// n'a de sens que pour un tiers qu'on peut aussi qualifier de destinataire. `.interco`
+    /// n'ajoute pas de capacité destinataire, donc n'influence pas ce calcul.
+    public var isSupplierOnly: Bool {
+        kinds.contains(.fournisseur) && !kinds.contains(.client) && !kinds.contains(.societe)
     }
 
     public var subtitle: String {
@@ -241,13 +278,22 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, party, companyID, note, routingAddresses, contacts, isArchived, tagIDs, logoData, profile
+        case id, kinds, kind, party, companyID, note, routingAddresses, contacts, isArchived, tagIDs, logoData, profile
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        kind = try c.decodeIfPresent(DirectoryEntryKind.self, forKey: .kind) ?? .client
+        // Données existantes : un seul `kind` (singulier), "both" représentant déjà un
+        // cumul client+fournisseur — développé ici une bonne fois pour toutes plutôt que de
+        // garder cette ambiguïté dans tout le reste du code.
+        if let decodedKinds = try c.decodeIfPresent(Set<DirectoryEntryKind>.self, forKey: .kinds), !decodedKinds.isEmpty {
+            kinds = decodedKinds
+        } else if let legacy = try c.decodeIfPresent(DirectoryEntryKind.self, forKey: .kind) {
+            kinds = legacy == .both ? [.client, .fournisseur] : [legacy]
+        } else {
+            kinds = [.client]
+        }
         party = try c.decodeIfPresent(InvoiceParty.self, forKey: .party)
             ?? InvoiceParty(name: "", street: "", postcode: "", city: "")
         companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
@@ -258,6 +304,23 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
         tagIDs = try c.decodeIfPresent([UUID].self, forKey: .tagIDs) ?? []
         logoData = try c.decodeIfPresent(Data.self, forKey: .logoData)
         profile = try c.decodeIfPresent(FacturXProfile.self, forKey: .profile) ?? .en16931
+    }
+
+    /// Écrit uniquement `kinds` (au pluriel) — plus jamais l'ancienne clé `kind` au
+    /// singulier, dont la lecture reste gérée par `init(from:)` pour les données existantes.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kinds, forKey: .kinds)
+        try c.encode(party, forKey: .party)
+        try c.encodeIfPresent(companyID, forKey: .companyID)
+        try c.encodeIfPresent(note, forKey: .note)
+        try c.encode(routingAddresses, forKey: .routingAddresses)
+        try c.encode(contacts, forKey: .contacts)
+        try c.encode(isArchived, forKey: .isArchived)
+        try c.encode(tagIDs, forKey: .tagIDs)
+        try c.encodeIfPresent(logoData, forKey: .logoData)
+        try c.encode(profile, forKey: .profile)
     }
 
     public var defaultRoutingAddress: PartyRoutingAddress? {
@@ -465,6 +528,7 @@ public final class KindColorStore: ObservableObject {
             .client: DirectoryEntryKind.client.defaultHexColor,
             .societe: DirectoryEntryKind.societe.defaultHexColor,
             .fournisseur: DirectoryEntryKind.fournisseur.defaultHexColor,
+            .interco: DirectoryEntryKind.interco.defaultHexColor,
             .both: DirectoryEntryKind.both.defaultHexColor,
         ]
         load()
@@ -477,6 +541,7 @@ public final class KindColorStore: ObservableObject {
                 .client: decoded["client"] ?? DirectoryEntryKind.client.defaultHexColor,
                 .societe: decoded["societe"] ?? decoded["fournisseur"] ?? DirectoryEntryKind.societe.defaultHexColor,
                 .fournisseur: decoded["fournisseur_new"] ?? DirectoryEntryKind.fournisseur.defaultHexColor,
+                .interco: decoded["interco"] ?? DirectoryEntryKind.interco.defaultHexColor,
                 .both: decoded["both"] ?? DirectoryEntryKind.both.defaultHexColor,
             ]
         }
@@ -487,6 +552,7 @@ public final class KindColorStore: ObservableObject {
             "client": colors[.client] ?? DirectoryEntryKind.client.defaultHexColor,
             "societe": colors[.societe] ?? DirectoryEntryKind.societe.defaultHexColor,
             "fournisseur_new": colors[.fournisseur] ?? DirectoryEntryKind.fournisseur.defaultHexColor,
+            "interco": colors[.interco] ?? DirectoryEntryKind.interco.defaultHexColor,
             "both": colors[.both] ?? DirectoryEntryKind.both.defaultHexColor,
         ]
         if let data = try? JSONEncoder().encode(dict) {

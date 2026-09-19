@@ -236,7 +236,8 @@ struct DocumentScanInvoiceImportView: View {
         extractedTotal = ScannedDocumentParser.extractTotal(from: text)
         if let siren = ScannedDocumentParser.extractSIREN(from: text),
            let entry = directory.entries.first(where: {
-               ($0.kind == .client || $0.kind == .both) && ($0.party.siren ?? "").filter(\.isNumber) == siren
+               guard $0.kinds.contains(.client) else { return false }
+               return ($0.party.siren ?? "").filter(\.isNumber) == siren
            }) {
             matchedEntry = entry
             buyerName = entry.displayName

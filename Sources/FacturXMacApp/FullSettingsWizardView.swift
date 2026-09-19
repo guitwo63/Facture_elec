@@ -35,7 +35,7 @@ struct FullSettingsWizardView: View {
     }
 
     private var societies: [DirectoryEntry] {
-        directory.entries.filter { $0.kind == .societe }
+        directory.entries.filter { $0.kinds.contains(.societe) }
     }
 
     var body: some View {

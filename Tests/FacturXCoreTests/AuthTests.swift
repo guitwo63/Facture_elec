@@ -117,9 +117,9 @@ final class AuthTests: XCTestCase {
         let dir = PartyDirectory()
         dir.entries = []
         store.attachDirectory(dir)
-        let e1 = DirectoryEntry(kind: .societe, party: InvoiceParty(name: "Société A", street: "", postcode: "", city: ""))
-        let e2 = DirectoryEntry(kind: .societe, party: InvoiceParty(name: "Société B", street: "", postcode: "", city: ""))
-        let client = DirectoryEntry(kind: .client, party: InvoiceParty(name: "Client X", street: "", postcode: "", city: ""))
+        let e1 = DirectoryEntry(kinds: [.societe], party: InvoiceParty(name: "Société A", street: "", postcode: "", city: ""))
+        let e2 = DirectoryEntry(kinds: [.societe], party: InvoiceParty(name: "Société B", street: "", postcode: "", city: ""))
+        let client = DirectoryEntry(kinds: [.client], party: InvoiceParty(name: "Client X", street: "", postcode: "", city: ""))
         dir.entries = [e1, e2, client]
         return (store, dir, [e1, e2, client])
     }
@@ -222,7 +222,7 @@ final class AuthTests: XCTestCase {
 
     func testDirectoryEntryCompanyIDRoundTrip() throws {
         let cid = UUID()
-        var entry = DirectoryEntry(kind: .client,
+        var entry = DirectoryEntry(kinds: [.client],
                                    party: InvoiceParty(name: "Client A", street: "", postcode: "", city: ""),
                                    companyID: cid)
         XCTAssertEqual(entry.companyID, cid)

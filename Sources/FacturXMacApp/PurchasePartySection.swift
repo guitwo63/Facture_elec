@@ -241,7 +241,7 @@ struct PurchasePartySection: View {
     }
 
     private func finishSaveToDirectory(_ p: InvoiceParty) {
-        var entry = DirectoryEntry(kind: role.defaultKind, party: p)
+        var entry = DirectoryEntry(kinds: [role.defaultKind], party: p)
         let siren = (p.siren ?? "").filter { $0.isNumber }
         let siret = (p.siret ?? "").filter { $0.isNumber }
         let endpoint = (p.endpointID ?? "").trimmingCharacters(in: .whitespaces)
@@ -283,8 +283,8 @@ struct PurchasePartySection: View {
     }
 }
 
-/// Pendant de `PartyPickerSheet` — filtre sur `.fournisseur`/`.both` au lieu de
-/// `.client`/`.both`, retypé sur `PurchasePartySection.Role`.
+/// Pendant de `PartyPickerSheet` — filtre sur `.fournisseur` au lieu de `.client`,
+/// retypé sur `PurchasePartySection.Role`.
 struct PurchasePartyPickerSheet: View {
     let role: PurchasePartySection.Role
     let onPick: (DirectoryEntry) -> Void
@@ -299,7 +299,7 @@ struct PurchasePartyPickerSheet: View {
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var active = directory.entries.filter {
-            !$0.isArchived && (role == .buyer ? $0.kind == .societe : ($0.kind == .fournisseur || $0.kind == .both))
+            !$0.isArchived && (role == .buyer ? $0.kinds.contains(.societe) : $0.kinds.contains(.fournisseur))
         }
         if role == .buyer, let scope = auth.visibleDirectoryEntryIDs(for: auth.currentUser) {
             active = active.filter { scope.contains($0.id) }
@@ -365,7 +365,7 @@ struct PurchasePartyPickerSheet: View {
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
                                         }
-                                        Text(entry.kind.label).font(.caption2)
+                                        Text(entry.kindsLabel).font(.caption2)
                                             .padding(.horizontal, 6).padding(.vertical, 1)
                                             .background(.quaternary, in: Capsule())
                                     }

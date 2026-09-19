@@ -228,7 +228,7 @@ public struct ExportGenerator {
             let c = e.defaultContact
             rows.append([
                 csv(p.name),
-                csv(e.kind.label),
+                csv(e.kinds.sorted { $0.label < $1.label }.map(\.label).joined(separator: " / ")),
                 csv(orBlank(p.siren)),
                 csv(orBlank(p.siret)),
                 csv(orBlank(p.vatNumber)),
@@ -272,6 +272,32 @@ public struct ExportGenerator {
             self.entries = entries
             self.errors = errors
         }
+    }
+
+    /// Convertit la colonne « Type » en un ensemble de types — un ou plusieurs, séparés par
+    /// « / » ou « , » (format produit par `directoryCSV`), ou une des anciennes valeurs
+    /// combinées ("Client / Fournisseur", "both"…) toujours acceptées à l'import.
+    static func parseKinds(_ raw: String?) -> Set<DirectoryEntryKind> {
+        let normalized = raw?.lowercased() ?? ""
+        guard !normalized.isEmpty else { return [.client] }
+        switch normalized {
+        case "client / fournisseur", "client/fournisseur", "both", "les deux":
+            return [.client, .fournisseur]
+        default: break
+        }
+        let tokens = normalized.split(whereSeparator: { $0 == "/" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        var kinds: Set<DirectoryEntryKind> = []
+        for token in tokens {
+            switch token {
+            case "societe", "société": kinds.insert(.societe)
+            case "fournisseur": kinds.insert(.fournisseur)
+            case "interco": kinds.insert(.interco)
+            case "client": kinds.insert(.client)
+            default: break
+            }
+        }
+        return kinds.isEmpty ? [.client] : kinds
     }
 
     /// Parse un CSV de tiers. En-têtes reconnues (insensible à la casse) :
@@ -338,14 +364,7 @@ public struct ExportGenerator {
                 errors.append("Ligne \(i + 2) : SIREN manquant pour « \(name) », ignoré.")
                 continue
             }
-            let kindStr = value(typeIdx)?.lowercased() ?? "client"
-            let kind: DirectoryEntryKind
-            switch kindStr {
-            case "societe", "société": kind = .societe
-            case "fournisseur": kind = .fournisseur
-            case "client / fournisseur", "client/fournisseur", "both", "les deux": kind = .both
-            default: kind = .client
-            }
+            let kinds = Self.parseKinds(value(typeIdx))
             var contacts: [PartyContact] = []
             let cname = value(contactNameIdx)
             let cemail = value(contactEmailIdx)
@@ -378,7 +397,7 @@ public struct ExportGenerator {
                 paymentTerms: value(termsIdx)
             )
             let entry = DirectoryEntry(
-                kind: kind,
+                kinds: kinds,
                 party: party,
                 note: value(noteIdx),
                 contacts: contacts
