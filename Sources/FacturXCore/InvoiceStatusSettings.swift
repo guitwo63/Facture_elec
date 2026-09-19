@@ -24,10 +24,14 @@ public final class InvoiceStatusStore: ObservableObject {
     public static let shared = InvoiceStatusStore()
 
     @Published public var overrides: [InvoiceStatusOverride]
+    /// Surcharge éparse par société (Réglages > Tables) : une société ne stocke que les
+    /// statuts qu'elle personnalise réellement — voir `SocietyScopedCatalog`.
+    @Published public var overridesBySociety: [UUID: [InvoiceStatusOverride]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.invoiceStatuses.v1") }
+    private var overridesBySocietyKey: String { env.key("facturx.invoiceStatuses.bysociety.v1") }
 
     public static var defaults: [InvoiceStatusOverride] {
         InvoiceStatus.allCases.map { s in
@@ -74,6 +78,13 @@ public final class InvoiceStatusStore: ObservableObject {
     }
 
     public func load() {
+        // Chargé avant tout appel à save() plus bas dans cette méthode (qui persiste aussi
+        // overridesBySociety) — sinon ce save() écraserait la surcharge par société avec un
+        // dictionnaire encore vide, avant qu'elle n'ait eu la chance d'être lue.
+        if let data = defaults.data(forKey: overridesBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [InvoiceStatusOverride]].self, from: data) {
+            overridesBySociety = decoded
+        }
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([InvoiceStatusOverride].self, from: data),
            !decoded.isEmpty {
@@ -103,11 +114,28 @@ public final class InvoiceStatusStore: ObservableObject {
             ?? InvoiceStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
     }
 
+    /// Variante par société : la surcharge de `companyID` pour ce statut si elle existe,
+    /// sinon le réglage global (`override(for:)` ci-dessus, avec son propre repli sur le
+    /// défaut codé en dur). `companyID == nil` retombe toujours sur le réglage global.
+    public func override(for status: InvoiceStatus, companyID: UUID?) -> InvoiceStatusOverride {
+        if let companyID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[companyID]) {
+            return resolved
+        }
+        return override(for: status)
+    }
+
     /// Transitions autorisées pour un statut donné, lues depuis la configuration
     /// (paramétrable dans Réglages > Statuts). Un administrateur peut en plus forcer
     /// n'importe quel autre statut standard, indépendamment du graphe configuré.
     public func allowedTransitions(from status: InvoiceStatus, isAdmin: Bool) -> [InvoiceStatus] {
-        let configured = override(for: status).transitionCodes.compactMap { InvoiceStatus(rawValue: $0) }
+        allowedTransitions(from: status, companyID: nil, isAdmin: isAdmin)
+    }
+
+    /// Variante par société : lit le graphe de transitions depuis la surcharge de
+    /// `companyID` si elle existe pour ce statut, sinon depuis le réglage global.
+    public func allowedTransitions(from status: InvoiceStatus, companyID: UUID?, isAdmin: Bool) -> [InvoiceStatus] {
+        let configured = override(for: status, companyID: companyID).transitionCodes.compactMap { InvoiceStatus(rawValue: $0) }
         guard isAdmin else { return configured }
         var extended = configured
         for s in InvoiceStatus.allCases where s != status && !extended.contains(s) {
@@ -120,6 +148,32 @@ public final class InvoiceStatusStore: ObservableObject {
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(overridesBySociety) {
+            defaults.set(data, forKey: overridesBySocietyKey)
+        }
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce statut pour cette société — pré-
+    /// remplie avec le réglage global actuel comme point de départ, comme "Personnaliser
+    /// pour cette société" le fait déjà pour le format de numérotation.
+    public func setOverride(_ override: InvoiceStatusOverride, companyID: UUID) {
+        var list = overridesBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == override.id }) {
+            list[idx] = override
+        } else {
+            list.append(override)
+        }
+        overridesBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce statut sur cette société.
+    public func removeOverride(for status: InvoiceStatus, companyID: UUID) {
+        overridesBySociety[companyID]?.removeAll { $0.id == status.rawValue }
+        if overridesBySociety[companyID]?.isEmpty == true {
+            overridesBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 
     public func reset() {

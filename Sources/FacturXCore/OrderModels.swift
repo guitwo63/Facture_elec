@@ -362,10 +362,13 @@ public final class OrderStatusStore: ObservableObject {
     public static let shared = OrderStatusStore()
 
     @Published public var overrides: [OrderStatusOverride]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
+    @Published public var overridesBySociety: [UUID: [OrderStatusOverride]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("orderx.statuses.v1") }
+    private var overridesBySocietyKey: String { env.key("orderx.statuses.bysociety.v1") }
 
     public static var defaults: [OrderStatusOverride] {
         OrderStatus.allCases.map { s in
@@ -396,12 +399,40 @@ public final class OrderStatusStore: ObservableObject {
             }
             overrides = OrderStatus.allCases.compactMap { byID[$0.rawValue] }
         }
+        if let data = defaults.data(forKey: overridesBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [OrderStatusOverride]].self, from: data) {
+            overridesBySociety = decoded
+        }
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(overridesBySociety) {
+            defaults.set(data, forKey: overridesBySocietyKey)
+        }
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce statut pour cette société.
+    public func setOverride(_ override: OrderStatusOverride, companyID: UUID) {
+        var list = overridesBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == override.id }) {
+            list[idx] = override
+        } else {
+            list.append(override)
+        }
+        overridesBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce statut sur cette société.
+    public func removeOverride(for status: OrderStatus, companyID: UUID) {
+        overridesBySociety[companyID]?.removeAll { $0.id == status.rawValue }
+        if overridesBySociety[companyID]?.isEmpty == true {
+            overridesBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 
     public func reset() {
@@ -425,21 +456,40 @@ public final class OrderStatusStore: ObservableObject {
         overrides.first { $0.id == status.rawValue } ?? OrderStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
     }
 
+    /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
+    public func override(for status: OrderStatus, companyID: UUID?) -> OrderStatusOverride {
+        if let companyID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[companyID]) {
+            return resolved
+        }
+        return override(for: status)
+    }
+
     public func override(for order: SalesOrder) -> OrderStatusOverride {
         var cid = order.customStatusID
         if cid == "sentToSupplier" { cid = OrderStatus.sentToSociete.rawValue }
-        if let cid = cid,
-           let custom = overrides.first(where: { $0.id == cid }) {
-            return custom
+        if let cid = cid {
+            if let companyID = order.companyID,
+               let custom = SocietyScopedCatalog.resolvedElement(id: cid, overrideForSociety: overridesBySociety[companyID]) {
+                return custom
+            }
+            if let custom = overrides.first(where: { $0.id == cid }) {
+                return custom
+            }
         }
-        return override(for: order.status)
+        return override(for: order.status, companyID: order.companyID)
     }
 
     /// Transitions autorisées depuis un statut donné, lues depuis la configuration
     /// (paramétrable dans Réglages > Statuts des commandes). Un administrateur peut
     /// en plus forcer n'importe quel autre statut standard ou personnalisé.
     public func allowedTransitions(from status: OrderStatus, isAdmin: Bool) -> [OrderStatus] {
-        let configured = override(for: status).transitionCodes.compactMap { OrderStatus(rawValue: $0) }
+        allowedTransitions(from: status, companyID: nil, isAdmin: isAdmin)
+    }
+
+    /// Variante par société — voir `InvoiceStatusStore.allowedTransitions(from:companyID:isAdmin:)`.
+    public func allowedTransitions(from status: OrderStatus, companyID: UUID?, isAdmin: Bool) -> [OrderStatus] {
+        let configured = override(for: status, companyID: companyID).transitionCodes.compactMap { OrderStatus(rawValue: $0) }
         guard isAdmin else { return configured }
         var extended = configured
         for s in OrderStatus.allCases where s != status && !extended.contains(s) {

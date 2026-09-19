@@ -28,10 +28,13 @@ public final class PurchaseInvoiceStatusStore: ObservableObject {
     public static let shared = PurchaseInvoiceStatusStore()
 
     @Published public var overrides: [PurchaseInvoiceStatusOverride]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
+    @Published public var overridesBySociety: [UUID: [PurchaseInvoiceStatusOverride]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.purchaseInvoiceStatuses.v1") }
+    private var overridesBySocietyKey: String { env.key("facturx.purchaseInvoiceStatuses.bysociety.v1") }
 
     public static var defaults: [PurchaseInvoiceStatusOverride] {
         PurchaseInvoiceStatus.allCases.map { s in
@@ -67,6 +70,12 @@ public final class PurchaseInvoiceStatusStore: ObservableObject {
     }
 
     public func load() {
+        // Chargé avant le save() plus bas (qui persiste aussi overridesBySociety) — voir
+        // InvoiceStatusStore.load() pour l'explication complète de cet ordre.
+        if let data = defaults.data(forKey: overridesBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [PurchaseInvoiceStatusOverride]].self, from: data) {
+            overridesBySociety = decoded
+        }
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([PurchaseInvoiceStatusOverride].self, from: data),
            !decoded.isEmpty {
@@ -87,6 +96,15 @@ public final class PurchaseInvoiceStatusStore: ObservableObject {
             ?? PurchaseInvoiceStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
     }
 
+    /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
+    public func override(for status: PurchaseInvoiceStatus, companyID: UUID?) -> PurchaseInvoiceStatusOverride {
+        if let companyID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[companyID]) {
+            return resolved
+        }
+        return override(for: status)
+    }
+
     /// Statut fonctionnel que ce code déclenche pour une facture d'achat déjà déposée sur
     /// SUPER PDP, `nil` si le statut n'a pas de code réforme (donc rien à envoyer — voir
     /// aussi le guard sur `superPDPRemoteID` côté UI, une facture saisie à la main n'a rien
@@ -96,7 +114,12 @@ public final class PurchaseInvoiceStatusStore: ObservableObject {
     }
 
     public func allowedTransitions(from status: PurchaseInvoiceStatus, isAdmin: Bool) -> [PurchaseInvoiceStatus] {
-        let configured = override(for: status).transitionCodes.compactMap { PurchaseInvoiceStatus(rawValue: $0) }
+        allowedTransitions(from: status, companyID: nil, isAdmin: isAdmin)
+    }
+
+    /// Variante par société — voir `InvoiceStatusStore.allowedTransitions(from:companyID:isAdmin:)`.
+    public func allowedTransitions(from status: PurchaseInvoiceStatus, companyID: UUID?, isAdmin: Bool) -> [PurchaseInvoiceStatus] {
+        let configured = override(for: status, companyID: companyID).transitionCodes.compactMap { PurchaseInvoiceStatus(rawValue: $0) }
         guard isAdmin else { return configured }
         var extended = configured
         for s in PurchaseInvoiceStatus.allCases where s != status && !extended.contains(s) {
@@ -109,6 +132,30 @@ public final class PurchaseInvoiceStatusStore: ObservableObject {
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(overridesBySociety) {
+            defaults.set(data, forKey: overridesBySocietyKey)
+        }
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce statut pour cette société.
+    public func setOverride(_ override: PurchaseInvoiceStatusOverride, companyID: UUID) {
+        var list = overridesBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == override.id }) {
+            list[idx] = override
+        } else {
+            list.append(override)
+        }
+        overridesBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce statut sur cette société.
+    public func removeOverride(for status: PurchaseInvoiceStatus, companyID: UUID) {
+        overridesBySociety[companyID]?.removeAll { $0.id == status.rawValue }
+        if overridesBySociety[companyID]?.isEmpty == true {
+            overridesBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 
     public func reset() {
