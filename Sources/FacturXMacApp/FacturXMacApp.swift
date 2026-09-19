@@ -142,6 +142,8 @@ struct FacturXMacApp: App {
     @StateObject private var paymentTermsStore = PaymentTermsPresetStore.shared
     @StateObject private var auditActionLabelStore = AuditActionLabelStore.shared
     @StateObject private var superPDPStatusCodeStore = SuperPDPStatusCodeStore.shared
+    @StateObject private var purchaseInvoiceStore = PurchaseInvoiceStore.shared
+    @StateObject private var purchaseInvoiceStatusStore = PurchaseInvoiceStatusStore.shared
     @StateObject private var auth = AuthStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -168,6 +170,8 @@ struct FacturXMacApp: App {
                 .environmentObject(paymentTermsStore)
                 .environmentObject(auditActionLabelStore)
                 .environmentObject(superPDPStatusCodeStore)
+                .environmentObject(purchaseInvoiceStore)
+                .environmentObject(purchaseInvoiceStatusStore)
                 .environmentObject(auth)
                 .environmentObject(appEnv)
                 .frame(minWidth: 980, minHeight: 620)
@@ -178,10 +182,12 @@ struct FacturXMacApp: App {
                     orderStore.audit = AuditStore.shared
                     quoteStore.audit = AuditStore.shared
                     directory.audit = AuditStore.shared
+                    purchaseInvoiceStore.audit = AuditStore.shared
                     store.actorName = auth.currentUser?.username ?? "system"
                     orderStore.actorName = auth.currentUser?.username ?? "system"
                     quoteStore.actorName = auth.currentUser?.username ?? "system"
                     directory.actorName = auth.currentUser?.username ?? "system"
+                    purchaseInvoiceStore.actorName = auth.currentUser?.username ?? "system"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         NSApp.activate(ignoringOtherApps: true)
                         if let window = NSApp.windows.first {
@@ -242,6 +248,7 @@ enum RootTab: String, CaseIterable, Identifiable {
     case quotes = "Devis"
     case orders = "Ventes"
     case invoices = "Factures"
+    case purchases = "Achats"
     case dashboard = "Tableau de bord"
     var id: String { rawValue }
 
@@ -251,6 +258,7 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .quotes: return "doc.text.below.ecg"
         case .orders: return "cart.fill"
         case .invoices: return "doc.text.fill"
+        case .purchases: return "cart.badge.clock"
         case .dashboard: return "gauge"
         }
     }
@@ -258,13 +266,17 @@ enum RootTab: String, CaseIterable, Identifiable {
     static func visible(for role: UserRole?, modules: ModuleSettings = ModuleStore.shared.settings) -> [RootTab] {
         var result: [RootTab]
         switch role {
+        // Le rôle acheteur garde l'onglet Ventes (déjà son point d'entrée avant l'existence
+        // du module Achats) et gagne Achats en plus — jamais retiré un accès existant sans
+        // qu'on le demande explicitement.
         case .acheteur:
-            result = [.orders]
+            result = [.orders, .purchases]
         default:
             result = allCases
         }
         if !modules.ordersEnabled { result.removeAll { $0 == .orders } }
         if !modules.quotesEnabled { result.removeAll { $0 == .quotes } }
+        if !modules.purchasesEnabled { result.removeAll { $0 == .purchases } }
         return result
     }
 }
@@ -490,12 +502,16 @@ struct RootView: View {
     @EnvironmentObject var pcloudSettings: PCloudSettings
     @EnvironmentObject var moduleStore: ModuleStore
     @EnvironmentObject var backupStrategyStore: BackupStrategyStore
+    @EnvironmentObject var purchaseInvoiceStore: PurchaseInvoiceStore
+    @EnvironmentObject var purchaseInvoiceStatusStore: PurchaseInvoiceStatusStore
     @StateObject private var pdpSync = PDPPeriodicSyncEngine()
+    @StateObject private var purchaseReceptionSync = PurchasePDPReceptionEngine()
     @State private var tab: RootTab = .invoices
     @State private var didAttemptAutoBackup = false
     @State private var selectedID: UUID?
     @State private var selectedOrderID: UUID?
     @State private var selectedQuoteID: UUID?
+    @State private var selectedPurchaseID: UUID?
     @State private var showSettings = false
     @State private var showUserManagement = false
     @State private var showEnvConfirm = false
@@ -538,6 +554,8 @@ struct RootView: View {
         kindColors.load()
         statusStore.load()
         invoiceStatusStore.load()
+        purchaseInvoiceStore.load()
+        purchaseInvoiceStatusStore.load()
         AuditStore.shared.load()
         chorusSettings.credentials = reloadChorusCredentials()
         superPDPSettings.credentials = reloadSuperPDPCredentials()
@@ -550,18 +568,23 @@ struct RootView: View {
         orderStore.audit = AuditStore.shared
         quoteStore.audit = AuditStore.shared
         directory.audit = AuditStore.shared
+        purchaseInvoiceStore.audit = AuditStore.shared
         auth.reloadEnvironment()
         store.actorName = auth.currentUser?.username ?? "system"
         orderStore.actorName = auth.currentUser?.username ?? "system"
         quoteStore.actorName = auth.currentUser?.username ?? "system"
         directory.actorName = auth.currentUser?.username ?? "system"
+        purchaseInvoiceStore.actorName = auth.currentUser?.username ?? "system"
         selectedID = nil
         selectedOrderID = nil
+        selectedPurchaseID = nil
         // Les identifiants SUPER PDP sont propres à l'environnement (test/production) :
         // un cycle de synchronisation en cours avec les anciens identifiants n'a plus de
         // sens après une bascule — on relance avec ceux qui viennent d'être rechargés.
         pdpSync.stop()
         pdpSync.start(store: store) { superPDPSettings.credentials }
+        purchaseReceptionSync.stop()
+        purchaseReceptionSync.start(store: purchaseInvoiceStore) { superPDPSettings.credentials }
     }
 
     /// Migration Keychain one-shot par clé, jamais rejouée ensuite — voir le commentaire
@@ -733,6 +756,8 @@ struct RootView: View {
                 OrdersTabView(selectedID: $selectedOrderID)
             case .quotes:
                 QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID, orderSelectedID: $selectedOrderID)
+            case .purchases:
+                PurchasesTabView(selectedID: $selectedPurchaseID)
             case .directory:
                 DirectoryView()
             case .dashboard:
@@ -783,7 +808,7 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showConnectionStatus) {
-            ConnectionStatusView(pdpSync: pdpSync)
+            ConnectionStatusView(pdpSync: pdpSync, purchaseReceptionSync: purchaseReceptionSync)
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
@@ -806,6 +831,7 @@ struct RootView: View {
             maybeShowSetupWizard()
             runAutoBackupIfNeeded()
             pdpSync.start(store: store) { superPDPSettings.credentials }
+            purchaseReceptionSync.start(store: purchaseInvoiceStore) { superPDPSettings.credentials }
         }
         .onChange(of: auth.currentUser) { _ in
             syncAuditActor()
@@ -888,13 +914,16 @@ struct RootView: View {
 /// Connexions > Alertes email).
 struct ConnectionStatusView: View {
     @ObservedObject var pdpSync: PDPPeriodicSyncEngine
+    @ObservedObject var purchaseReceptionSync: PurchasePDPReceptionEngine
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @EnvironmentObject var pcloudSettings: PCloudSettings
     @EnvironmentObject var chorusSettings: ChorusProSettings
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var purchaseInvoiceStore: PurchaseInvoiceStore
     @Environment(\.dismiss) private var dismiss
     @State private var syncingNow = false
+    @State private var syncingPurchasesNow = false
 
     @State private var pdpTesting = false
     @State private var pdpResult: String?
@@ -972,6 +1001,8 @@ struct ConnectionStatusView: View {
                     if superPDPSettings.credentials.usePDP {
                         Divider()
                         pdpSyncSection
+                        Divider()
+                        purchaseReceptionSection
                     }
                 }
                 .padding()
@@ -1024,6 +1055,45 @@ struct ConnectionStatusView: View {
             }
             .buttonStyle(.bordered)
             .disabled(syncingNow || !superPDPSettings.credentials.isConfigured)
+        }
+    }
+
+    /// Statut de la réception automatique des factures d'achat (module Achats) — pendant de
+    /// `pdpSyncSection` côté réception, même cadence partagée. Voir
+    /// `PurchasePDPReceptionEngine`.
+    private var purchaseReceptionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Réception des factures d'achat", systemImage: "tray.and.arrow.down").font(.headline)
+                Spacer()
+                if purchaseReceptionSync.isRunning {
+                    Label("Active", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
+                }
+            }
+            Text("Récupère automatiquement sur SUPER PDP les factures déposées par vos fournisseurs et les ajoute à Achats.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let lastRun = purchaseReceptionSync.lastRunAt {
+                Text("Dernière réception : \(lastRun.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let summary = purchaseReceptionSync.lastRunSummary {
+                Text(summary).font(.caption2).foregroundStyle(.secondary)
+            }
+            Button {
+                syncingPurchasesNow = true
+                Task {
+                    await purchaseReceptionSync.runOnce(store: purchaseInvoiceStore, credentials: superPDPSettings.credentials)
+                    syncingPurchasesNow = false
+                }
+            } label: {
+                if syncingPurchasesNow {
+                    HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Réception…") }
+                } else {
+                    Label("Recevoir maintenant", systemImage: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(syncingPurchasesNow || !superPDPSettings.credentials.isConfigured)
         }
     }
 
@@ -5879,6 +5949,9 @@ struct ApplicationSettingsView: View {
                         Toggle("Ventes (commandes)", isOn: $moduleStore.settings.ordersEnabled)
                             .toggleStyle(.switch)
                             .onChange(of: moduleStore.settings.ordersEnabled) { _ in moduleStore.save() }
+                        Toggle("Achats", isOn: $moduleStore.settings.purchasesEnabled)
+                            .toggleStyle(.switch)
+                            .onChange(of: moduleStore.settings.purchasesEnabled) { _ in moduleStore.save() }
                     }.padding(8)
                 } label: {
                     Label("Modules", systemImage: "square.grid.2x2")
@@ -6425,6 +6498,7 @@ extension DirectoryEntryKind: Identifiable {
 
 enum ValueTable: String, CaseIterable, Identifiable {
     case invoiceStatuses
+    case purchaseInvoiceStatuses
     case orderStatuses
     case quoteStatuses
     case paymentTerms
@@ -6442,6 +6516,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .invoiceStatuses: return "Statuts des factures"
+        case .purchaseInvoiceStatuses: return "Statuts des factures d'achat"
         case .orderStatuses: return "Statuts des commandes"
         case .quoteStatuses: return "Statuts des devis"
         case .paymentTerms: return "Conditions de paiement"
@@ -6459,6 +6534,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .invoiceStatuses: return "doc.text.fill"
+        case .purchaseInvoiceStatuses: return "cart.badge.clock"
         case .orderStatuses: return "list.bullet.rectangle"
         case .quoteStatuses: return "doc.text.below.ecg"
         case .paymentTerms: return "banknote"
@@ -6475,7 +6551,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 
     var isEditable: Bool {
         switch self {
-        case .invoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels, .superPDPStatusCodes: return true
+        case .invoiceStatuses, .purchaseInvoiceStatuses, .orderStatuses, .quoteStatuses, .paymentTerms, .tags, .kindColors, .auditActionLabels, .superPDPStatusCodes: return true
         default: return false
         }
     }
@@ -6484,6 +6560,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
 struct ValueTablesView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
+    @EnvironmentObject var purchaseInvoiceStatusStore: PurchaseInvoiceStatusStore
     @EnvironmentObject var quoteStatusStore: QuoteStatusStore
     @EnvironmentObject var tagStore: TagStore
     @EnvironmentObject var kindColors: KindColorStore
@@ -6496,6 +6573,7 @@ struct ValueTablesView: View {
     @State private var searchQuery = ""
     @State private var editingStatus: OrderStatusOverride?
     @State private var editingInvoiceStatus: InvoiceStatusOverride?
+    @State private var editingPurchaseInvoiceStatus: PurchaseInvoiceStatusOverride?
     @State private var editingQuoteStatus: QuoteStatusOverride?
     @State private var editingTag: PartyTag?
     @State private var editingPaymentTerm: PaymentTermsPreset?
@@ -6533,6 +6611,14 @@ struct ValueTablesView: View {
                 if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     invoiceStatusStore.overrides[i] = updated
                     invoiceStatusStore.save()
+                }
+            }
+        }
+        .sheet(item: $editingPurchaseInvoiceStatus) { override in
+            PurchaseInvoiceStatusEditorSheet(override: override) { updated in
+                if let i = purchaseInvoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                    purchaseInvoiceStatusStore.overrides[i] = updated
+                    purchaseInvoiceStatusStore.save()
                 }
             }
         }
@@ -6610,6 +6696,7 @@ struct ValueTablesView: View {
     private var valuesPanel: some View {
         switch selectedTable {
         case .invoiceStatuses: invoiceStatusesPanel
+        case .purchaseInvoiceStatuses: purchaseInvoiceStatusesPanel
         case .orderStatuses: orderStatusesPanel
         case .quoteStatuses: quoteStatusesPanel
         case .paymentTerms: paymentTermsPanel
@@ -6859,6 +6946,96 @@ struct ValueTablesView: View {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return invoiceStatusStore.overrides }
         return invoiceStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
+    }
+
+    // MARK: - Statuts des factures d'achat
+
+    private var purchaseInvoiceStatusesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Statuts des factures d'achat").font(.title3.bold())
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            // Même raison que pour la table des statuts de facture : PurchaseInvoice.status
+            // est typé sur l'enum PurchaseInvoiceStatus, un statut personnalisé ne pourrait
+            // jamais être assigné à une facture d'achat.
+            Text("Personnalisez le libellé des 8 statuts fonctionnels. Les lignes « réforme » (liaison PDP) sont non supprimables : seul le libellé est modifiable. La colonne « code réforme » indique l'événement envoyé à SUPER PDP pour informer le fournisseur ; les transitions affichent le workflow de validation.")
+                .font(.caption).foregroundStyle(.secondary).padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredPurchaseInvoiceStatuses) { override in
+                        purchaseInvoiceStatusRow(override)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private func purchaseInvoiceStatusRow(_ override: PurchaseInvoiceStatusOverride) -> some View {
+        let transitionLabels: [String] = override.transitionCodes.compactMap { code in
+            purchaseInvoiceStatusStore.overrides.first { $0.id == code }?.label
+                ?? PurchaseInvoiceStatus(rawValue: code)?.label
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: override.systemImage)
+                    .frame(width: 22)
+                    .foregroundStyle(Color(hex: override.hexColor))
+                Text(override.label).font(.body)
+                if override.isReformStatus {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(override.reformCode ?? "")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.12)))
+                    .help("Statut lié à la réforme (PDP) — code \(override.reformCode ?? ""). Non supprimable, libellé modifiable.")
+                    Label("Envoyé à SUPER PDP", systemImage: "arrow.up.circle")
+                        .font(.caption2.bold())
+                        .foregroundStyle(Color.orange)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.orange.opacity(0.12)))
+                        .help("L'app transmet ce statut à SUPER PDP pour informer le fournisseur (bouton de transition dans la fiche facture d'achat).")
+                } else {
+                    Text("hors réforme")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button {
+                    editingPurchaseInvoiceStatus = override
+                } label: { Image(systemName: "pencil") }
+                    .buttonStyle(.borderless)
+                    .help("Modifier le libellé")
+            }
+            if !transitionLabels.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Transitions : " + transitionLabels.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.clear))
+    }
+
+    private var filteredPurchaseInvoiceStatuses: [PurchaseInvoiceStatusOverride] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return purchaseInvoiceStatusStore.overrides }
+        return purchaseInvoiceStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
     }
 
     private var orderStatusesPanel: some View {
@@ -7535,6 +7712,100 @@ struct InvoiceStatusEditorSheet: View {
                 Button("Enregistrer") {
                     let ordered = InvoiceStatus.allCases.map { $0.rawValue }.filter { transitionCodes.contains($0) }
                     onSave(InvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: ordered))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(label.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(width: 460, height: 460)
+    }
+}
+
+/// Pendant de `InvoiceStatusEditorSheet` côté achats — copie structurelle, retypée sur
+/// `PurchaseInvoiceStatus`/`PurchaseInvoiceStatusOverride`.
+struct PurchaseInvoiceStatusEditorSheet: View {
+    var override: PurchaseInvoiceStatusOverride
+    let onSave: (PurchaseInvoiceStatusOverride) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @State private var systemImage: String
+    @State private var hexColor: String
+    @State private var transitionCodes: Set<String>
+
+    private var currentStatus: PurchaseInvoiceStatus? { PurchaseInvoiceStatus(rawValue: override.id) }
+    private var possibleTargets: [PurchaseInvoiceStatus] { PurchaseInvoiceStatus.allCases.filter { $0.rawValue != override.id } }
+
+    init(override: PurchaseInvoiceStatusOverride, onSave: @escaping (PurchaseInvoiceStatusOverride) -> Void) {
+        self.override = override
+        self.onSave = onSave
+        _label = State(initialValue: override.label)
+        _systemImage = State(initialValue: override.systemImage)
+        _hexColor = State(initialValue: override.hexColor)
+        _transitionCodes = State(initialValue: Set(override.transitionCodes))
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Modifier le statut de facture d'achat").font(.title3.bold())
+                Spacer()
+                Button("Annuler") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            if override.isReformStatus {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                    Text("Statut de réforme (PDP) — code \(override.reformCode ?? ""). Seul le libellé est modifiable.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.1)))
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Libellé").frame(width: 100, alignment: .leading)
+                    TextField("Libellé", text: $label).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Icône SF").frame(width: 100, alignment: .leading)
+                    TextField("Icône SF", text: $systemImage).textFieldStyle(.roundedBorder)
+                        .disabled(override.isReformStatus)
+                }
+                HStack {
+                    Text("Couleur").frame(width: 100, alignment: .leading)
+                    ColorPicker(selection: Binding(
+                        get: { Color(hex: hexColor) },
+                        set: { hexColor = hexString(from: $0) }
+                    )) { Text("Couleur") }
+                    .disabled(override.isReformStatus)
+                }
+            }
+            if currentStatus != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transitions autorisées vers…").font(.subheadline.bold())
+                    Text("Statuts accessibles depuis « \(label) » via les boutons d'action de la facture d'achat (un administrateur peut toujours forcer les autres).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(possibleTargets, id: \.self) { target in
+                        Toggle(isOn: Binding(
+                            get: { transitionCodes.contains(target.rawValue) },
+                            set: { isOn in
+                                if isOn { transitionCodes.insert(target.rawValue) }
+                                else { transitionCodes.remove(target.rawValue) }
+                            }
+                        )) {
+                            Label(target.label, systemImage: target.systemImage)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Enregistrer") {
+                    let ordered = PurchaseInvoiceStatus.allCases.map { $0.rawValue }.filter { transitionCodes.contains($0) }
+                    onSave(PurchaseInvoiceStatusOverride(id: override.id, label: label, systemImage: systemImage, hexColor: hexColor, reformCode: override.reformCode, transitionCodes: ordered))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)

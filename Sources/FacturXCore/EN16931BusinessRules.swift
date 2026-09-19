@@ -21,9 +21,22 @@ public struct BusinessRuleResult: Identifiable, Hashable {
     }
 }
 
+/// Distingue une facture qu'on émet (`issued`, le cas par défaut — inchangé pour tous les
+/// appels existants) d'une facture reçue d'un tiers (`received`, factures d'achat) : les
+/// contrôles purement liés à l'émission (mentions légales françaises qu'on est censé avoir
+/// rédigées nous-mêmes, recommandation de profil qu'on n'a pas choisi) n'ont pas de sens sur
+/// un document que quelqu'un d'autre a produit — il n'y a rien à corriger de notre côté.
+/// Tout le reste (arithmétique, structure, qualité des données des deux parties) reste
+/// vérifié dans les deux cas : ce sont des indicateurs de qualité de données génériques,
+/// pas des obligations propres à l'émetteur.
+public enum EN16931RuleContext {
+    case issued
+    case received
+}
+
 public enum EN16931BusinessRules {
 
-    public static func evaluate(invoice: Invoice) -> [BusinessRuleResult] {
+    public static func evaluate(invoice: Invoice, context: EN16931RuleContext = .issued) -> [BusinessRuleResult] {
         var results: [BusinessRuleResult] = []
 
         let sellerName = invoice.seller.name.trimmingCharacters(in: .whitespaces)
@@ -175,17 +188,21 @@ public enum EN16931BusinessRules {
                 message: "BR-AC-01 : Une facture de solde devrait indiquer le montant des acomptes déjà payés (PrepaidAmount)."))
         }
 
-        if invoice.legalNotePMT.trimmingCharacters(in: .whitespaces).isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
-                message: "BR-FR-05 : La mention sur les frais de recouvrement (SubjectCode PMT) est obligatoire en France."))
-        }
-        if invoice.legalNotePMD.trimmingCharacters(in: .whitespaces).isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
-                message: "BR-FR-05 : La mention sur les pénalités de retard (SubjectCode PMD) est obligatoire en France."))
-        }
-        if invoice.legalNoteAAB.trimmingCharacters(in: .whitespaces).isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
-                message: "BR-FR-05 : La mention sur l'escompte (SubjectCode AAB) est obligatoire en France."))
+        // Mentions légales françaises : obligatoires sur une facture qu'on émet (BR-FR-05),
+        // mais sans objet sur un document reçu — on ne les a pas rédigées, rien à corriger.
+        if context == .issued {
+            if invoice.legalNotePMT.trimmingCharacters(in: .whitespaces).isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
+                    message: "BR-FR-05 : La mention sur les frais de recouvrement (SubjectCode PMT) est obligatoire en France."))
+            }
+            if invoice.legalNotePMD.trimmingCharacters(in: .whitespaces).isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
+                    message: "BR-FR-05 : La mention sur les pénalités de retard (SubjectCode PMD) est obligatoire en France."))
+            }
+            if invoice.legalNoteAAB.trimmingCharacters(in: .whitespaces).isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
+                    message: "BR-FR-05 : La mention sur l'escompte (SubjectCode AAB) est obligatoire en France."))
+            }
         }
 
         if let iban = invoice.paymentIBAN, !iban.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -233,12 +250,16 @@ public enum EN16931BusinessRules {
             }
         }
 
-        switch invoice.profile {
-        case .minimum, .basicWL, .basic:
-            results.append(BusinessRuleResult(ruleId: "BR-PROFIL", severity: .warning,
-                message: "Le profil \(invoice.profile.rawValue) est limité ; EN 16931 est recommandé pour la réforme française."))
-        case .en16931, .extended:
-            break
+        // Recommandation de profil : pertinente pour un choix qu'on fait nous-mêmes en
+        // émettant, pas pour un profil déjà choisi par le fournisseur sur un document reçu.
+        if context == .issued {
+            switch invoice.profile {
+            case .minimum, .basicWL, .basic:
+                results.append(BusinessRuleResult(ruleId: "BR-PROFIL", severity: .warning,
+                    message: "Le profil \(invoice.profile.rawValue) est limité ; EN 16931 est recommandé pour la réforme française."))
+            case .en16931, .extended:
+                break
+            }
         }
 
         return results

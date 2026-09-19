@@ -1,9 +1,11 @@
 import Foundation
+import CoreGraphics
 
-public enum FacturXEmbedError: Error {
+public enum FacturXEmbedError: Error, Equatable {
     case invalidPDF
     case invalidXML
     case malformedPDF
+    case noEmbeddedXML
 }
 
 /// Génère une facture Factur-X : un PDF contenant le CII XML embarqué sous
@@ -108,6 +110,70 @@ public struct FacturXEmbedder {
         pdf.append(xref.data(using: .ascii)!)
         pdf.append(trailer.data(using: .ascii)!)
         return pdf
+    }
+
+    /// Extrait le XML CII embarqué d'un PDF Factur-X — contrepartie lecture d'`embed`, mais
+    /// délibérément **pas** construite en étendant `PDFParser` ci-dessous : ce dernier
+    /// suffit à relire nos propres PDF (structure simple et connue), mais un PDF Factur-X
+    /// *reçu* d'un tiers (facture d'achat) peut avoir n'importe quelle structure interne
+    /// (flux d'objets compressés, xref en flux, filtres…) — `CGPDFDocument` est le moteur de
+    /// production d'Apple (déjà utilisé par `InvoicePDFRenderer`, `CoreGraphics` n'est donc
+    /// pas une nouvelle dépendance de ce module), bien plus robuste ici qu'un scanner maison
+    /// étendu pour lire du contenu tiers imprévisible.
+    public func extractXML(fromPDF pdfData: Data) throws -> Data {
+        guard let provider = CGDataProvider(data: pdfData as CFData),
+              let document = CGPDFDocument(provider),
+              let catalog = document.catalog else {
+            throw FacturXEmbedError.invalidPDF
+        }
+
+        var namesDict: CGPDFDictionaryRef?
+        var embeddedFilesDict: CGPDFDictionaryRef?
+        var namesArray: CGPDFArrayRef?
+        guard CGPDFDictionaryGetDictionary(catalog, "Names", &namesDict),
+              let names = namesDict,
+              CGPDFDictionaryGetDictionary(names, "EmbeddedFiles", &embeddedFilesDict),
+              let embeddedFiles = embeddedFilesDict,
+              CGPDFDictionaryGetArray(embeddedFiles, "Names", &namesArray),
+              let entries = namesArray else {
+            throw FacturXEmbedError.noEmbeddedXML
+        }
+
+        // La liste alterne nom (impair : chaîne) / spécification de fichier (pair : dico) —
+        // Factur-X n'embarque en pratique qu'un seul fichier, mais on préfère celui nommé
+        // explicitly "factur-x.xml" s'il y en a plusieurs, plutôt que de supposer l'ordre.
+        let count = CGPDFArrayGetCount(entries)
+        var fallback: Data?
+        var index = 0
+        while index + 1 < count {
+            defer { index += 2 }
+            var nameString: CGPDFStringRef?
+            var filespecDict: CGPDFDictionaryRef?
+            guard CGPDFArrayGetString(entries, index, &nameString),
+                  CGPDFArrayGetDictionary(entries, index + 1, &filespecDict),
+                  let filespec = filespecDict else { continue }
+            guard let data = embeddedFileData(from: filespec) else { continue }
+            let name = nameString.flatMap { CGPDFStringCopyTextString($0) as String? } ?? ""
+            if name.lowercased().contains("factur-x") || name.lowercased().contains("facturx") {
+                return data
+            }
+            if fallback == nil { fallback = data }
+        }
+        guard let data = fallback else { throw FacturXEmbedError.noEmbeddedXML }
+        return data
+    }
+
+    private func embeddedFileData(from filespec: CGPDFDictionaryRef) -> Data? {
+        var efDict: CGPDFDictionaryRef?
+        guard CGPDFDictionaryGetDictionary(filespec, "EF", &efDict), let ef = efDict else { return nil }
+        var stream: CGPDFStreamRef?
+        if !CGPDFDictionaryGetStream(ef, "F", &stream) {
+            _ = CGPDFDictionaryGetStream(ef, "UF", &stream)
+        }
+        guard let fileStream = stream else { return nil }
+        var format: CGPDFDataFormat = .raw
+        guard let cfData = CGPDFStreamCopyData(fileStream, &format) else { return nil }
+        return cfData as Data
     }
 
     private func makeEmbeddedFileStream(xml: Data) -> Data {
