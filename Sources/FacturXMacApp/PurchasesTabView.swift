@@ -18,10 +18,9 @@ struct PurchasesTabView: View {
     @EnvironmentObject var auth: AuthStore
     @EnvironmentObject var directory: PartyDirectory
     @Binding var selectedID: UUID?
+    @Binding var companyFilter: UUID?
     @State private var query = ""
     @State private var statusFilter: PurchaseInvoiceStatus? = nil
-    @State private var companyFilter: UUID? = nil
-    @State private var didInitCompanyFilter = false
 
     var filteredInvoices: [PurchaseInvoice] {
         var result = store.invoices
@@ -51,7 +50,7 @@ struct PurchasesTabView: View {
             VStack(spacing: 8) {
                 HStack {
                     Button {
-                        let record = store.newManualEntry(directory: directory, companyID: defaultCompanyID())
+                        let record = store.newManualEntry(directory: directory, companyID: companyFilter ?? defaultCompanyID())
                         store.upsert(record)
                         selectedID = record.id
                     } label: { Label("Nouvelle facture d'achat", systemImage: "plus") }
@@ -65,14 +64,6 @@ struct PurchasesTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
-                    Picker("Société", selection: $companyFilter) {
-                        Text("Toutes les sociétés").tag(UUID?.none)
-                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
-                            Text(entry.party.name).tag(UUID?.some(entry.id))
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 180)
                     Spacer()
                 }
                 HStack {
@@ -99,7 +90,7 @@ struct PurchasesTabView: View {
                         Text("Aucune facture d'achat.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle facture d'achat") {
-                            let record = store.newManualEntry(directory: directory, companyID: defaultCompanyID())
+                            let record = store.newManualEntry(directory: directory, companyID: companyFilter ?? defaultCompanyID())
                             store.upsert(record)
                             selectedID = record.id
                         }
@@ -158,12 +149,6 @@ struct PurchasesTabView: View {
         .onChange(of: filteredInvoices) { newList in
             if let id = selectedID, !newList.contains(where: { $0.id == id }) {
                 selectedID = nil
-            }
-        }
-        .onAppear {
-            if !didInitCompanyFilter {
-                companyFilter = defaultCompanyID()
-                didInitCompanyFilter = true
             }
         }
     }

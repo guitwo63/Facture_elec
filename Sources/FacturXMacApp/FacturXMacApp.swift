@@ -512,6 +512,13 @@ struct RootView: View {
     @State private var selectedOrderID: UUID?
     @State private var selectedQuoteID: UUID?
     @State private var selectedPurchaseID: UUID?
+    // Périmètre société actif, partagé par les 4 modules (Factures/Commandes/Devis/Achats) :
+    // filtre leur liste et détermine la société assignée aux nouveaux documents créés depuis
+    // leur bouton "Nouveau". nil = "Toutes les sociétés" (du périmètre visible de
+    // l'utilisateur — voir `auth.visibleSocieties`). Initialisé une fois dans `.onAppear`
+    // (dépend de `auth.currentUser`, indisponible à l'initialisation de l'état).
+    @State private var activeCompanyID: UUID?
+    @State private var didInitActiveCompanyID = false
     @State private var showSettings = false
     @State private var showUserManagement = false
     @State private var showEnvConfirm = false
@@ -578,6 +585,12 @@ struct RootView: View {
         selectedID = nil
         selectedOrderID = nil
         selectedPurchaseID = nil
+        // La société active peut ne pas exister dans l'environnement qu'on vient de charger
+        // (UUID propres à chaque environnement test/production) — resemée immédiatement,
+        // comme au premier .onAppear (qui ne se redéclenche pas ici : la vue reste montée,
+        // seules ses données sont rechargées).
+        activeCompanyID = (auth.currentUser?.isAdmin == true) ? nil : defaultDraftCompanyID()
+        didInitActiveCompanyID = true
         // Les identifiants SUPER PDP sont propres à l'environnement (test/production) :
         // un cycle de synchronisation en cours avec les anciens identifiants n'a plus de
         // sens après une bascule — on relance avec ceux qui viennent d'être rechargés.
@@ -700,6 +713,18 @@ struct RootView: View {
                         moduleButton(t)
                     }
                 }
+                if auth.visibleSocieties(for: auth.currentUser).count > 1 {
+                    Divider().frame(height: 20).padding(.horizontal, 4)
+                    HStack(spacing: 3) {
+                        Picker("Société (périmètre)", selection: $activeCompanyID) {
+                            Text("Toutes les sociétés").tag(UUID?.none)
+                            ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                                Text(s.displayName).tag(UUID?.some(s.id))
+                            }
+                        }.frame(width: 280)
+                        InfoBadge(text: "Société active : filtre les listes de Factures/Commandes/Devis/Achats et détermine la société assignée aux nouveaux documents créés depuis leur bouton « Nouveau ». « Toutes les sociétés » n'affecte que l'affichage.")
+                    }
+                }
                 Spacer()
                 if let user = auth.currentUser {
                     HStack(spacing: 6) {
@@ -711,6 +736,8 @@ struct RootView: View {
                             auth.logout()
                             tab = .invoices
                             selectedID = nil
+                            activeCompanyID = nil
+                            didInitActiveCompanyID = false
                         } label: {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
                                 .font(.title2)
@@ -751,13 +778,13 @@ struct RootView: View {
 
             switch tab {
             case .invoices:
-                InvoicesTabView(selectedID: $selectedID)
+                InvoicesTabView(selectedID: $selectedID, companyFilter: $activeCompanyID)
             case .orders:
-                OrdersTabView(selectedID: $selectedOrderID)
+                OrdersTabView(selectedID: $selectedOrderID, companyFilter: $activeCompanyID)
             case .quotes:
-                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID, orderSelectedID: $selectedOrderID)
+                QuotesTabView(selectedID: $selectedQuoteID, rootTab: $tab, invoiceSelectedID: $selectedID, orderSelectedID: $selectedOrderID, companyFilter: $activeCompanyID)
             case .purchases:
-                PurchasesTabView(selectedID: $selectedPurchaseID)
+                PurchasesTabView(selectedID: $selectedPurchaseID, companyFilter: $activeCompanyID)
             case .directory:
                 DirectoryView()
             case .dashboard:
@@ -812,20 +839,24 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .newInvoiceRequested)) { _ in
             tab = .invoices
-            let draft = store.newDraft(companyID: defaultDraftCompanyID(),
+            let draft = store.newDraft(companyID: activeCompanyID ?? defaultDraftCompanyID(),
                                        preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
             store.upsert(draft)
             selectedID = draft.id
         }
         .onReceive(NotificationCenter.default.publisher(for: .newOrderRequested)) { _ in
             tab = .orders
-            let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultDraftCompanyID())
+            let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: activeCompanyID ?? defaultDraftCompanyID())
             orderStore.upsert(draft)
             selectedOrderID = draft.id
         }
         .onAppear {
             if auth.currentUser?.role == .acheteur, !RootTab.visible(for: .acheteur, modules: moduleStore.settings).contains(tab) {
                 tab = .orders
+            }
+            if !didInitActiveCompanyID {
+                activeCompanyID = (auth.currentUser?.isAdmin == true) ? nil : defaultDraftCompanyID()
+                didInitActiveCompanyID = true
             }
             syncAuditActor()
             maybeShowSetupWizard()
@@ -1720,11 +1751,10 @@ struct InvoicesTabView: View {
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var moduleStore: ModuleStore
     @Binding var selectedID: UUID?
+    @Binding var companyFilter: UUID?
     @State private var query = ""
     @State private var typeFilter: InvoiceTypeFilter = .all
     @State private var statusFilter: InvoiceStatus? = nil
-    @State private var companyFilter: UUID? = nil
-    @State private var didInitCompanyFilter = false
     @State private var showOrderPicker = false
     @State private var showQuotePicker = false
     @State private var showQuickInvoiceWizard = false
@@ -1799,7 +1829,7 @@ struct InvoicesTabView: View {
                     } label: {
                         Label("Nouvelle facture", systemImage: "plus")
                     } primaryAction: {
-                        let draft = store.newDraft(companyID: defaultCompanyID(),
+                        let draft = store.newDraft(companyID: companyFilter ?? defaultCompanyID(),
                                                    preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID)
                         store.upsert(draft)
                         selectedID = draft.id
@@ -1827,14 +1857,6 @@ struct InvoicesTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
-                    Picker("Société", selection: $companyFilter) {
-                        Text("Toutes les sociétés").tag(UUID?.none)
-                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
-                            Text(entry.party.name).tag(UUID?.some(entry.id))
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 180)
                     Spacer()
                     Menu {
                         ForEach(QuickExport.Format.allCases, id: \.self) { f in
@@ -1911,7 +1933,7 @@ struct InvoicesTabView: View {
                         Text("Aucune facture.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle facture") {
-                            let draft = store.newDraft(companyID: defaultCompanyID())
+                            let draft = store.newDraft(companyID: companyFilter ?? defaultCompanyID())
                             store.upsert(draft)
                             selectedID = draft.id
                         }
@@ -2058,12 +2080,6 @@ struct InvoicesTabView: View {
         .onChange(of: selectedID) { id in
             if let id = id, !filteredInvoices.contains(where: { $0.id == id }) {
                 selectedID = nil
-            }
-        }
-        .onAppear {
-            if !didInitCompanyFilter {
-                companyFilter = defaultCompanyID()
-                didInitCompanyFilter = true
             }
         }
     }
@@ -9464,13 +9480,12 @@ struct OrdersTabView: View {
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var moduleStore: ModuleStore
     @Binding var selectedID: UUID?
+    @Binding var companyFilter: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var showScanImport = false
     @State private var showQuotePicker = false
     @State private var statusFilter: OrderStatus? = nil
-    @State private var companyFilter: UUID? = nil
-    @State private var didInitCompanyFilter = false
     @State private var showAdvancedFilters = false
     @State private var advField1: OrderFilterField = .none
     @State private var advValue1 = ""
@@ -9644,7 +9659,7 @@ struct OrdersTabView: View {
                     } label: {
                         Label("Nouvelle commande", systemImage: "plus")
                     } primaryAction: {
-                        let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
+                        let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: companyFilter ?? defaultOrderCompanyID())
                         orderStore.upsert(draft)
                         selectedID = draft.id
                     }
@@ -9659,14 +9674,6 @@ struct OrdersTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
-                    Picker("Société", selection: $companyFilter) {
-                        Text("Toutes les sociétés").tag(UUID?.none)
-                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
-                            Text(entry.party.name).tag(UUID?.some(entry.id))
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 180)
                     Spacer()
                     Menu {
                         ForEach(QuickExport.OrderFormat.allCases, id: \.self) { f in
@@ -9743,7 +9750,7 @@ struct OrdersTabView: View {
                         Text("Aucune commande.")
                             .foregroundStyle(.secondary)
                         Button("Nouvelle commande") {
-                            let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: defaultOrderCompanyID())
+                            let draft = orderStore.newDraft(preferredSellerEntryID: auth.currentUser?.defaultSellerEntryID, companyID: companyFilter ?? defaultOrderCompanyID())
                             orderStore.upsert(draft)
                             selectedID = draft.id
                         }
@@ -9833,12 +9840,6 @@ struct OrdersTabView: View {
                 onCancel: { showQuotePicker = false }
             )
         }
-        .onAppear {
-            if !didInitCompanyFilter {
-                companyFilter = defaultOrderCompanyID()
-                didInitCompanyFilter = true
-            }
-        }
     }
 
     private var scopedOrders: [SalesOrder] {
@@ -9901,11 +9902,10 @@ struct QuotesTabView: View {
     @Binding var rootTab: RootTab
     @Binding var invoiceSelectedID: UUID?
     @Binding var orderSelectedID: UUID?
+    @Binding var companyFilter: UUID?
     @State private var query = ""
     @State private var exportMessage: String?
     @State private var statusFilter: QuoteStatus? = nil
-    @State private var companyFilter: UUID? = nil
-    @State private var didInitCompanyFilter = false
     @State private var showAdvancedFilters = false
     @State private var advField1: QuoteFilterField = .none
     @State private var advValue1 = ""
@@ -10067,7 +10067,7 @@ struct QuotesTabView: View {
 
     private func newQuote() {
         let seller = store.resolveDefaultSeller(from: directory) ?? store.myCompany
-        let draft = quoteStore.newDraft(seller: seller, companyID: defaultCompanyID())
+        let draft = quoteStore.newDraft(seller: seller, companyID: companyFilter ?? defaultCompanyID())
         quoteStore.upsert(draft)
         selectedID = draft.id
     }
@@ -10087,14 +10087,6 @@ struct QuotesTabView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
-                    Picker("Société", selection: $companyFilter) {
-                        Text("Toutes les sociétés").tag(UUID?.none)
-                        ForEach(auth.visibleSocieties(for: auth.currentUser), id: \.id) { entry in
-                            Text(entry.party.name).tag(UUID?.some(entry.id))
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 180)
                     Spacer()
                     Menu {
                         ForEach(QuickExport.QuoteFormat.allCases, id: \.self) { f in
@@ -10235,12 +10227,6 @@ struct QuotesTabView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            }
-        }
-        .onAppear {
-            if !didInitCompanyFilter {
-                companyFilter = defaultCompanyID()
-                didInitCompanyFilter = true
             }
         }
     }
