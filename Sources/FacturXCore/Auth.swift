@@ -356,8 +356,12 @@ public struct AuditLogEntry: Codable, Identifiable, Hashable {
     public var objectCode: String?
     public var statusFrom: String?
     public var statusTo: String?
+    /// Société concernée, quand il y en a une — `nil` pour les entrées sans société naturelle
+    /// (connexion, 2FA, gestion des utilisateurs, sauvegarde globale). Une entrée `nil` reste
+    /// toujours visible quel que soit le filtre société du Journal (voir `AuditLogView`).
+    public var companyID: UUID?
 
-    public init(id: UUID = UUID(), timestamp: Date = Date(), actor: String, action: String, target: String, details: String = "", objectType: AuditObjectType? = nil, objectCode: String? = nil, statusFrom: String? = nil, statusTo: String? = nil) {
+    public init(id: UUID = UUID(), timestamp: Date = Date(), actor: String, action: String, target: String, details: String = "", objectType: AuditObjectType? = nil, objectCode: String? = nil, statusFrom: String? = nil, statusTo: String? = nil, companyID: UUID? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.actor = actor
@@ -368,10 +372,11 @@ public struct AuditLogEntry: Codable, Identifiable, Hashable {
         self.objectCode = objectCode
         self.statusFrom = statusFrom
         self.statusTo = statusTo
+        self.companyID = companyID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, timestamp, actor, action, target, details, objectType, objectCode, statusFrom, statusTo
+        case id, timestamp, actor, action, target, details, objectType, objectCode, statusFrom, statusTo, companyID
     }
 
     public init(from decoder: Decoder) throws {
@@ -386,6 +391,7 @@ public struct AuditLogEntry: Codable, Identifiable, Hashable {
         objectCode = try c.decodeIfPresent(String.self, forKey: .objectCode)
         statusFrom = try c.decodeIfPresent(String.self, forKey: .statusFrom)
         statusTo = try c.decodeIfPresent(String.self, forKey: .statusTo)
+        companyID = try c.decodeIfPresent(UUID.self, forKey: .companyID)
     }
 }
 
@@ -412,13 +418,13 @@ public final class AuditStore: ObservableObject {
         }
     }
 
-    public func record(actor: String, action: String, target: String, details: String = "", objectType: AuditObjectType? = nil, objectCode: String? = nil) {
-        entries.insert(AuditLogEntry(actor: actor, action: action, target: target, details: details, objectType: objectType, objectCode: objectCode), at: 0)
+    public func record(actor: String, action: String, target: String, details: String = "", objectType: AuditObjectType? = nil, objectCode: String? = nil, companyID: UUID? = nil) {
+        entries.insert(AuditLogEntry(actor: actor, action: action, target: target, details: details, objectType: objectType, objectCode: objectCode, companyID: companyID), at: 0)
         if entries.count > maxEntries { entries.removeLast(entries.count - maxEntries) }
         save()
     }
 
-    public func recordStatusChange(actor: String, objectType: AuditObjectType, objectCode: String, statusFrom: String?, statusTo: String, details: String = "") {
+    public func recordStatusChange(actor: String, objectType: AuditObjectType, objectCode: String, statusFrom: String?, statusTo: String, details: String = "", companyID: UUID? = nil) {
         entries.insert(AuditLogEntry(
             actor: actor,
             action: "status_change",
@@ -427,7 +433,8 @@ public final class AuditStore: ObservableObject {
             objectType: objectType,
             objectCode: objectCode,
             statusFrom: statusFrom,
-            statusTo: statusTo
+            statusTo: statusTo,
+            companyID: companyID
         ), at: 0)
         if entries.count > maxEntries { entries.removeLast(entries.count - maxEntries) }
         save()

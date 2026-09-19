@@ -427,12 +427,12 @@ struct PurchaseInvoiceEditorView: View {
                 pdpFeedbackMessage = "↑ Envoyé à SUPER PDP : statut \(detailLabel) — id distant \(remoteID)."
                 store.audit?.record(actor: store.actorName, action: "purchase_pdp_status_sent", target: invoiceNumber,
                                      details: "Statut \(detailLabel) envoyé au fournisseur — id distant \(remoteID)",
-                                     objectType: .purchaseInvoice, objectCode: invoiceNumber)
+                                     objectType: .purchaseInvoice, objectCode: invoiceNumber, companyID: record.invoice.companyID)
             } catch {
                 pdpFeedbackMessage = "Échec de l'envoi à SUPER PDP : \(error.localizedDescription)."
                 store.audit?.record(actor: store.actorName, action: "purchase_pdp_status_error", target: invoiceNumber,
                                      details: "Échec envoi statut \(detailLabel) au fournisseur : \(error.localizedDescription)",
-                                     objectType: .purchaseInvoice, objectCode: invoiceNumber)
+                                     objectType: .purchaseInvoice, objectCode: invoiceNumber, companyID: record.invoice.companyID)
             }
             sendingPDPFeedback = false
         }

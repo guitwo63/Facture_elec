@@ -92,10 +92,10 @@ public final class QuoteStore: ObservableObject {
         save()
         if let prev = previousStatus, prev != quote.status {
             audit?.recordStatusChange(actor: actorName, objectType: .quote, objectCode: quote.number,
-                                       statusFrom: prev.label, statusTo: quote.status.label, details: "devis")
+                                       statusFrom: prev.label, statusTo: quote.status.label, details: "devis", companyID: quote.companyID)
         } else {
             audit?.record(actor: actorName, action: isNew ? "quote_created" : "quote_updated",
-                           target: quote.number, details: "devis", objectType: .quote, objectCode: quote.number)
+                           target: quote.number, details: "devis", objectType: .quote, objectCode: quote.number, companyID: quote.companyID)
         }
     }
 
@@ -103,7 +103,7 @@ public final class QuoteStore: ObservableObject {
         quotes.removeAll { $0.id == quote.id }
         save()
         audit?.record(actor: actorName, action: "quote_deleted", target: quote.number, details: "devis",
-                       objectType: .quote, objectCode: quote.number)
+                       objectType: .quote, objectCode: quote.number, companyID: quote.companyID)
     }
 
     public func newDraft(seller: InvoiceParty, companyID: UUID? = nil) -> Quote {
