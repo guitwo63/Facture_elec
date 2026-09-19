@@ -4206,7 +4206,9 @@ struct PartyPickerSheet: View {
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var active = directory.entries.filter {
-            !$0.isArchived && (role == .seller ? $0.kinds.contains(.societe) : $0.kinds.contains(.client))
+            guard !$0.isArchived else { return false }
+            if $0.kinds.contains(.interco) { return true }
+            return role == .seller ? $0.kinds.contains(.societe) : $0.kinds.contains(.client)
         }
         if role == .seller, let scope = auth.visibleDirectoryEntryIDs(for: auth.currentUser) {
             active = active.filter { scope.contains($0.id) }
@@ -4430,17 +4432,24 @@ struct PartyImportSheet: View {
     }
 }
 
-enum DirectoryKindFilter: String, CaseIterable, Hashable {
-    case all = "Tous"
-    case clients = "Clients"
-    case fournisseurs = "Fournisseurs"
+/// Puce cliquable partagée par le multi-sélecteur de types (fiche tiers) et le filtre par
+/// type (Annuaire) — même style, logique de bascule laissée à l'appelant car elle diffère
+/// (la fiche impose au moins un type coché, le filtre autorise "aucun" = "Tous").
+private struct KindChipToggle: View {
+    let label: String
+    let isOn: Bool
+    let action: () -> Void
 
-    func matches(_ kinds: Set<DirectoryEntryKind>) -> Bool {
-        switch self {
-        case .all: return !kinds.contains(.societe)
-        case .clients: return kinds.contains(.client)
-        case .fournisseurs: return kinds.contains(.fournisseur)
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.callout)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(isOn ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
+                .overlay(Capsule().stroke(isOn ? Color.accentColor : Color.secondary.opacity(0.4)))
+                .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
         }
+        .buttonStyle(.plain)
     }
 }
 
@@ -4476,14 +4485,16 @@ struct DirectoryView: View {
     @State private var showExport = false
     @State private var showImport = false
     @State private var importResult: ExportGenerator.PartyImportResult?
-    @State private var kindFilter: DirectoryKindFilter = .all
+    /// Vide = "Tous" (tous les tiers hors sociétés du périmètre, comme avant) ; sinon un
+    /// tiers est visible s'il porte au moins un des types cochés ici.
+    @State private var kindFilters: Set<DirectoryEntryKind> = []
 
     private var canManageSocietes: Bool { auth.currentUser?.isAdmin == true }
 
     var filtered: [DirectoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         var base = directory.entries.filter { showArchived || !$0.isArchived }
-        base = base.filter { kindFilter.matches($0.kinds) }
+        base = base.filter { kindFilters.isEmpty ? !$0.kinds.contains(.societe) : !$0.kinds.isDisjoint(with: kindFilters) }
         guard q.isEmpty else {
             return base.filter {
                 $0.displayName.lowercased().contains(q)
@@ -4506,13 +4517,17 @@ struct DirectoryView: View {
                     } label: { Label("Nouveau tiers", systemImage: "plus") }
                         .buttonStyle(.borderedProminent)
                     Text("Annuaire des tiers").font(.title2.bold())
-                    Picker("Type", selection: $kindFilter) {
-                        ForEach(DirectoryKindFilter.allCases, id: \.self) { f in
-                            Text(f.rawValue).tag(f)
+                    HStack(spacing: 6) {
+                        KindChipToggle(label: "Tous", isOn: kindFilters.isEmpty) {
+                            kindFilters = []
+                        }
+                        ForEach([DirectoryEntryKind.client, .fournisseur, .interco], id: \.self) { kind in
+                            KindChipToggle(label: kind.label, isOn: kindFilters.contains(kind)) {
+                                if kindFilters.contains(kind) { kindFilters.remove(kind) }
+                                else { kindFilters.insert(kind) }
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 240)
                     Spacer()
                     Button { showImport = true } label: { Label("Importer", systemImage: "square.and.arrow.down") }
                         .buttonStyle(.bordered)
@@ -5129,9 +5144,8 @@ struct DirectoryEditorView: View {
                 Text("Type").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     ForEach(availableKinds, id: \.self) { kind in
-                        let isOn = entry.kinds.contains(kind)
-                        Button {
-                            if isOn {
+                        KindChipToggle(label: kind.label, isOn: entry.kinds.contains(kind)) {
+                            if entry.kinds.contains(kind) {
                                 // Un tiers doit toujours garder au moins un type — on
                                 // ignore silencieusement le dernier décochage plutôt que
                                 // d'autoriser un ensemble vide dénué de sens.
@@ -5139,15 +5153,7 @@ struct DirectoryEditorView: View {
                             } else {
                                 entry.kinds.insert(kind)
                             }
-                        } label: {
-                            Text(kind.label)
-                                .font(.callout)
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(isOn ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
-                                .overlay(Capsule().stroke(isOn ? Color.accentColor : Color.secondary.opacity(0.4)))
-                                .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
                         }
-                        .buttonStyle(.plain)
                     }
                     Spacer()
                 }
