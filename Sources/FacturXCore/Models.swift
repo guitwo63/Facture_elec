@@ -575,6 +575,127 @@ extension InvoiceStatus: Codable {
     }
 }
 
+/// Cycle de vie **fonctionnel** d'une facture d'achat — pendant de `InvoiceStatus`, mais
+/// orienté validation interne (a-t-on reçu la facture, l'acheteur l'a-t-il transmise, le
+/// comptable l'a-t-il approuvée pour paiement) plutôt qu'acheminement réseau. Un achat n'a
+/// personne à qui "envoyer" quoi que ce soit avant validation — c'est nous le destinataire.
+/// Même choix d'architecture que côté ventes (voir la doc de `InvoiceStatus` et
+/// `docs/integrations-superpdp.md` section 9) : petit enum fermé et stable, le détail des
+/// événements SUPER PDP reste dans le journal PDP de la facture, pas ici.
+public enum PurchaseInvoiceStatus: String, CaseIterable {
+    case draft
+    case received
+    case toValidate
+    case validated
+    case disputed
+    case refused
+    case paid
+    case cancelled
+
+    public var label: String {
+        switch self {
+        case .draft: return "Brouillon"
+        case .received: return "Reçue"
+        case .toValidate: return "À valider"
+        case .validated: return "Validée"
+        case .disputed: return "Contestée"
+        case .refused: return "Refusée"
+        case .paid: return "Payée"
+        case .cancelled: return "Annulée"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .draft: return "doc"
+        case .received: return "tray.and.arrow.down.fill"
+        case .toValidate: return "hourglass"
+        case .validated: return "checkmark.seal.fill"
+        case .disputed: return "exclamationmark.bubble.fill"
+        case .refused: return "xmark.octagon.fill"
+        case .paid: return "checkmark.circle.fill"
+        case .cancelled: return "minus.circle.fill"
+        }
+    }
+
+    public var hexColor: String {
+        switch self {
+        case .draft: return "6E6E73"
+        case .received: return "2A6EBB"
+        case .toValidate: return "B07A2A"
+        case .validated: return "2E8B57"
+        case .disputed: return "D35400"
+        case .refused: return "C0392B"
+        case .paid: return "1E7E34"
+        case .cancelled: return "8C8C8C"
+        }
+    }
+
+    public var locksInvoice: Bool {
+        switch self {
+        case .draft, .refused: return false
+        case .received, .toValidate, .validated, .disputed, .paid, .cancelled: return true
+        }
+    }
+
+    /// Ordre du cycle de vie (même usage que `InvoiceStatus.lifecycleRank` : empêcher tout
+    /// rapatriement rétrograde depuis PDP). `validated`/`disputed`/`refused` partagent le
+    /// même rang : des issues différentes à la même étape de décision comptable.
+    public var lifecycleRank: Int {
+        switch self {
+        case .draft: return 0
+        case .received: return 1
+        case .toValidate: return 2
+        case .validated: return 3
+        case .disputed: return 3
+        case .refused: return 3
+        case .paid: return 4
+        case .cancelled: return 4
+        }
+    }
+
+    /// Transitions par défaut (personnalisables dans Réglages > Tables > Statuts des
+    /// factures d'achat). `draft` n'existe que pour une saisie manuelle en cours ; une
+    /// facture reçue via SUPER PDP arrive directement à `received`, il n'y a rien à
+    /// "brouillonner" sur un document déjà complet reçu d'un tiers.
+    public func allowedTransitions() -> [PurchaseInvoiceStatus] {
+        switch self {
+        case .draft:
+            return [.received]
+        case .received:
+            return [.toValidate]
+        case .toValidate:
+            return [.validated, .disputed, .refused]
+        case .validated:
+            return [.disputed, .paid]
+        case .disputed:
+            return [.validated, .refused]
+        case .refused:
+            return []
+        case .paid:
+            return []
+        case .cancelled:
+            return []
+        }
+    }
+}
+
+extension PurchaseInvoiceStatus: Codable {
+    /// Pas de donnée héritée à migrer (nouveau statut) — le repli sûr sur `.draft` pour
+    /// toute valeur inconnue est une protection anticipée, sur le même principe que
+    /// `InvoiceStatus.init(from:)` : si un cas venait à être retiré plus tard, une facture
+    /// d'achat déjà persistée avec ce statut ne doit jamais devenir indécodable.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PurchaseInvoiceStatus(rawValue: raw) ?? .draft
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 public struct Invoice: Codable, Hashable, Identifiable {
     public var id: UUID
     public var number: String

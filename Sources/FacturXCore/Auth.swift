@@ -325,6 +325,7 @@ public enum EmailValidator {
 
 public enum AuditObjectType: String, Codable, CaseIterable {
     case invoice
+    case purchaseInvoice
     case order
     case quote
     case party
@@ -334,6 +335,7 @@ public enum AuditObjectType: String, Codable, CaseIterable {
     public var label: String {
         switch self {
         case .invoice: return "Facture"
+        case .purchaseInvoice: return "Facture d'achat"
         case .order: return "Commande"
         case .quote: return "Devis"
         case .party: return "Tiers"
@@ -948,6 +950,12 @@ public final class AuthStore: ObservableObject {
     }
 
     public func visibleOrderCompanyIDs(for user: User?) -> Set<UUID>? {
+        guard let user = user else { return nil }
+        if user.isAdmin { return nil }
+        return Set(user.societyIDs)
+    }
+
+    public func visiblePurchaseInvoiceCompanyIDs(for user: User?) -> Set<UUID>? {
         guard let user = user else { return nil }
         if user.isAdmin { return nil }
         return Set(user.societyIDs)
