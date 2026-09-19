@@ -134,7 +134,8 @@ public final class SuperPDPStatusCodeStore: ObservableObject {
     /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
     public func override(for code: String, companyID: UUID?) -> PDPEventCodeOverride? {
         let normalized = code.lowercased()
-        if let companyID, let overrides = overridesBySociety[companyID],
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let overrides = overridesBySociety[effectiveID],
            let match = overrides.first(where: { $0.id.lowercased() == normalized }) {
             return match
         }

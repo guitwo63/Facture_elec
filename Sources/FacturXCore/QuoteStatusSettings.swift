@@ -117,8 +117,9 @@ public final class QuoteStatusStore: ObservableObject {
 
     /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
     public func override(for status: QuoteStatus, companyID: UUID?) -> QuoteStatusOverride {
-        if let companyID,
-           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[companyID]) {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[effectiveID]) {
             return resolved
         }
         return override(for: status)

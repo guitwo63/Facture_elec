@@ -115,11 +115,14 @@ public final class InvoiceStatusStore: ObservableObject {
     }
 
     /// Variante par société : la surcharge de `companyID` pour ce statut si elle existe,
-    /// sinon le réglage global (`override(for:)` ci-dessus, avec son propre repli sur le
-    /// défaut codé en dur). `companyID == nil` retombe toujours sur le réglage global.
+    /// sinon celle de la société principale, sinon le réglage global (`override(for:)`
+    /// ci-dessus, avec son propre repli sur le défaut codé en dur). `companyID == nil`
+    /// résout désormais sur la société principale si une a été désignée — voir
+    /// `PartyDirectory.principaleSocieteID`.
     public func override(for status: InvoiceStatus, companyID: UUID?) -> InvoiceStatusOverride {
-        if let companyID,
-           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[companyID]) {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[effectiveID]) {
             return resolved
         }
         return override(for: status)

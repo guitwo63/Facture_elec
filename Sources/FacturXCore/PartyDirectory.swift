@@ -577,17 +577,19 @@ public final class TagStore: ObservableObject {
     }
 
     /// Liste effective pour une société : le réglage global, avec les tags de la société
-    /// superposés par id. `companyID == nil` retourne toujours le réglage global.
+    /// superposés par id. `companyID == nil` résout sur la société principale si une a été
+    /// désignée (voir `PartyDirectory.principaleSocieteID`), sinon le réglage global.
     public func list(for companyID: UUID?) -> [PartyTag] {
-        guard let companyID else { return tags }
-        return SocietyScopedCatalog.resolvedList(global: tags, overrideForSociety: tagsBySociety[companyID])
+        guard let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID else { return tags }
+        return SocietyScopedCatalog.resolvedList(global: tags, overrideForSociety: tagsBySociety[effectiveID])
     }
 
     /// Un tag précis par id, résolu pour une société — pour l'affichage d'un tag déjà
     /// assigné à un tiers (`DirectoryEntry.tagIDs`), qui peut référencer un tag propre à la
     /// société de ce tiers.
     public func tag(id: UUID, companyID: UUID?) -> PartyTag? {
-        if let companyID, let match = SocietyScopedCatalog.resolvedElement(id: id, overrideForSociety: tagsBySociety[companyID]) {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let match = SocietyScopedCatalog.resolvedElement(id: id, overrideForSociety: tagsBySociety[effectiveID]) {
             return match
         }
         return tags.first { $0.id == id }
@@ -677,7 +679,8 @@ public final class KindColorStore: ObservableObject {
 
     /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
     public func hexColor(for kind: DirectoryEntryKind, companyID: UUID?) -> String {
-        if let companyID, let color = colorsBySociety[companyID]?[kind] {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let color = colorsBySociety[effectiveID]?[kind] {
             return color
         }
         return hexColor(for: kind)

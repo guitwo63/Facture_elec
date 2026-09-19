@@ -129,10 +129,12 @@ public final class InvoiceStore: ObservableObject {
         }
     }
 
-    /// Format effectif pour une société : son réglage propre s'il existe, sinon le
-    /// format par défaut. `companyID == nil` renvoie toujours le format par défaut.
+    /// Format effectif pour une société : son réglage propre s'il existe, sinon celui de la
+    /// société principale, sinon le format par défaut. `companyID == nil` résout sur la
+    /// société principale si une a été désignée (voir `PartyDirectory.principaleSocieteID`).
     public func numberingFormat(for companyID: UUID?) -> InvoiceNumberingFormat {
-        if let cid = companyID, let override = numberFormatOverrides[cid] { return override }
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let override = numberFormatOverrides[effectiveID] { return override }
         return InvoiceNumberingFormat(prefix: numberPrefix, includeYear: numberIncludeYear, start: numberStart, useSeparator: numberUseSeparator)
     }
 

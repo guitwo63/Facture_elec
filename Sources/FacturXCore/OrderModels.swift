@@ -458,8 +458,9 @@ public final class OrderStatusStore: ObservableObject {
 
     /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
     public func override(for status: OrderStatus, companyID: UUID?) -> OrderStatusOverride {
-        if let companyID,
-           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[companyID]) {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[effectiveID]) {
             return resolved
         }
         return override(for: status)
@@ -469,8 +470,9 @@ public final class OrderStatusStore: ObservableObject {
         var cid = order.customStatusID
         if cid == "sentToSupplier" { cid = OrderStatus.sentToSociete.rawValue }
         if let cid = cid {
-            if let companyID = order.companyID,
-               let custom = SocietyScopedCatalog.resolvedElement(id: cid, overrideForSociety: overridesBySociety[companyID]) {
+            let effectiveID = order.companyID ?? PartyDirectory.shared.principaleSocieteID
+            if let effectiveID,
+               let custom = SocietyScopedCatalog.resolvedElement(id: cid, overrideForSociety: overridesBySociety[effectiveID]) {
                 return custom
             }
             if let custom = overrides.first(where: { $0.id == cid }) {
