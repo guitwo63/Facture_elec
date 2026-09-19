@@ -713,7 +713,7 @@ struct RootView: View {
                         moduleButton(t)
                     }
                 }
-                if auth.visibleSocieties(for: auth.currentUser).count > 1 {
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
                     Divider().frame(height: 20).padding(.horizontal, 4)
                     HStack(spacing: 3) {
                         Picker("Société (périmètre)", selection: $activeCompanyID) {
@@ -6818,6 +6818,30 @@ enum ValueTable: String, CaseIterable, Identifiable {
     }
 }
 
+/// Badge affiché sur une ligne de table de réglages quand une société est sélectionnée et
+/// que cette ligne a une surcharge propre à elle — clic pour revenir au réglage par défaut.
+private struct SocietyOverrideBadge: View {
+    let isOverridden: Bool
+    let onRevert: () -> Void
+
+    var body: some View {
+        if isOverridden {
+            Button(action: onRevert) {
+                HStack(spacing: 3) {
+                    Image(systemName: "building.2.fill").font(.caption2)
+                    Text("Personnalisé").font(.caption2)
+                    Image(systemName: "arrow.uturn.backward").font(.caption2)
+                }
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.12)))
+                .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("Personnalisé pour cette société — cliquer pour revenir au réglage par défaut")
+        }
+    }
+}
+
 struct ValueTablesView: View {
     @EnvironmentObject var statusStore: OrderStatusStore
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
@@ -6828,7 +6852,12 @@ struct ValueTablesView: View {
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
     @EnvironmentObject var actionLabelStore: AuditActionLabelStore
     @EnvironmentObject var superPDPStatusCodeStore: SuperPDPStatusCodeStore
+    @EnvironmentObject var auth: AuthStore
     @State private var selectedTable: ValueTable = .orderStatuses
+    /// Société dont on édite/consulte les surcharges — commune à toutes les tables
+    /// modifiables (pas besoin de re-choisir en changeant de table). `nil` = "Toutes"
+    /// (réglage global) — voir la doc de chaque store pour la résolution.
+    @State private var tableSocietyID: UUID?
     @State private var editingPDPStatusCode: PDPEventCodeOverride?
     @State private var creatingPDPStatusCode = false
     @State private var searchQuery = ""
@@ -6850,6 +6879,22 @@ struct ValueTablesView: View {
                     .textFieldStyle(.roundedBorder)
             }
             .padding(10)
+            if selectedTable.isEditable, !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                HStack(spacing: 6) {
+                    Text("Société").font(.caption).foregroundStyle(.secondary)
+                    Picker("Société", selection: $tableSocietyID) {
+                        Text("Toutes (réglage par défaut)").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                            Text(s.displayName).tag(UUID?.some(s.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 260)
+                    InfoBadge(text: "Personnalisez une valeur pour cette société uniquement — les autres sociétés gardent le réglage par défaut. « Toutes » édite ce réglage par défaut lui-même.")
+                    Spacer()
+                }
+                .padding(.horizontal, 10).padding(.bottom, 8)
+            }
             Divider()
             HStack(alignment: .top, spacing: 0) {
                 tablesList
@@ -6861,7 +6906,9 @@ struct ValueTablesView: View {
         }
         .sheet(item: $editingStatus) { override in
             OrderStatusEditorSheet(override: override) { updated in
-                if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                if let cid = tableSocietyID {
+                    statusStore.setOverride(updated, companyID: cid)
+                } else if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     statusStore.overrides[i] = updated
                     statusStore.save()
                 }
@@ -6869,7 +6916,9 @@ struct ValueTablesView: View {
         }
         .sheet(item: $editingInvoiceStatus) { override in
             InvoiceStatusEditorSheet(override: override) { updated in
-                if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                if let cid = tableSocietyID {
+                    invoiceStatusStore.setOverride(updated, companyID: cid)
+                } else if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     invoiceStatusStore.overrides[i] = updated
                     invoiceStatusStore.save()
                 }
@@ -6877,7 +6926,9 @@ struct ValueTablesView: View {
         }
         .sheet(item: $editingPurchaseInvoiceStatus) { override in
             PurchaseInvoiceStatusEditorSheet(override: override) { updated in
-                if let i = purchaseInvoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                if let cid = tableSocietyID {
+                    purchaseInvoiceStatusStore.setOverride(updated, companyID: cid)
+                } else if let i = purchaseInvoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     purchaseInvoiceStatusStore.overrides[i] = updated
                     purchaseInvoiceStatusStore.save()
                 }
@@ -6885,27 +6936,49 @@ struct ValueTablesView: View {
         }
         .sheet(item: $editingQuoteStatus) { override in
             QuoteStatusEditorSheet(override: override) { updated in
-                if let i = quoteStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
+                if let cid = tableSocietyID {
+                    quoteStatusStore.setOverride(updated, companyID: cid)
+                } else if let i = quoteStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                     quoteStatusStore.overrides[i] = updated
                     quoteStatusStore.save()
                 }
             }
         }
         .sheet(item: $editingTag) { tag in
-            TagEditorSheet(tag: tag) { updated in tagStore.upsert(updated) }
+            TagEditorSheet(tag: tag) { updated in
+                if let cid = tableSocietyID {
+                    tagStore.setOverride(updated, companyID: cid)
+                } else {
+                    tagStore.upsert(updated)
+                }
+            }
         }
         .sheet(item: $editingPaymentTerm) { preset in
-            PaymentTermsPresetEditorSheet(preset: preset) { updated in paymentTermsStore.upsert(updated) }
+            PaymentTermsPresetEditorSheet(preset: preset) { updated in
+                if let cid = tableSocietyID {
+                    paymentTermsStore.setOverride(updated, companyID: cid)
+                } else {
+                    paymentTermsStore.upsert(updated)
+                }
+            }
         }
         .sheet(item: $editingKind) { kind in
-            KindColorEditorSheet(kind: kind, hex: kindColors.hexColor(for: kind)) { newHex in
-                kindColors.colors[kind] = newHex
-                kindColors.save()
+            KindColorEditorSheet(kind: kind, hex: kindColors.hexColor(for: kind, companyID: tableSocietyID)) { newHex in
+                if let cid = tableSocietyID {
+                    kindColors.setOverride(hexColor: newHex, for: kind, companyID: cid)
+                } else {
+                    kindColors.colors[kind] = newHex
+                    kindColors.save()
+                }
             }
         }
         .sheet(item: $editingPDPStatusCode) { override in
             PDPStatusCodeEditorSheet(existing: override) { updated in
-                superPDPStatusCodeStore.upsert(updated)
+                if let cid = tableSocietyID {
+                    superPDPStatusCodeStore.setOverride(updated, companyID: cid)
+                } else {
+                    superPDPStatusCodeStore.upsert(updated)
+                }
             }
         }
         .sheet(isPresented: $creatingPDPStatusCode) {
@@ -6974,9 +7047,16 @@ struct ValueTablesView: View {
 
     private var filteredAuditActionLabels: [AuditActionLabel] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let sorted = actionLabelStore.overrides.sorted { $0.label < $1.label }
-        guard !q.isEmpty else { return sorted }
-        return sorted.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+        let resolved = actionLabelStore.overrides
+            .map { AuditActionLabel(id: $0.id, label: actionLabelStore.label(for: $0.id, companyID: tableSocietyID)) }
+            .sorted { $0.label < $1.label }
+        guard !q.isEmpty else { return resolved }
+        return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    private func isAuditActionLabelOverridden(_ id: String) -> Bool {
+        guard let cid = tableSocietyID else { return false }
+        return actionLabelStore.overridesBySociety[cid]?.contains { $0.id == id } ?? false
     }
 
     private var auditActionLabelsPanel: some View {
@@ -6984,10 +7064,12 @@ struct ValueTablesView: View {
             HStack {
                 Text("Libellés du journal").font(.title3.bold())
                 Spacer()
-                Button {
-                    actionLabelStore.resetToDefaults()
-                } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
-                    .buttonStyle(.bordered)
+                if tableSocietyID == nil {
+                    Button {
+                        actionLabelStore.resetToDefaults()
+                    } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
+                        .buttonStyle(.bordered)
+                }
             }
             .padding(12)
             Divider()
@@ -7001,9 +7083,20 @@ struct ValueTablesView: View {
                                 .frame(width: 220, alignment: .leading)
                             TextField("Libellé", text: Binding(
                                 get: { item.label },
-                                set: { actionLabelStore.upsert(AuditActionLabel(id: item.id, label: $0)) }
+                                set: { newLabel in
+                                    if let cid = tableSocietyID {
+                                        actionLabelStore.setOverride(AuditActionLabel(id: item.id, label: newLabel), companyID: cid)
+                                    } else {
+                                        actionLabelStore.upsert(AuditActionLabel(id: item.id, label: newLabel))
+                                    }
+                                }
                             ))
                             .textFieldStyle(.roundedBorder)
+                            SocietyOverrideBadge(isOverridden: isAuditActionLabelOverridden(item.id)) {
+                                if let cid = tableSocietyID {
+                                    actionLabelStore.removeOverride(id: item.id, companyID: cid)
+                                }
+                            }
                         }
                         .padding(.vertical, 2)
                     }
@@ -7015,9 +7108,17 @@ struct ValueTablesView: View {
 
     private var filteredPDPStatusCodes: [PDPEventCodeOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let sorted = superPDPStatusCodeStore.overrides.sorted { $0.id < $1.id }
-        guard !q.isEmpty else { return sorted }
-        return sorted.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+        let resolved = superPDPStatusCodeStore.overrides
+            .map { superPDPStatusCodeStore.override(for: $0.id, companyID: tableSocietyID) ?? $0 }
+            .sorted { $0.id < $1.id }
+        guard !q.isEmpty else { return resolved }
+        return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+    }
+
+    private func isPDPStatusCodeOverridden(_ id: String) -> Bool {
+        guard let cid = tableSocietyID else { return false }
+        let normalized = id.lowercased()
+        return superPDPStatusCodeStore.overridesBySociety[cid]?.contains { $0.id.lowercased() == normalized } ?? false
     }
 
     /// Table de paramétrage des codes d'événement SUPER PDP (fr:2XX) : libellé français et
@@ -7032,10 +7133,12 @@ struct ValueTablesView: View {
             HStack {
                 Text("Statuts SUPER PDP").font(.title3.bold())
                 Spacer()
-                Button {
-                    creatingPDPStatusCode = true
-                } label: { Label("Nouvelle valeur", systemImage: "plus") }
-                    .buttonStyle(.borderedProminent)
+                if tableSocietyID == nil {
+                    Button {
+                        creatingPDPStatusCode = true
+                    } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .padding(12)
             Divider()
@@ -7069,12 +7172,17 @@ struct ValueTablesView: View {
                 Text("informatif seulement").font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
+            SocietyOverrideBadge(isOverridden: isPDPStatusCodeOverridden(item.id)) {
+                if let cid = tableSocietyID {
+                    superPDPStatusCodeStore.removeOverride(id: item.id, companyID: cid)
+                }
+            }
             Button {
                 editingPDPStatusCode = item
             } label: { Image(systemName: "pencil") }
                 .buttonStyle(.borderless)
                 .help("Modifier")
-            if !item.isSystemDefined {
+            if !item.isSystemDefined, tableSocietyID == nil {
                 Button(role: .destructive) {
                     superPDPStatusCodeStore.remove(item)
                 } label: { Image(systemName: "trash") }
@@ -7148,12 +7256,17 @@ struct ValueTablesView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
+                SocietyOverrideBadge(isOverridden: tableSocietyID.map { cid in invoiceStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } ?? false } ?? false) {
+                    if let status = InvoiceStatus(rawValue: override.id), let cid = tableSocietyID {
+                        invoiceStatusStore.removeOverride(for: status, companyID: cid)
+                    }
+                }
                 Button {
                     editingInvoiceStatus = override
                 } label: { Image(systemName: "pencil") }
                     .buttonStyle(.borderless)
                     .help("Modifier le libellé")
-                if !override.isReformStatus {
+                if !override.isReformStatus, tableSocietyID == nil {
                     Button(role: .destructive) {
                         if let i = invoiceStatusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                             invoiceStatusStore.remove(at: i)
@@ -7205,8 +7318,9 @@ struct ValueTablesView: View {
 
     private var filteredInvoiceStatuses: [InvoiceStatusOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return invoiceStatusStore.overrides }
-        return invoiceStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
+        let resolved = InvoiceStatus.allCases.map { invoiceStatusStore.override(for: $0, companyID: tableSocietyID) }
+        guard !q.isEmpty else { return resolved }
+        return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
     }
 
     // MARK: - Statuts des factures d'achat
@@ -7270,6 +7384,11 @@ struct ValueTablesView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
+                SocietyOverrideBadge(isOverridden: tableSocietyID.map { cid in purchaseInvoiceStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } ?? false } ?? false) {
+                    if let status = PurchaseInvoiceStatus(rawValue: override.id), let cid = tableSocietyID {
+                        purchaseInvoiceStatusStore.removeOverride(for: status, companyID: cid)
+                    }
+                }
                 Button {
                     editingPurchaseInvoiceStatus = override
                 } label: { Image(systemName: "pencil") }
@@ -7295,8 +7414,9 @@ struct ValueTablesView: View {
 
     private var filteredPurchaseInvoiceStatuses: [PurchaseInvoiceStatusOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return purchaseInvoiceStatusStore.overrides }
-        return purchaseInvoiceStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
+        let resolved = PurchaseInvoiceStatus.allCases.map { purchaseInvoiceStatusStore.override(for: $0, companyID: tableSocietyID) }
+        guard !q.isEmpty else { return resolved }
+        return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
     }
 
     private var orderStatusesPanel: some View {
@@ -7304,11 +7424,13 @@ struct ValueTablesView: View {
             HStack {
                 Text("Statuts des commandes").font(.title3.bold())
                 Spacer()
-                Button {
-                    let id = "custom-\(UUID().uuidString.prefix(8))"
-                    statusStore.append(OrderStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
-                } label: { Label("Nouvelle valeur", systemImage: "plus") }
-                    .buttonStyle(.borderedProminent)
+                if tableSocietyID == nil {
+                    Button {
+                        let id = "custom-\(UUID().uuidString.prefix(8))"
+                        statusStore.append(OrderStatusOverride(id: id, label: "Nouveau statut", systemImage: "doc", hexColor: "6E6E73"))
+                    } label: { Label("Nouvelle valeur", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .padding(12)
             Divider()
@@ -7351,12 +7473,25 @@ struct ValueTablesView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
+                SocietyOverrideBadge(isOverridden: tableSocietyID.map { cid in statusStore.overridesBySociety[cid]?.contains { $0.id == override.id } ?? false } ?? false) {
+                    // Manipulation directe (pas de removeOverride(for:companyID:) générique côté
+                    // OrderStatusStore) : cette table mélange statuts standard (enum OrderStatus)
+                    // et statuts personnalisés (id "custom-…", hors enum) — il faut fonctionner
+                    // uniformément sur un id brut pour couvrir les deux.
+                    if let cid = tableSocietyID {
+                        statusStore.overridesBySociety[cid]?.removeAll { $0.id == override.id }
+                        if statusStore.overridesBySociety[cid]?.isEmpty == true {
+                            statusStore.overridesBySociety.removeValue(forKey: cid)
+                        }
+                        statusStore.save()
+                    }
+                }
                 Button {
                     editingStatus = override
                 } label: { Image(systemName: "pencil") }
                     .buttonStyle(.borderless)
                     .help("Modifier ce statut")
-                if !override.isPDPStatus {
+                if !override.isPDPStatus, tableSocietyID == nil {
                     Button(role: .destructive) {
                         if let i = statusStore.overrides.firstIndex(where: { $0.id == override.id }) {
                             statusStore.remove(at: i)
@@ -7416,6 +7551,11 @@ struct ValueTablesView: View {
                     .foregroundStyle(Color(hex: override.hexColor))
                 Text(override.label).font(.body)
                 Spacer()
+                SocietyOverrideBadge(isOverridden: tableSocietyID.map { cid in quoteStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } ?? false } ?? false) {
+                    if let status = QuoteStatus(rawValue: override.id), let cid = tableSocietyID {
+                        quoteStatusStore.removeOverride(for: status, companyID: cid)
+                    }
+                }
                 Button {
                     editingQuoteStatus = override
                 } label: { Image(systemName: "pencil") }
@@ -7441,20 +7581,33 @@ struct ValueTablesView: View {
 
     private var filteredQuoteStatuses: [QuoteStatusOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return quoteStatusStore.overrides }
-        return quoteStatusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+        let resolved = QuoteStatus.allCases.map { quoteStatusStore.override(for: $0, companyID: tableSocietyID) }
+        guard !q.isEmpty else { return resolved }
+        return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
 
     private var filteredStatuses: [OrderStatusOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return statusStore.overrides }
-        return statusStore.overrides.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+        // Mélange statuts standard + personnalisés ("custom-…") — résolu par id brut plutôt
+        // que via OrderStatus.allCases, pour couvrir les deux (voir le commentaire sur le
+        // bouton de retour au réglage global ci-dessus).
+        let resolved = statusStore.overrides.map { global in
+            tableSocietyID.flatMap { cid in SocietyScopedCatalog.resolvedElement(id: global.id, overrideForSociety: statusStore.overridesBySociety[cid]) } ?? global
+        }
+        guard !q.isEmpty else { return resolved }
+        return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
 
     private var filteredPaymentTerms: [PaymentTermsPreset] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return paymentTermsStore.presets }
-        return paymentTermsStore.presets.filter { $0.label.lowercased().contains(q) || $0.text.lowercased().contains(q) }
+        let resolved = paymentTermsStore.list(for: tableSocietyID)
+        guard !q.isEmpty else { return resolved }
+        return resolved.filter { $0.label.lowercased().contains(q) || $0.text.lowercased().contains(q) }
+    }
+
+    private func isPaymentTermOverridden(_ id: String) -> Bool {
+        guard let cid = tableSocietyID else { return false }
+        return paymentTermsStore.presetsBySociety[cid]?.contains { $0.id == id } ?? false
     }
 
     private var paymentTermsPanel: some View {
@@ -7462,13 +7615,19 @@ struct ValueTablesView: View {
             HStack {
                 Text("Conditions de paiement").font(.title3.bold())
                 Spacer()
-                Button {
-                    paymentTermsStore.reset()
-                } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
-                    .buttonStyle(.bordered)
+                if tableSocietyID == nil {
+                    Button {
+                        paymentTermsStore.reset()
+                    } label: { Label("Réinitialiser", systemImage: "arrow.counterclockwise") }
+                        .buttonStyle(.bordered)
+                }
                 Button {
                     let preset = PaymentTermsPreset(label: "Nouveau préréglage", text: "")
-                    paymentTermsStore.append(preset)
+                    if let cid = tableSocietyID {
+                        paymentTermsStore.setOverride(preset, companyID: cid)
+                    } else {
+                        paymentTermsStore.append(preset)
+                    }
                     editingPaymentTerm = preset
                 } label: { Label("Nouvelle valeur", systemImage: "plus") }
                     .buttonStyle(.borderedProminent)
@@ -7485,18 +7644,25 @@ struct ValueTablesView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
+                            SocietyOverrideBadge(isOverridden: isPaymentTermOverridden(preset.id)) {
+                                if let cid = tableSocietyID {
+                                    paymentTermsStore.removeOverride(id: preset.id, companyID: cid)
+                                }
+                            }
                             Button {
                                 editingPaymentTerm = preset
                             } label: { Image(systemName: "pencil") }
                                 .buttonStyle(.borderless)
                                 .help("Modifier ce préréglage")
-                            Button(role: .destructive) {
-                                if let idx = paymentTermsStore.presets.firstIndex(where: { $0.id == preset.id }) {
-                                    paymentTermsStore.remove(at: idx)
-                                }
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Supprimer ce préréglage")
+                            if tableSocietyID == nil {
+                                Button(role: .destructive) {
+                                    if let idx = paymentTermsStore.presets.firstIndex(where: { $0.id == preset.id }) {
+                                        paymentTermsStore.remove(at: idx)
+                                    }
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Supprimer ce préréglage")
+                            }
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
@@ -7523,16 +7689,23 @@ struct ValueTablesView: View {
                             Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
                             Text(tag.name).font(.body)
                             Spacer()
+                            SocietyOverrideBadge(isOverridden: tableSocietyID.map { cid in tagStore.tagsBySociety[cid]?.contains { $0.id == tag.id } ?? false } ?? false) {
+                                if let cid = tableSocietyID {
+                                    tagStore.removeOverride(id: tag.id, companyID: cid)
+                                }
+                            }
                             Button {
                                 editingTag = tag
                             } label: { Image(systemName: "pencil") }
                                 .buttonStyle(.borderless)
                                 .help("Modifier ce tag")
-                            Button(role: .destructive) {
-                                tagStore.delete(tag)
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Supprimer ce tag")
+                            if tableSocietyID == nil {
+                                Button(role: .destructive) {
+                                    tagStore.delete(tag)
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Supprimer ce tag")
+                            }
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
@@ -7548,7 +7721,12 @@ struct ValueTablesView: View {
                         TextField("Nom du nouveau tag", text: $newTagName)
                         Button {
                             guard !newTagName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                            tagStore.upsert(PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex))
+                            let newTag = PartyTag(name: newTagName.trimmingCharacters(in: .whitespaces), hexColor: newTagHex)
+                            if let cid = tableSocietyID {
+                                tagStore.setOverride(newTag, companyID: cid)
+                            } else {
+                                tagStore.upsert(newTag)
+                            }
                             newTagName = ""
                             newTagHex = "555555"
                         } label: { Label("Ajouter", systemImage: "plus.circle.fill") }
@@ -7562,8 +7740,9 @@ struct ValueTablesView: View {
 
     private var filteredTags: [PartyTag] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return tagStore.tags }
-        return tagStore.tags.filter { $0.name.lowercased().contains(q) }
+        let source = tagStore.list(for: tableSocietyID)
+        guard !q.isEmpty else { return source }
+        return source.filter { $0.name.lowercased().contains(q) }
     }
 
     private var kindColorsPanel: some View {
@@ -7578,21 +7757,28 @@ struct ValueTablesView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(DirectoryEntryKind.selectable, id: \.self) { kind in
                         HStack(spacing: 10) {
-                            Circle().fill(Color(hex: kindColors.hexColor(for: kind))).frame(width: 14, height: 14)
+                            Circle().fill(Color(hex: kindColors.hexColor(for: kind, companyID: tableSocietyID))).frame(width: 14, height: 14)
                             Text(kind.label).font(.body)
-                            Text(kindColors.hexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
+                            Text(kindColors.hexColor(for: kind, companyID: tableSocietyID)).font(.caption).foregroundStyle(.secondary).monospaced()
                             Spacer()
+                            SocietyOverrideBadge(isOverridden: tableSocietyID.map { cid in kindColors.colorsBySociety[cid]?[kind] != nil } ?? false) {
+                                if let cid = tableSocietyID {
+                                    kindColors.removeOverride(for: kind, companyID: cid)
+                                }
+                            }
                             Button {
                                 editingKind = kind
                             } label: { Image(systemName: "pencil") }
                                 .buttonStyle(.borderless)
                                 .help("Modifier cette couleur")
-                            Button(role: .destructive) {
-                                kindColors.colors[kind] = kind.defaultHexColor
-                                kindColors.save()
-                            } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                                .help("Réinitialiser cette couleur")
+                            if tableSocietyID == nil {
+                                Button(role: .destructive) {
+                                    kindColors.colors[kind] = kind.defaultHexColor
+                                    kindColors.save()
+                                } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless)
+                                    .help("Réinitialiser cette couleur")
+                            }
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
