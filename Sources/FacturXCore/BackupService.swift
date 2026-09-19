@@ -19,6 +19,10 @@ public struct BackupBundle: Codable {
     public var quotes: [Quote]
     public var parties: [DirectoryEntry]
     public var orderPartySemanticsVersion: Int
+    /// Factures d'achat (module Achats) — absent des sauvegardes créées avant l'incrément
+    /// 3.1 du chantier "Réglages par société" (le module Achats a été ajouté après ce
+    /// fichier) ; `decodeIfPresent(...) ?? []` pour rester compatible avec ces anciens fichiers.
+    public var purchaseInvoices: [PurchaseInvoice]
 
     public init(
         createdAt: Date = Date(),
@@ -27,7 +31,8 @@ public struct BackupBundle: Codable {
         orders: [SalesOrder],
         quotes: [Quote] = [],
         parties: [DirectoryEntry],
-        orderPartySemanticsVersion: Int = BackupBundle.currentOrderPartySemanticsVersion
+        orderPartySemanticsVersion: Int = BackupBundle.currentOrderPartySemanticsVersion,
+        purchaseInvoices: [PurchaseInvoice] = []
     ) {
         self.createdAt = createdAt
         self.appVersion = appVersion
@@ -36,10 +41,11 @@ public struct BackupBundle: Codable {
         self.quotes = quotes
         self.parties = parties
         self.orderPartySemanticsVersion = orderPartySemanticsVersion
+        self.purchaseInvoices = purchaseInvoices
     }
 
     private enum CodingKeys: String, CodingKey {
-        case createdAt, appVersion, invoices, orders, quotes, parties, orderPartySemanticsVersion
+        case createdAt, appVersion, invoices, orders, quotes, parties, orderPartySemanticsVersion, purchaseInvoices
     }
 
     public init(from decoder: Decoder) throws {
@@ -51,6 +57,7 @@ public struct BackupBundle: Codable {
         quotes = try c.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
         parties = try c.decodeIfPresent([DirectoryEntry].self, forKey: .parties) ?? []
         orderPartySemanticsVersion = try c.decodeIfPresent(Int.self, forKey: .orderPartySemanticsVersion) ?? 1
+        purchaseInvoices = try c.decodeIfPresent([PurchaseInvoice].self, forKey: .purchaseInvoices) ?? []
     }
 
     /// Nom de fichier suggéré, horodaté, pour éviter d'écraser une sauvegarde précédente.
@@ -62,17 +69,33 @@ public struct BackupBundle: Codable {
 }
 
 public enum BackupService {
+    /// `companyID` filtre chaque tableau avant de construire le bundle ; `nil` (par défaut)
+    /// capture tout, comportement strictement inchangé pour tout appelant existant.
+    /// `purchaseInvoiceStore` est requis (pas optionnel) — corrige l'oubli du module Achats
+    /// proprement plutôt que de le contourner (voir la doc de `BackupBundle.purchaseInvoices`).
     public static func capture(
         invoiceStore: InvoiceStore,
         orderStore: OrderStore,
         quoteStore: QuoteStore,
-        directory: PartyDirectory
+        directory: PartyDirectory,
+        purchaseInvoiceStore: PurchaseInvoiceStore,
+        companyID: UUID? = nil
     ) -> BackupBundle {
-        BackupBundle(
-            invoices: invoiceStore.invoices,
-            orders: orderStore.orders,
-            quotes: quoteStore.quotes,
-            parties: directory.entries
+        guard let companyID else {
+            return BackupBundle(
+                invoices: invoiceStore.invoices,
+                orders: orderStore.orders,
+                quotes: quoteStore.quotes,
+                parties: directory.entries,
+                purchaseInvoices: purchaseInvoiceStore.invoices
+            )
+        }
+        return BackupBundle(
+            invoices: invoiceStore.invoices.filter { $0.companyID == companyID },
+            orders: orderStore.orders.filter { $0.companyID == companyID },
+            quotes: quoteStore.quotes.filter { $0.companyID == companyID },
+            parties: directory.entries.filter { $0.companyID == companyID },
+            purchaseInvoices: purchaseInvoiceStore.invoices.filter { $0.invoice.companyID == companyID }
         )
     }
 
@@ -84,7 +107,8 @@ public enum BackupService {
         invoiceStore: InvoiceStore,
         orderStore: OrderStore,
         quoteStore: QuoteStore,
-        directory: PartyDirectory
+        directory: PartyDirectory,
+        purchaseInvoiceStore: PurchaseInvoiceStore
     ) {
         bundle.invoices.forEach(invoiceStore.upsert)
         let orders: [SalesOrder]
@@ -100,6 +124,7 @@ public enum BackupService {
         orders.forEach(orderStore.upsert)
         bundle.quotes.forEach(quoteStore.upsert)
         bundle.parties.forEach(directory.upsert)
+        bundle.purchaseInvoices.forEach(purchaseInvoiceStore.upsert)
     }
 
     public static func encode(_ bundle: BackupBundle) throws -> Data {

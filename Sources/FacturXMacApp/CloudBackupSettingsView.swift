@@ -9,6 +9,8 @@ struct CloudBackupSettingsView: View {
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var purchaseInvoiceStore: PurchaseInvoiceStore
+    @EnvironmentObject var auth: AuthStore
 
     @State private var testing = false
     @State private var testMessage: String?
@@ -19,10 +21,14 @@ struct CloudBackupSettingsView: View {
     @State private var restoring = false
     @State private var restoreMessage: String?
     @State private var listingBackups = false
+    /// Filtre la sauvegarde manuelle sur une seule société — `nil` = toutes (comportement
+    /// historique, inchangé). La sauvegarde automatique au lancement reste toujours non
+    /// filtrée (voir `RootView.runAutoBackupIfNeeded()`), décision actée dans le plan.
+    @State private var backupSocietyID: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Sauvegarde les factures, commandes et l'annuaire vers votre compte pCloud, dans un fichier JSON horodaté. La restauration ajoute/met à jour les données à partir d'une sauvegarde — elle n'efface jamais rien.")
+            Text("Sauvegarde les factures, commandes, devis, factures d'achat et l'annuaire vers votre compte pCloud, dans un fichier JSON horodaté. La restauration ajoute/met à jour les données à partir d'une sauvegarde — elle n'efface jamais rien.")
                 .font(.caption).foregroundStyle(.secondary)
 
             TextField("Email pCloud", text: $pcloudSettings.credentials.username)
@@ -37,6 +43,21 @@ struct CloudBackupSettingsView: View {
             .help("Le compte pCloud est hébergé aux États-Unis ou en Europe selon l'inscription initiale — une mauvaise région empêche toute connexion.")
             TextField("Dossier de sauvegarde", text: $pcloudSettings.credentials.backupFolderPath)
                 .textFieldStyle(.roundedBorder).frame(width: 280)
+
+            if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                HStack(spacing: 6) {
+                    Text("Sauvegarder").font(.caption).foregroundStyle(.secondary)
+                    Picker("Société", selection: $backupSocietyID) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                            Text(s.displayName).tag(UUID?.some(s.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 220)
+                }
+                .help("Limite la sauvegarde manuelle aux documents de la société choisie. La sauvegarde automatique au lancement reste toujours complète.")
+            }
 
             HStack {
                 Button {
@@ -136,7 +157,7 @@ struct CloudBackupSettingsView: View {
         backupMessage = nil
         let credentials = pcloudSettings.credentials
         let strategy = backupStrategyStore.settings
-        let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
+        let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: purchaseInvoiceStore, companyID: backupSocietyID)
         Task {
             do {
                 backupMessage = try await BackupRunner.run(bundle: bundle, pcloudCredentials: credentials, strategy: strategy)
@@ -188,8 +209,8 @@ struct CloudBackupSettingsView: View {
                 let auth = try await service.login(credentials: credentials)
                 let data = try await service.download(fileID: file.fileID, credentials: credentials, auth: auth)
                 let bundle = try BackupService.decode(data)
-                BackupService.restore(bundle, invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
-                restoreMessage = "Restauration terminée : \(bundle.invoices.count) facture(s), \(bundle.orders.count) commande(s), \(bundle.quotes.count) devis, \(bundle.parties.count) tiers."
+                BackupService.restore(bundle, invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: purchaseInvoiceStore)
+                restoreMessage = "Restauration terminée : \(bundle.invoices.count) facture(s), \(bundle.orders.count) commande(s), \(bundle.quotes.count) devis, \(bundle.purchaseInvoices.count) facture(s) d'achat, \(bundle.parties.count) tiers."
             } catch {
                 restoreMessage = "Échec de la restauration : \(error.localizedDescription)"
             }
