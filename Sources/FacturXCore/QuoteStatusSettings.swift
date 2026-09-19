@@ -37,10 +37,13 @@ public final class QuoteStatusStore: ObservableObject {
     public static let shared = QuoteStatusStore()
 
     @Published public var overrides: [QuoteStatusOverride]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
+    @Published public var overridesBySociety: [UUID: [QuoteStatusOverride]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.quotestatuses.v1") }
+    private var overridesBySocietyKey: String { env.key("facturx.quotestatuses.bysociety.v1") }
 
     public static var defaultOverrides: [QuoteStatusOverride] {
         QuoteStatus.allCases.map { s in
@@ -66,12 +69,40 @@ public final class QuoteStatusStore: ObservableObject {
             }
             overrides = QuoteStatus.allCases.compactMap { byID[$0.rawValue] }
         }
+        if let data = defaults.data(forKey: overridesBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [QuoteStatusOverride]].self, from: data) {
+            overridesBySociety = decoded
+        }
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(overridesBySociety) {
+            defaults.set(data, forKey: overridesBySocietyKey)
+        }
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce statut pour cette société.
+    public func setOverride(_ override: QuoteStatusOverride, companyID: UUID) {
+        var list = overridesBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == override.id }) {
+            list[idx] = override
+        } else {
+            list.append(override)
+        }
+        overridesBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce statut sur cette société.
+    public func removeOverride(for status: QuoteStatus, companyID: UUID) {
+        overridesBySociety[companyID]?.removeAll { $0.id == status.rawValue }
+        if overridesBySociety[companyID]?.isEmpty == true {
+            overridesBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 
     public func reset() {
@@ -84,9 +115,23 @@ public final class QuoteStatusStore: ObservableObject {
             ?? QuoteStatusOverride(id: status.rawValue, label: status.label, systemImage: status.systemImage, hexColor: status.hexColor)
     }
 
+    /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
+    public func override(for status: QuoteStatus, companyID: UUID?) -> QuoteStatusOverride {
+        if let companyID,
+           let resolved = SocietyScopedCatalog.resolvedElement(id: status.rawValue, overrideForSociety: overridesBySociety[companyID]) {
+            return resolved
+        }
+        return override(for: status)
+    }
+
     /// Transitions autorisées depuis un statut, lues depuis la configuration
     /// (Réglages > Tables > Statuts des devis).
     public func allowedTransitions(from status: QuoteStatus) -> [QuoteStatus] {
-        override(for: status).transitionCodes.compactMap { QuoteStatus(rawValue: $0) }
+        allowedTransitions(from: status, companyID: nil)
+    }
+
+    /// Variante par société.
+    public func allowedTransitions(from status: QuoteStatus, companyID: UUID?) -> [QuoteStatus] {
+        override(for: status, companyID: companyID).transitionCodes.compactMap { QuoteStatus(rawValue: $0) }
     }
 }

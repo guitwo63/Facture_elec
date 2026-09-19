@@ -21,10 +21,13 @@ public final class AuditActionLabelStore: ObservableObject {
     public static let shared = AuditActionLabelStore()
 
     @Published public var overrides: [AuditActionLabel]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
+    @Published public var overridesBySociety: [UUID: [AuditActionLabel]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.auditactionlabels.v1") }
+    private var overridesBySocietyKey: String { env.key("facturx.auditactionlabels.bysociety.v1") }
 
     public static let defaultLabels: [AuditActionLabel] = [
         AuditActionLabel(id: "status_change", label: "Changement de statut"),
@@ -88,18 +91,54 @@ public final class AuditActionLabelStore: ObservableObject {
             merged.append(def)
         }
         overrides = merged
+        if let data = defaults.data(forKey: overridesBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [AuditActionLabel]].self, from: data) {
+            overridesBySociety = decoded
+        }
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(overridesBySociety) {
+            defaults.set(data, forKey: overridesBySocietyKey)
+        }
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce libellé pour cette société.
+    public func setOverride(_ override: AuditActionLabel, companyID: UUID) {
+        var list = overridesBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == override.id }) {
+            list[idx] = override
+        } else {
+            list.append(override)
+        }
+        overridesBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce libellé sur cette société.
+    public func removeOverride(id: String, companyID: UUID) {
+        overridesBySociety[companyID]?.removeAll { $0.id == id }
+        if overridesBySociety[companyID]?.isEmpty == true {
+            overridesBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 
     /// Libellé français pour un code technique — retombe sur le code brut si aucun
     /// libellé n'est défini (ne devrait arriver que pour un code totalement inconnu).
     public func label(for actionCode: String) -> String {
         overrides.first(where: { $0.id == actionCode })?.label ?? actionCode
+    }
+
+    /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
+    public func label(for actionCode: String, companyID: UUID?) -> String {
+        if let companyID, let match = SocietyScopedCatalog.resolvedElement(id: actionCode, overrideForSociety: overridesBySociety[companyID]) {
+            return match.label
+        }
+        return label(for: actionCode)
     }
 
     public func upsert(_ item: AuditActionLabel) {

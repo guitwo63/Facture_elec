@@ -37,10 +37,13 @@ public final class SuperPDPStatusCodeStore: ObservableObject {
     public static let shared = SuperPDPStatusCodeStore()
 
     @Published public var overrides: [PDPEventCodeOverride]
+    /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
+    @Published public var overridesBySociety: [UUID: [PDPEventCodeOverride]] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.superpdp.statusCodes.v1") }
+    private var overridesBySocietyKey: String { env.key("facturx.superpdp.statusCodes.bysociety.v1") }
 
     public static let defaultCodes: [PDPEventCodeOverride] = [
         PDPEventCodeOverride(id: "fr:200", label: "Déposée", isSystemDefined: true),
@@ -87,12 +90,40 @@ public final class SuperPDPStatusCodeStore: ObservableObject {
             merged.append(d)
         }
         overrides = merged
+        if let data = defaults.data(forKey: overridesBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: [PDPEventCodeOverride]].self, from: data) {
+            overridesBySociety = decoded
+        }
     }
 
     public func save() {
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(overridesBySociety) {
+            defaults.set(data, forKey: overridesBySocietyKey)
+        }
+    }
+
+    /// Commence (ou remplace) la personnalisation de ce code pour cette société.
+    public func setOverride(_ override: PDPEventCodeOverride, companyID: UUID) {
+        var list = overridesBySociety[companyID] ?? []
+        if let idx = list.firstIndex(where: { $0.id == override.id }) {
+            list[idx] = override
+        } else {
+            list.append(override)
+        }
+        overridesBySociety[companyID] = list
+        save()
+    }
+
+    /// Revient au réglage global pour ce code sur cette société.
+    public func removeOverride(id: String, companyID: UUID) {
+        overridesBySociety[companyID]?.removeAll { $0.id == id }
+        if overridesBySociety[companyID]?.isEmpty == true {
+            overridesBySociety.removeValue(forKey: companyID)
+        }
+        save()
     }
 
     public func override(for code: String) -> PDPEventCodeOverride? {
@@ -100,10 +131,26 @@ public final class SuperPDPStatusCodeStore: ObservableObject {
         return overrides.first { $0.id.lowercased() == normalized }
     }
 
+    /// Variante par société — voir `InvoiceStatusStore.override(for:companyID:)`.
+    public func override(for code: String, companyID: UUID?) -> PDPEventCodeOverride? {
+        let normalized = code.lowercased()
+        if let companyID, let overrides = overridesBySociety[companyID],
+           let match = overrides.first(where: { $0.id.lowercased() == normalized }) {
+            return match
+        }
+        return override(for: code)
+    }
+
     /// Statut fonctionnel que ce code déclenche, s'il y en a un — c'est la passerelle
     /// utilisée par `PDPStatusMapper.functionalTransition(for:)`.
     public func functionalTransition(for code: String) -> InvoiceStatus? {
         guard let raw = override(for: code)?.functionalTransition else { return nil }
+        return InvoiceStatus(rawValue: raw)
+    }
+
+    /// Variante par société.
+    public func functionalTransition(for code: String, companyID: UUID?) -> InvoiceStatus? {
+        guard let raw = override(for: code, companyID: companyID)?.functionalTransition else { return nil }
         return InvoiceStatus(rawValue: raw)
     }
 
