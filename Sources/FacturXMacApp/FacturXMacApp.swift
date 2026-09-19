@@ -5603,7 +5603,8 @@ struct SettingsTabView: View {
             items.append(contentsOf: [
                 TabItem(index: 1, label: "Tables", icon: "tablecells"),
                 TabItem(index: 2, label: "Application", icon: "gearshape.2"),
-                TabItem(index: 5, label: "Connexions", icon: "network")
+                TabItem(index: 5, label: "Connexions", icon: "network"),
+                TabItem(index: 6, label: "Par société", icon: "building.2.crop.circle")
             ])
         }
         // Le journal (historique des statuts) est utile à tous les rôles, pas
@@ -5638,6 +5639,8 @@ struct SettingsTabView: View {
                 DataAdminView()
             case 5:
                 ConnectionsSettingsView()
+            case 6:
+                ConfigureSocieteView()
             default:
                 ApplicationSettingsView()
             }
@@ -6935,6 +6938,14 @@ struct ValueTablesView: View {
     @State private var newTagName = ""
     @State private var newTagHex = "555555"
 
+    /// `initialSocietyID` pré-sélectionne le picker société — utilisé par l'écran
+    /// "Configurer une société" (F.3) pour embarquer cette vue déjà filtrée sur la société
+    /// choisie, sans dupliquer la logique des 9 panneaux. `nil` (par défaut) préserve le
+    /// comportement de l'onglet Réglages > Tables autonome ("Toutes" au départ).
+    init(initialSocietyID: UUID? = nil) {
+        _tableSocietyID = State(initialValue: initialSocietyID)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -7921,6 +7932,116 @@ struct ValueTablesView: View {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return refs }
         return refs.filter { $0.code.lowercased().contains(q) || $0.label.lowercased().contains(q) }
+    }
+}
+
+/// Choisir une société d'abord, puis revoir tous ses réglages personnalisables en une seule
+/// fois — en complément des sélecteurs déjà présents écran par écran (Tables, Application),
+/// pas à leur place (F.3 du chantier "Réglages par société"). Réutilise les vues déjà
+/// existantes (`ValueTablesView`, pré-filtrée via son `initialSocietyID`) plutôt que de
+/// dupliquer leur logique d'édition. Conçue pour grossir : une section "Emails" s'ajoutera
+/// après la Zone 0, une section "Connexions" après la Zone 4.
+struct ConfigureSocieteView: View {
+    @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var orderStore: OrderStore
+    @EnvironmentObject var quoteStore: QuoteStore
+    @State private var selectedSocieteID: UUID?
+    @State private var tablesExpanded = true
+    @State private var numberingExpanded = false
+
+    private var societies: [DirectoryEntry] {
+        auth.visibleSocieties(for: auth.currentUser)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Configurer une société").font(.title2.bold())
+            Text("Choisissez une société pour revoir en une seule fois tous ses réglages personnalisables, plutôt que de les retrouver écran par écran.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if societies.isEmpty {
+                Text("Aucune société du périmètre. Créez-en une dans Réglages > Application > Sociétés du périmètre.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Picker("Société", selection: $selectedSocieteID) {
+                    Text("Choisir une société…").tag(UUID?.none)
+                    ForEach(societies) { s in
+                        HStack {
+                            Text(s.displayName)
+                            if s.isPrincipale { Text("— principale") }
+                        }.tag(UUID?.some(s.id))
+                    }
+                }
+                .frame(width: 340)
+            }
+
+            if let cid = selectedSocieteID {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        DisclosureGroup("Tables de valeurs (statuts, tags, conditions de paiement, couleurs…)", isExpanded: $tablesExpanded) {
+                            ValueTablesView(initialSocietyID: cid)
+                                .id(cid)
+                                .frame(minHeight: 480)
+                        }
+                        DisclosureGroup("Numérotation", isExpanded: $numberingExpanded) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                numberingSummaryRow(
+                                    title: "Factures",
+                                    format: store.numberingFormat(for: cid),
+                                    isOverridden: store.numberFormatOverrides[cid] != nil,
+                                    onCustomize: { store.numberFormatOverrides[cid] = store.numberingFormat(for: nil); store.save() },
+                                    onRevert: { store.numberFormatOverrides.removeValue(forKey: cid); store.save() }
+                                )
+                                numberingSummaryRow(
+                                    title: "Commandes",
+                                    format: orderStore.numberingFormat(for: cid),
+                                    isOverridden: orderStore.numberFormatOverrides[cid] != nil,
+                                    onCustomize: { orderStore.numberFormatOverrides[cid] = orderStore.numberingFormat(for: nil); orderStore.save() },
+                                    onRevert: { orderStore.numberFormatOverrides.removeValue(forKey: cid); orderStore.save() }
+                                )
+                                numberingSummaryRow(
+                                    title: "Devis",
+                                    format: quoteStore.numberingFormat(for: cid),
+                                    isOverridden: quoteStore.numberFormatOverrides[cid] != nil,
+                                    onCustomize: { quoteStore.numberFormatOverrides[cid] = quoteStore.numberingFormat(for: nil); quoteStore.save() },
+                                    onRevert: { quoteStore.numberFormatOverrides.removeValue(forKey: cid); quoteStore.save() }
+                                )
+                                Text("Détail complet (préfixe, année, numéro de début, séparateur) dans Réglages > Application.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            } else {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Text("Sélectionnez une société pour commencer.").foregroundStyle(.secondary)
+                    Spacer()
+                }
+                Spacer()
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func numberingSummaryRow(title: String, format: InvoiceNumberingFormat, isOverridden: Bool, onCustomize: @escaping () -> Void, onRevert: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title).frame(width: 90, alignment: .leading)
+            Text("\(format.prefix)\(format.includeYear ? "-AAAA" : "")-0001").monospaced().font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if isOverridden {
+                Button("Revenir au réglage hérité", role: .destructive, action: onRevert).buttonStyle(.link).font(.caption2)
+            } else {
+                Button("Personnaliser pour cette société", action: onCustomize).buttonStyle(.link).font(.caption2)
+            }
+        }
     }
 }
 
