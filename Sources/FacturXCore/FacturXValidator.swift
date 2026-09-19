@@ -12,6 +12,14 @@ public struct FacturXValidationResult {
         self.warnings = warnings
         self.businessRules = businessRules
     }
+
+    /// Nombre total d'erreurs bloquantes, `errors` et `businessRules` confondus — `isValid`
+    /// tient compte des deux (`errors.isEmpty && !hasRuleErrors`), donc tout message qui
+    /// annonce un décompte d'erreurs doit faire de même sous peine d'afficher "0 erreur(s)"
+    /// alors que la validation a bien échoué (le cas si seul `businessRules` en contient).
+    public var totalErrorCount: Int {
+        errors.count + businessRules.filter { $0.severity == .error }.count
+    }
 }
 
 public struct FacturXValidator {

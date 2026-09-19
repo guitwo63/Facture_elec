@@ -216,6 +216,25 @@ final class VATCategoryTests: XCTestCase {
         XCTAssertFalse(rules.contains { $0.ruleId == "BR-E-02" })
     }
 
+    // MARK: - FacturXValidator.totalErrorCount
+
+    /// Régression : le panneau "Validation locale échouée" affichait « 0 erreur(s) » — un
+    /// message contradictoire — quand la seule cause d'échec était une règle métier
+    /// (ex. BR-CO-09) sans qu'aucune des vérifications propres à FacturXValidator.errors ne
+    /// soit elle-même en défaut. `isValid` tenait déjà compte de `businessRules`, mais les
+    /// messages affichés ne comptaient que `errors.count` — `totalErrorCount` comble l'écart.
+    func testTotalErrorCountIncludesBusinessRuleErrorsNotJustPlainErrors() {
+        var seller = InvoiceParty(name: "Vendeur", street: "1 rue A", postcode: "75001", city: "Paris", country: "FR", siren: "123456789")
+        seller.vatNumber = "XX123456789" // préfixe pays invalide -> BR-CO-09, aucune autre erreur
+        let buyer = InvoiceParty(name: "Acheteur", street: "2 rue B", postcode: "75002", city: "Paris", country: "FR", siren: "987654321")
+        let inv = Invoice(number: "F-1", seller: seller, buyer: buyer,
+                          lines: [InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 20)])
+        let result = FacturXValidator().validate(invoice: inv)
+        XCTAssertFalse(result.isValid, "une erreur de règle métier doit invalider le résultat")
+        XCTAssertEqual(result.errors.count, 0, "aucune des vérifications directes de errors n'est en cause ici")
+        XCTAssertEqual(result.totalErrorCount, 1, "totalErrorCount doit refléter l'erreur BR-CO-09, pas afficher 0")
+    }
+
     // MARK: - CIIXMLGenerator / OrderCIOXMLGenerator
 
     func testXMLLineAndBreakdownUseTheLinesActualCategoryNotHardcodedS() throws {

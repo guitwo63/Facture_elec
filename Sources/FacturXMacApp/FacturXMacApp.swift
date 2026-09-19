@@ -3318,7 +3318,7 @@ struct InvoiceEditorView: View {
         if !preCheck.isValid {
             validation = preCheck
             showValidation = true
-            exportError = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de générer."
+            exportError = "Validation échouée : \(preCheck.totalErrorCount) erreur(s). Corrigez avant de générer."
             return
         }
         do {
@@ -3374,7 +3374,7 @@ struct InvoiceEditorView: View {
         if !preCheck.isValid {
             validation = preCheck
             showValidation = true
-            superPDPMessage = "Validation échouée : \(preCheck.errors.count) erreur(s). Corrigez avant de déposer."
+            superPDPMessage = "Validation échouée : \(preCheck.totalErrorCount) erreur(s). Corrigez avant de déposer."
             superPDPSubmitting = false
             return
         }
@@ -3613,7 +3613,7 @@ struct InvoiceEditorView: View {
         if !preCheck.isValid {
             validation = preCheck
             showValidation = true
-            superPDPMessage = "Validation locale échouée : \(preCheck.errors.count) erreur(s). Corrigez avant la validation SUPER PDP."
+            superPDPMessage = "Validation locale échouée : \(preCheck.totalErrorCount) erreur(s). Corrigez avant la validation SUPER PDP."
             pdpValidating = false
             return
         }
