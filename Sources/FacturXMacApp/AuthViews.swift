@@ -1294,19 +1294,27 @@ struct DataAdminView: View {
 
 struct DataInvoicesPanel: View {
     @EnvironmentObject var store: InvoiceStore
+    @EnvironmentObject var auth: AuthStore
     @State private var query = ""
+    @State private var societyFilter: UUID?
     @State private var editingID: UUID?
     @State private var remoteIDDraft = ""
     @State private var savedID: UUID?
 
+    /// Filtre société non restrictif (convenance) : réduit la liste sans jamais rien cacher
+    /// par défaut — un admin réparant un problème inter-sociétés garde la visibilité
+    /// complète tant qu'il ne choisit pas explicitement une société.
     private var filtered: [Invoice] {
+        var base = societyFilter.map { cid in store.invoices.filter { $0.companyID == cid } } ?? store.invoices
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return store.invoices.sorted { $0.number < $1.number } }
-        return store.invoices.filter {
-            $0.number.lowercased().contains(q)
-            || ($0.superPDPRemoteID ?? "").lowercased().contains(q)
-            || $0.status.label.lowercased().contains(q)
-        }.sorted { $0.number < $1.number }
+        if !q.isEmpty {
+            base = base.filter {
+                $0.number.lowercased().contains(q)
+                || ($0.superPDPRemoteID ?? "").lowercased().contains(q)
+                || $0.status.label.lowercased().contains(q)
+            }
+        }
+        return base.sorted { $0.number < $1.number }
     }
 
     var body: some View {
@@ -1314,6 +1322,15 @@ struct DataInvoicesPanel: View {
             HStack {
                 TextField("Rechercher (n°, statut, remote ID)", text: $query)
                     .textFieldStyle(.roundedBorder)
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                    Picker("Société", selection: $societyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                            Text(s.displayName).tag(UUID?.some(s.id))
+                        }
+                    }
+                    .labelsHidden().frame(width: 200)
+                }
                 Spacer()
                 Text("\(store.invoices.count) facture(s)").font(.caption).foregroundStyle(.secondary)
             }
@@ -1388,14 +1405,17 @@ struct DataInvoicesPanel: View {
 struct DataOrdersPanel: View {
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var statusStore: OrderStatusStore
+    @EnvironmentObject var auth: AuthStore
     @State private var query = ""
+    @State private var societyFilter: UUID?
 
     private var filtered: [SalesOrder] {
+        var base = societyFilter.map { cid in orderStore.orders.filter { $0.companyID == cid } } ?? orderStore.orders
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return orderStore.orders.sorted { $0.number < $1.number } }
-        return orderStore.orders.filter {
-            $0.number.lowercased().contains(q) || $0.status.label.lowercased().contains(q)
-        }.sorted { $0.number < $1.number }
+        if !q.isEmpty {
+            base = base.filter { $0.number.lowercased().contains(q) || $0.status.label.lowercased().contains(q) }
+        }
+        return base.sorted { $0.number < $1.number }
     }
 
     /// Commandes dont le customStatusID pointe vers un statut personnalisé qui
@@ -1411,6 +1431,15 @@ struct DataOrdersPanel: View {
             HStack {
                 TextField("Rechercher (n°, statut)", text: $query)
                     .textFieldStyle(.roundedBorder)
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                    Picker("Société", selection: $societyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                            Text(s.displayName).tag(UUID?.some(s.id))
+                        }
+                    }
+                    .labelsHidden().frame(width: 200)
+                }
                 Spacer()
                 Text("\(orderStore.orders.count) commande(s)").font(.caption).foregroundStyle(.secondary)
             }
@@ -1455,16 +1484,21 @@ struct DataOrdersPanel: View {
 
 struct DataPartiesPanel: View {
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var auth: AuthStore
     @State private var query = ""
+    @State private var societyFilter: UUID?
 
     private var filtered: [DirectoryEntry] {
+        var base = societyFilter.map { cid in directory.entries.filter { $0.companyID == cid } } ?? directory.entries
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return directory.entries.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending } }
-        return directory.entries.filter {
-            $0.displayName.lowercased().contains(q)
-                || ($0.party.siren ?? "").lowercased().contains(q)
-                || ($0.party.siret ?? "").lowercased().contains(q)
-        }.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        if !q.isEmpty {
+            base = base.filter {
+                $0.displayName.lowercased().contains(q)
+                    || ($0.party.siren ?? "").lowercased().contains(q)
+                    || ($0.party.siret ?? "").lowercased().contains(q)
+            }
+        }
+        return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
     var body: some View {
@@ -1472,6 +1506,15 @@ struct DataPartiesPanel: View {
             HStack {
                 TextField("Rechercher (nom, SIREN, SIRET)", text: $query)
                     .textFieldStyle(.roundedBorder)
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                    Picker("Société", selection: $societyFilter) {
+                        Text("Toutes les sociétés").tag(UUID?.none)
+                        ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                            Text(s.displayName).tag(UUID?.some(s.id))
+                        }
+                    }
+                    .labelsHidden().frame(width: 200)
+                }
                 Spacer()
                 Text("\(directory.entries.count) tiers").font(.caption).foregroundStyle(.secondary)
             }
@@ -1508,6 +1551,7 @@ struct DataPortabilityPanel: View {
     @EnvironmentObject var orderStore: OrderStore
     @EnvironmentObject var quoteStore: QuoteStore
     @EnvironmentObject var directory: PartyDirectory
+    @EnvironmentObject var purchaseInvoiceStore: PurchaseInvoiceStore
     @EnvironmentObject var invoiceStatusStore: InvoiceStatusStore
     @EnvironmentObject var orderStatusStore: OrderStatusStore
     @EnvironmentObject var tagStore: TagStore
@@ -1535,6 +1579,9 @@ struct DataPortabilityPanel: View {
                 moduleRow(title: "Devis", count: quoteStore.quotes.count,
                           onExport: { exportJSON(quoteStore.quotes, suggestedName: "devis.json") },
                           onImport: importQuotes)
+                moduleRow(title: "Achats", count: purchaseInvoiceStore.invoices.count,
+                          onExport: { exportJSON(purchaseInvoiceStore.invoices, suggestedName: "achats.json") },
+                          onImport: importPurchaseInvoices)
 
                 Divider()
 
@@ -1631,6 +1678,17 @@ struct DataPortabilityPanel: View {
             let imported = try DataPortability.importJSON(Quote.self, from: data)
             imported.forEach(quoteStore.upsert)
             message = "\(imported.count) devis importé(s)."
+        } catch {
+            message = "Échec de l'import : \(error.localizedDescription)"
+        }
+    }
+
+    private func importPurchaseInvoices() {
+        guard let data = pickJSONFile() else { return }
+        do {
+            let imported = try DataPortability.importJSON(PurchaseInvoice.self, from: data)
+            imported.forEach(purchaseInvoiceStore.upsert)
+            message = "\(imported.count) facture(s) d'achat importée(s)."
         } catch {
             message = "Échec de l'import : \(error.localizedDescription)"
         }

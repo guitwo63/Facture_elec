@@ -60,6 +60,16 @@ final class PCloudServiceTests: XCTestCase {
 
 final class BackupServiceTests: XCTestCase {
 
+    /// Les tests d'achat de cet incrément (3.1) passent par `BackupService.restore`, qui
+    /// appelle `PurchaseInvoiceStore.upsert` — lequel persiste sur le vrai `UserDefaults`
+    /// (comme les autres stores de ce fichier). Nettoyage explicite pour ne pas laisser de
+    /// facture d'achat résiduelle polluer `PurchaseInvoiceStoreTests`, qui s'exécute dans le
+    /// même processus de test.
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: "facturx.purchaseinvoices.v1")
+        super.tearDown()
+    }
+
     private func sampleInvoice() -> Invoice {
         Invoice(
             number: "FAC-BAK-1",
@@ -77,6 +87,17 @@ final class BackupServiceTests: XCTestCase {
         )
     }
 
+    private func samplePurchaseInvoice(companyID: UUID? = nil) -> PurchaseInvoice {
+        let invoice = Invoice(
+            number: "ACH-BAK-1",
+            seller: InvoiceParty(name: "Fournisseur", street: "1 rue A", postcode: "75001", city: "Paris"),
+            buyer: InvoiceParty(name: "Mon Entreprise", street: "2 rue B", postcode: "75002", city: "Paris"),
+            companyID: companyID,
+            lines: [InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 20)]
+        )
+        return PurchaseInvoice(invoice: invoice, status: .draft)
+    }
+
     func testCaptureReadsCurrentDataFromAllStores() {
         let invoiceStore = InvoiceStore()
         invoiceStore.invoices = [sampleInvoice()]
@@ -87,7 +108,7 @@ final class BackupServiceTests: XCTestCase {
         let quoteStore = QuoteStore()
         quoteStore.quotes = []
 
-        let bundle = BackupService.capture(invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
+        let bundle = BackupService.capture(invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: PurchaseInvoiceStore())
 
         XCTAssertEqual(bundle.invoices.count, 1)
         XCTAssertEqual(bundle.invoices.first?.number, "FAC-BAK-1")
@@ -100,11 +121,87 @@ final class BackupServiceTests: XCTestCase {
 
         let bundle = BackupService.capture(
             invoiceStore: InvoiceStore(), orderStore: OrderStore(),
-            quoteStore: quoteStore, directory: PartyDirectory()
+            quoteStore: quoteStore, directory: PartyDirectory(), purchaseInvoiceStore: PurchaseInvoiceStore()
         )
 
         XCTAssertEqual(bundle.quotes.count, 1, "les devis doivent faire partie de la sauvegarde, au même titre que factures/commandes/tiers")
         XCTAssertEqual(bundle.quotes.first?.number, "DEV-BAK-1")
+    }
+
+    // MARK: - Incrément 3.1 (Réglages par société) : filtre société + module Achats
+
+    func testCaptureIncludesPurchaseInvoices() {
+        let purchaseStore = PurchaseInvoiceStore()
+        purchaseStore.invoices = [samplePurchaseInvoice()]
+
+        let bundle = BackupService.capture(
+            invoiceStore: InvoiceStore(), orderStore: OrderStore(), quoteStore: QuoteStore(),
+            directory: PartyDirectory(), purchaseInvoiceStore: purchaseStore
+        )
+
+        XCTAssertEqual(bundle.purchaseInvoices.count, 1, "les factures d'achat doivent faire partie de la sauvegarde, au même titre que les autres modules")
+        XCTAssertEqual(bundle.purchaseInvoices.first?.invoice.number, "ACH-BAK-1")
+    }
+
+    func testRestoreUpsertsPurchaseInvoicesAdditively() {
+        let bundle = BackupBundle(invoices: [], orders: [], parties: [], purchaseInvoices: [samplePurchaseInvoice()])
+        let purchaseStore = PurchaseInvoiceStore()
+        purchaseStore.invoices = []
+
+        BackupService.restore(
+            bundle, invoiceStore: InvoiceStore(), orderStore: OrderStore(), quoteStore: QuoteStore(),
+            directory: PartyDirectory(), purchaseInvoiceStore: purchaseStore
+        )
+
+        XCTAssertEqual(purchaseStore.invoices.count, 1)
+        XCTAssertEqual(purchaseStore.invoices.first?.invoice.number, "ACH-BAK-1")
+    }
+
+    func testCaptureWithoutCompanyIDIsUnfilteredIdenticalToPreviousBehavior() {
+        let cidA = UUID(); let cidB = UUID()
+        let invoiceStore = InvoiceStore()
+        invoiceStore.invoices = [sampleInvoice(), sampleInvoice()]
+        invoiceStore.invoices[0].companyID = cidA
+        invoiceStore.invoices[1].companyID = cidB
+        let purchaseStore = PurchaseInvoiceStore()
+        purchaseStore.invoices = [samplePurchaseInvoice(companyID: cidA), samplePurchaseInvoice(companyID: cidB)]
+
+        let bundle = BackupService.capture(
+            invoiceStore: invoiceStore, orderStore: OrderStore(), quoteStore: QuoteStore(),
+            directory: PartyDirectory(), purchaseInvoiceStore: purchaseStore
+        )
+
+        XCTAssertEqual(bundle.invoices.count, 2, "sans companyID, capture reste non filtrée — comportement identique à avant l'incrément 3.1")
+        XCTAssertEqual(bundle.purchaseInvoices.count, 2)
+    }
+
+    func testCaptureWithCompanyIDFiltersAllFourModules() {
+        let cidA = UUID(); let cidB = UUID()
+        let invoiceStore = InvoiceStore()
+        invoiceStore.invoices = [sampleInvoice(), sampleInvoice()]
+        invoiceStore.invoices[0].companyID = cidA
+        invoiceStore.invoices[1].companyID = cidB
+        let quoteStore = QuoteStore()
+        quoteStore.quotes = [sampleQuote(), sampleQuote()]
+        quoteStore.quotes[0].companyID = cidA
+        quoteStore.quotes[1].companyID = cidB
+        let purchaseStore = PurchaseInvoiceStore()
+        purchaseStore.invoices = [samplePurchaseInvoice(companyID: cidA), samplePurchaseInvoice(companyID: cidB)]
+        let directory = PartyDirectory()
+        let partyA = DirectoryEntry(kinds: [.client], party: InvoiceParty(name: "Client A", street: "", postcode: "", city: ""), companyID: cidA)
+        let partyB = DirectoryEntry(kinds: [.client], party: InvoiceParty(name: "Client B", street: "", postcode: "", city: ""), companyID: cidB)
+        directory.entries = [partyA, partyB]
+
+        let bundle = BackupService.capture(
+            invoiceStore: invoiceStore, orderStore: OrderStore(), quoteStore: quoteStore,
+            directory: directory, purchaseInvoiceStore: purchaseStore, companyID: cidA
+        )
+
+        XCTAssertEqual(bundle.invoices.count, 1)
+        XCTAssertEqual(bundle.quotes.count, 1)
+        XCTAssertEqual(bundle.purchaseInvoices.count, 1)
+        XCTAssertEqual(bundle.parties.count, 1)
+        XCTAssertEqual(bundle.parties.first?.displayName, "Client A")
     }
 
     func testRestoreUpsertsQuotesAdditively() {
@@ -117,7 +214,7 @@ final class BackupServiceTests: XCTestCase {
 
         BackupService.restore(
             bundle, invoiceStore: InvoiceStore(), orderStore: OrderStore(),
-            quoteStore: quoteStore, directory: PartyDirectory()
+            quoteStore: quoteStore, directory: PartyDirectory(), purchaseInvoiceStore: PurchaseInvoiceStore()
         )
 
         XCTAssertEqual(quoteStore.quotes.count, 1)
@@ -137,7 +234,7 @@ final class BackupServiceTests: XCTestCase {
         let directory = PartyDirectory()
         let quoteStore = QuoteStore()
 
-        BackupService.restore(bundle, invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
+        BackupService.restore(bundle, invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: PurchaseInvoiceStore())
 
         XCTAssertEqual(invoiceStore.invoices.count, 2, "la restauration doit ajouter, pas remplacer, les données existantes")
         XCTAssertTrue(invoiceStore.invoices.contains { $0.number == "FAC-EXISTING" })
@@ -152,8 +249,8 @@ final class BackupServiceTests: XCTestCase {
         let directory = PartyDirectory()
         let quoteStore = QuoteStore()
 
-        BackupService.restore(bundle, invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
-        BackupService.restore(bundle, invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory)
+        BackupService.restore(bundle, invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: PurchaseInvoiceStore())
+        BackupService.restore(bundle, invoiceStore: invoiceStore, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: PurchaseInvoiceStore())
 
         XCTAssertEqual(invoiceStore.invoices.filter { $0.id == invoice.id }.count, 1, "un même id importé deux fois ne doit pas se dupliquer")
     }
@@ -193,7 +290,7 @@ final class BackupServiceTests: XCTestCase {
         let orderStore = OrderStore()
         orderStore.orders = []
 
-        BackupService.restore(bundle, invoiceStore: InvoiceStore(), orderStore: orderStore, quoteStore: QuoteStore(), directory: PartyDirectory())
+        BackupService.restore(bundle, invoiceStore: InvoiceStore(), orderStore: orderStore, quoteStore: QuoteStore(), directory: PartyDirectory(), purchaseInvoiceStore: PurchaseInvoiceStore())
 
         let restored = orderStore.orders.first(where: { $0.number == "CD-BAK-LEGACY" })
         XCTAssertEqual(restored?.seller.name, "Mon Entreprise SARL", "un bundle d'avant l'inversion doit être permuté pour que notre société soit seller")
@@ -210,7 +307,7 @@ final class BackupServiceTests: XCTestCase {
         let orderStore = OrderStore()
         orderStore.orders = []
 
-        BackupService.restore(bundle, invoiceStore: InvoiceStore(), orderStore: orderStore, quoteStore: QuoteStore(), directory: PartyDirectory())
+        BackupService.restore(bundle, invoiceStore: InvoiceStore(), orderStore: orderStore, quoteStore: QuoteStore(), directory: PartyDirectory(), purchaseInvoiceStore: PurchaseInvoiceStore())
 
         let restored = orderStore.orders.first(where: { $0.number == "CD-BAK-CURRENT" })
         XCTAssertEqual(restored?.seller.name, "Mon Entreprise SARL", "un bundle déjà au sens actuel ne doit pas être re-permuté")
