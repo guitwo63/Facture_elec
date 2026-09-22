@@ -1094,10 +1094,15 @@ public final class SuperPDPSettings: ObservableObject {
     public static let shared = SuperPDPSettings()
 
     @Published public var credentials: SuperPDPCredentials
+    /// Surcharge éparse par société (Réglages > Connexions) — voir `SocietyScopedCatalog`
+    /// et le patron déjà en place pour les tables de valeurs. Chaque société a en réalité
+    /// son propre compte SUPER PDP, d'où le chantier "Réglages par société".
+    @Published public var credentialsBySociety: [UUID: SuperPDPCredentials] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.superpdp.credentials.v1") }
+    private var credentialsBySocietyKey: String { env.key("facturx.superpdp.credentials.bysociety.v1") }
     private var clientSecretKeychainKey: String { env.key("facturx.superpdp.clientSecret.v1") }
     private var keychainCleanupDoneKey: String { env.key("facturx.superpdp.keychainCleanupDone.v1") }
 
@@ -1118,6 +1123,10 @@ public final class SuperPDPSettings: ObservableObject {
         }
         Self.migrateFromKeychainOnce(into: &decoded, clientSecretKeychainKey: env.key("facturx.superpdp.clientSecret.v1"), keychainCleanupDoneKey: env.key("facturx.superpdp.keychainCleanupDone.v1"), defaults: defaults)
         credentials = decoded
+        if let data = defaults.data(forKey: env.key("facturx.superpdp.credentials.bysociety.v1")),
+           let decodedBySociety = try? JSONDecoder().decode([UUID: SuperPDPCredentials].self, from: data) {
+            credentialsBySociety = decodedBySociety
+        }
     }
 
     /// Ne touche au Keychain qu'une seule fois, jamais plus ensuite — voir le commentaire
@@ -1136,5 +1145,31 @@ public final class SuperPDPSettings: ObservableObject {
         if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(credentialsBySociety) {
+            defaults.set(data, forKey: credentialsBySocietyKey)
+        }
+    }
+
+    /// Identifiants effectifs pour une société : les siens s'ils existent, sinon ceux de la
+    /// société principale, sinon le réglage global (`credentials`). `companyID == nil`
+    /// résout sur la société principale si une a été désignée (voir
+    /// `PartyDirectory.principaleSocieteID`), sinon le réglage global — jamais de
+    /// régression pour un appelant qui ne passe rien.
+    public func credentials(for companyID: UUID?) -> SuperPDPCredentials {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let override = credentialsBySociety[effectiveID] { return override }
+        return credentials
+    }
+
+    /// Commence (ou remplace) la personnalisation des identifiants pour cette société.
+    public func setOverride(_ creds: SuperPDPCredentials, companyID: UUID) {
+        credentialsBySociety[companyID] = creds
+        save()
+    }
+
+    /// Revient au réglage hérité (société principale, ou global) pour cette société.
+    public func removeOverride(companyID: UUID) {
+        credentialsBySociety.removeValue(forKey: companyID)
+        save()
     }
 }

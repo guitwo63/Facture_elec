@@ -2513,7 +2513,7 @@ struct InvoiceEditorView: View {
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Capsule().fill(Color.red))
                 }
-                if superPDPSettings.credentials.usePDP {
+                if superPDPSettings.credentials(for: invoice.companyID).usePDP {
                     Button {
                         // Rafraîchit le statut (auparavant un bouton "Statut PDP" séparé
                         // dans la barre d'action) et ouvre l'historique en un seul clic :
@@ -2533,7 +2533,7 @@ struct InvoiceEditorView: View {
                     .foregroundStyle(.secondary)
                     .disabled(superPDPSubmitting
                               || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                              || !superPDPSettings.credentials.isConfigured)
+                              || !superPDPSettings.credentials(for: invoice.companyID).isConfigured)
                     .help("Rafraîchir le statut et voir l'historique des événements SUPER PDP")
                 }
                 if isLocked {
@@ -2585,7 +2585,7 @@ struct InvoiceEditorView: View {
                         .buttonStyle(ToolbarActionButtonStyle(tint: .gray))
                         .help("Protéger la facture validée en lecture seule")
                     }
-                    if superPDPSettings.credentials.usePDP {
+                    if superPDPSettings.credentials(for: invoice.companyID).usePDP {
                             Button {
                                 validatePDP()
                             } label: {
@@ -2599,7 +2599,7 @@ struct InvoiceEditorView: View {
                                 }
                             }
                             .buttonStyle(ToolbarActionButtonStyle(tint: .blue))
-                            .disabled(pdpValidating || !superPDPSettings.credentials.isConfigured)
+                            .disabled(pdpValidating || !superPDPSettings.credentials(for: invoice.companyID).isConfigured)
                             .help("Valider le Factur-X sur SUPER PDP avant dépôt")
                     } else {
                         Button("Valider") { runValidation() }
@@ -2614,7 +2614,7 @@ struct InvoiceEditorView: View {
                             // (statut verrouillant) — ce qui bloquait ensuite le vrai bouton
                             // "Super PDP" (dépôt), y compris pour un administrateur. Le seul
                             // chemin valide vers ce statut est donc le dépôt réel.
-                            if s == .sent, superPDPSettings.credentials.usePDP,
+                            if s == .sent, superPDPSettings.credentials(for: invoice.companyID).usePDP,
                                (invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty {
                                 depositToSuperPDP()
                             } else {
@@ -2629,7 +2629,7 @@ struct InvoiceEditorView: View {
                     if invoice.type.isInternalCreditNote {
                         Button("Exporter PDF") { exportPlainPDF() }
                             .buttonStyle(ToolbarActionButtonStyle(tint: .blue, filled: true))
-                    } else if superPDPSettings.credentials.usePDP {
+                    } else if superPDPSettings.credentials(for: invoice.companyID).usePDP {
                         Button {
                             depositToSuperPDP()
                         } label: { Label("Super PDP", systemImage: "paperplane.fill") }
@@ -2640,7 +2640,7 @@ struct InvoiceEditorView: View {
                             // dès que le statut verrouille la facture, même pour un administrateur
                             // — empêchant justement de corriger une facture restée bloquée à tort
                             // au statut « Transmise au PDP » sans dépôt réel.
-                            .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials.isConfigured || !isAdmin)
+                            .disabled(fieldLocked || superPDPSubmitting || !superPDPSettings.credentials(for: invoice.companyID).isConfigured || !isAdmin)
                             .help(isAdmin
                                   ? "Déposer la facture Factur-X sur SUPER PDP (Plateforme Agréée)"
                                   : "Réservé aux administrateurs : dépôt réglementaire sur SUPER PDP (Plateforme Agréée)")
@@ -2662,14 +2662,14 @@ struct InvoiceEditorView: View {
                             store.upsert(copy)
                             duplicatedNumber = copy.number
                         } label: { Label("Dupliquer", systemImage: "plus.square.on.square") }
-                        if superPDPSettings.credentials.usePDP {
+                        if superPDPSettings.credentials(for: invoice.companyID).usePDP {
                             Divider()
                             Button {
                                 downloadPDPInvoice()
                             } label: { Label("Copie PDP", systemImage: "square.and.arrow.down") }
                                 .disabled(pdpDownloading
                                           || ((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                          || !superPDPSettings.credentials.isConfigured)
+                                          || !superPDPSettings.credentials(for: invoice.companyID).isConfigured)
                                 .help("Télécharger la copie de la facture déposée sur SUPER PDP")
                         }
                     } label: {
@@ -2755,7 +2755,7 @@ struct InvoiceEditorView: View {
 
                 if isAdmin {
                     let forceable = InvoiceStatus.allCases.filter { $0 != invoice.status && !configuredTransitions.contains($0) }
-                    if !forceable.isEmpty || superPDPSettings.credentials.usePDP {
+                    if !forceable.isEmpty || superPDPSettings.credentials(for: invoice.companyID).usePDP {
                         Divider().frame(height: 20)
                         HStack(spacing: 8) {
                             if !forceable.isEmpty {
@@ -2773,7 +2773,7 @@ struct InvoiceEditorView: View {
                                 .buttonStyle(ToolbarActionButtonStyle(tint: .red))
                                 .help("Administrateur : forcer un statut hors des transitions configurées")
                             }
-                            if superPDPSettings.credentials.usePDP {
+                            if superPDPSettings.credentials(for: invoice.companyID).usePDP {
                                 Button {
                                     notifyPDPStatusChange(to: invoice.status, force: true)
                                 } label: {
@@ -2781,7 +2781,7 @@ struct InvoiceEditorView: View {
                                 }
                                 .buttonStyle(ToolbarActionButtonStyle(tint: .red))
                                 .disabled(((invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty)
-                                          || !superPDPSettings.credentials.isConfigured)
+                                          || !superPDPSettings.credentials(for: invoice.companyID).isConfigured)
                                 .help("Forcer le renvoi du statut actuel à SUPER PDP (admin)")
                             }
                         }
@@ -3382,7 +3382,7 @@ struct InvoiceEditorView: View {
             do {
                 let facturx = try FacturXGenerator().generate(invoice: invoice, logo: sellerLogo)
                 let service = SuperPDPService()
-                let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
+                let submission = try await service.submitInvoice(fileData: facturx, credentials: superPDPSettings.credentials(for: invoice.companyID))
                 superPDPSubmission = SuperPDPInvoiceSubmission(
                     id: submission.id, remoteID: submission.remoteID, status: submission.status,
                     enInvoiceRef: submission.enInvoiceRef, submittedAt: submission.submittedAt,
@@ -3436,7 +3436,7 @@ struct InvoiceEditorView: View {
         Task {
             do {
                 let service = SuperPDPService()
-                let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: superPDPSettings.credentials)
+                let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: superPDPSettings.credentials(for: invoice.companyID))
                 superPDPSubmission = SuperPDPInvoiceSubmission(
                     id: updated.id, remoteID: updated.remoteID, status: updated.status,
                     enInvoiceRef: updated.enInvoiceRef, submittedAt: updated.submittedAt,
@@ -3489,7 +3489,7 @@ struct InvoiceEditorView: View {
             superPDPMessage = "Aucun identifiant distant : la facture n'a pas encore été déposée sur SUPER PDP."
             return
         }
-        guard superPDPSettings.credentials.isConfigured else {
+        guard superPDPSettings.credentials(for: invoice.companyID).isConfigured else {
             superPDPMessage = "Identifiants SUPER PDP non configurés."
             return
         }
@@ -3498,7 +3498,7 @@ struct InvoiceEditorView: View {
         Task {
             do {
                 let service = SuperPDPService()
-                let data = try await service.downloadInvoice(remoteID: rid, credentials: superPDPSettings.credentials)
+                let data = try await service.downloadInvoice(remoteID: rid, credentials: superPDPSettings.credentials(for: invoice.companyID))
                 let panel = NSSavePanel()
                 let isPDF = data.count > 4 && data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46
                 panel.allowedContentTypes = isPDF ? [.pdf] : [.xml]
@@ -3522,7 +3522,7 @@ struct InvoiceEditorView: View {
             superPDPMessage = "Aucun identifiant distant : la facture n'a pas encore été déposée sur SUPER PDP."
             return
         }
-        guard superPDPSettings.credentials.isConfigured else {
+        guard superPDPSettings.credentials(for: invoice.companyID).isConfigured else {
             superPDPMessage = "Identifiants SUPER PDP non configurés."
             return
         }
@@ -3531,7 +3531,7 @@ struct InvoiceEditorView: View {
         Task {
             do {
                 let service = SuperPDPService()
-                let events = try await service.listInvoiceEvents(remoteID: rid, credentials: superPDPSettings.credentials)
+                let events = try await service.listInvoiceEvents(remoteID: rid, credentials: superPDPSettings.credentials(for: invoice.companyID))
                 pdpEvents = events.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
             } catch let e as SuperPDPError {
                 superPDPMessage = "Échec historique : \(e.localizedDescription)"
@@ -3601,7 +3601,7 @@ struct InvoiceEditorView: View {
     }
 
     private func validatePDP() {
-        guard superPDPSettings.credentials.isConfigured else {
+        guard superPDPSettings.credentials(for: invoice.companyID).isConfigured else {
             superPDPMessage = "Identifiants SUPER PDP non configurés."
             return
         }
@@ -3621,7 +3621,7 @@ struct InvoiceEditorView: View {
             do {
                 let facturx = try FacturXGenerator().generate(invoice: invoice, logo: sellerLogo)
                 let service = SuperPDPService()
-                let report = try await service.validateInvoice(fileData: facturx, credentials: superPDPSettings.credentials)
+                let report = try await service.validateInvoice(fileData: facturx, credentials: superPDPSettings.credentials(for: invoice.companyID))
                 pdpValidationReport = report
                 showPDPValidationPanel = true
                 superPDPMessage = nil
@@ -3656,7 +3656,7 @@ struct InvoiceEditorView: View {
 
     private func notifyPDPStatusChange(to newStatus: InvoiceStatus, force: Bool = false) {
         guard let rid = (superPDPSubmission?.remoteID ?? invoice.superPDPRemoteID), !rid.isEmpty else { return }
-        guard superPDPSettings.credentials.isConfigured else { return }
+        guard superPDPSettings.credentials(for: invoice.companyID).isConfigured else { return }
         // "200" (sent) est posé par le dépôt lui-même (voir depositToSuperPDP) — jamais
         // envoyé séparément comme événement de statut.
         guard let statusCode = invoiceStatusStore.override(for: newStatus).reformCode, statusCode != "200" else { return }
@@ -3683,7 +3683,7 @@ struct InvoiceEditorView: View {
                         ]
                     }
                 }
-                try await service.sendInvoiceEvent(remoteID: rid, statusCode: statusCode, credentials: superPDPSettings.credentials, reportedData: reported)
+                try await service.sendInvoiceEvent(remoteID: rid, statusCode: statusCode, credentials: superPDPSettings.credentials(for: invoice.companyID), reportedData: reported)
                 lastSentPDPStatusCode = statusCode
                 superPDPSubmission = SuperPDPInvoiceSubmission(
                     id: UUID().uuidString, remoteID: rid, status: detailLabel,
@@ -6468,6 +6468,7 @@ struct ConnectionsSettingsView: View {
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var auth: AuthStore
+    @EnvironmentObject var directory: PartyDirectory
     @State private var dinumExpanded = false
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = true
@@ -6481,10 +6482,57 @@ struct ConnectionsSettingsView: View {
     @State private var pdpSessionChecking = false
     @State private var smtpTestMessage: String?
     @State private var smtpTesting = false
+    /// Société dont on édite/teste les identifiants — commune aux 4 services ci-dessous
+    /// (configurer une société touche typiquement ses 4 services d'affilée). `nil` = société
+    /// principale si une est désignée, sinon le réglage global par défaut — même principe que
+    /// `ValueTablesView.tableSocietyID`.
+    @State private var connectionsSocietyID: UUID?
+
+    private var noSelectionConnectionsLabel: String {
+        guard let principaleID = directory.principaleSocieteID,
+              let principale = directory.entries.first(where: { $0.id == principaleID }) else {
+            return "Toutes (réglage par défaut)"
+        }
+        return "Société principale : \(principale.displayName)"
+    }
+
+    /// Identifiants SUPER PDP en cours d'édition : ceux de la société sélectionnée (créés à
+    /// la volée à partir du réglage hérité si elle n'a pas encore de surcharge propre), ou
+    /// le réglage global si "Toutes" est sélectionné. Écrire dedans met à jour la bonne
+    /// cible chez `superPDPSettings` — même principe qu'`activeNumberingFormatBinding`.
+    private var activeSuperPDPCredentialsBinding: Binding<SuperPDPCredentials> {
+        Binding(
+            get: {
+                guard let cid = connectionsSocietyID else { return superPDPSettings.credentials }
+                return superPDPSettings.credentialsBySociety[cid] ?? superPDPSettings.credentials(for: cid)
+            },
+            set: { newValue in
+                if let cid = connectionsSocietyID {
+                    superPDPSettings.setOverride(newValue, companyID: cid)
+                } else {
+                    superPDPSettings.credentials = newValue
+                    superPDPSettings.save()
+                }
+            }
+        )
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Société").font(.caption).foregroundStyle(.secondary)
+                        Picker("Société", selection: $connectionsSocietyID) {
+                            Text(noSelectionConnectionsLabel).tag(UUID?.none)
+                            ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
+                                Text(s.displayName).tag(UUID?.some(s.id))
+                            }
+                        }
+                        .labelsHidden().frame(width: 260)
+                        InfoBadge(text: "Chaque société a ses propres identifiants pour chacun des 4 services ci-dessous — ce sélecteur pilote les quatre à la fois.")
+                    }
+                }
                 DisclosureGroup(isExpanded: $dinumExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("L'API recherche-entreprises.api.gouv.fr (DINUM) pré-remplit la désignation et l'adresse postale d'un tiers à partir d'un SIREN, SIRET ou nom. Gratuite, publique, sans compte ni jeton. Ne donne pas l'adresse de routage PPF.")
@@ -6582,35 +6630,47 @@ struct ConnectionsSettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("SUPER PDP est une Plateforme Agréée (PA) API-first pour envoyer et recevoir des factures électroniques conformes (Factur-X/UBL) et consulter l'annuaire des destinataires.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Toggle(isOn: $superPDPSettings.credentials.usePDP) {
+                        if let cid = connectionsSocietyID {
+                            if superPDPSettings.credentialsBySociety[cid] == nil {
+                                HStack(spacing: 6) {
+                                    Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                    Button("Personnaliser pour cette société") {
+                                        superPDPSettings.setOverride(superPDPSettings.credentials(for: cid), companyID: cid)
+                                    }.buttonStyle(.link).font(.caption2)
+                                }
+                            } else {
+                                Button("Revenir au réglage hérité", role: .destructive) {
+                                    superPDPSettings.removeOverride(companyID: cid)
+                                }.buttonStyle(.link).font(.caption2)
+                            }
+                        }
+                        Toggle(isOn: activeSuperPDPCredentialsBinding.usePDP) {
                             Text("Utiliser PDP").font(.body.weight(.semibold))
                         }
                         .toggleStyle(.switch)
-                        .onChange(of: superPDPSettings.credentials.usePDP) { _ in superPDPSettings.save() }
                         .help("Active les fonctions de dépôt et validation des factures via SUPER PDP. Si désactivé, seul le bouton « Valider » reste disponible sur la facture.")
-                        if superPDPSettings.credentials.usePDP {
+                        if activeSuperPDPCredentialsBinding.wrappedValue.usePDP {
                         HStack {
                             Text("Client ID").frame(width: 100, alignment: .leading)
-                            TextField("Client ID", text: $superPDPSettings.credentials.clientID)
+                            TextField("Client ID", text: activeSuperPDPCredentialsBinding.clientID)
                         }
                         HStack {
                             Text("Client Secret").frame(width: 100, alignment: .leading)
-                            SecureField("Client Secret", text: $superPDPSettings.credentials.clientSecret)
+                            SecureField("Client Secret", text: activeSuperPDPCredentialsBinding.clientSecret)
                         }
                         HStack {
                             Text("Base API").frame(width: 100, alignment: .leading)
-                            TextField("https://api.superpdp.tech", text: $superPDPSettings.credentials.apiBaseURL)
+                            TextField("https://api.superpdp.tech", text: activeSuperPDPCredentialsBinding.apiBaseURL)
                         }
                         HStack {
                             Text("Synchronisation").frame(width: 100, alignment: .leading)
                             Stepper(
-                                value: $superPDPSettings.credentials.syncIntervalMinutes,
+                                value: activeSuperPDPCredentialsBinding.syncIntervalMinutes,
                                 in: SuperPDPCredentials.minSyncIntervalMinutes...120,
                                 step: 5
                             ) {
-                                Text("Toutes les \(superPDPSettings.credentials.syncIntervalMinutes) min")
+                                Text("Toutes les \(activeSuperPDPCredentialsBinding.wrappedValue.syncIntervalMinutes) min")
                             }
-                            .onChange(of: superPDPSettings.credentials.syncIntervalMinutes) { _ in superPDPSettings.save() }
                             .help("Cadence du cycle en arrière-plan qui interroge SUPER PDP pour les factures déposées et applique tout avancement de statut reçu.")
                         }
                         HStack {
@@ -6625,16 +6685,21 @@ struct ConnectionsSettingsView: View {
                         }
                         HStack {
                             Button {
-                                superPDPSettings.save()
+                                if let cid = connectionsSocietyID {
+                                    superPDPSettings.setOverride(activeSuperPDPCredentialsBinding.wrappedValue, companyID: cid)
+                                } else {
+                                    superPDPSettings.save()
+                                }
                             } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
                                 .buttonStyle(.borderedProminent)
                             Button {
                                 superPDPTesting = true
                                 superPDPTestMessage = nil
+                                let creds = superPDPSettings.credentials(for: connectionsSocietyID)
                                 Task {
                                     do {
                                         let service = SuperPDPService()
-                                        let company = try await service.getCompany(credentials: superPDPSettings.credentials)
+                                        let company = try await service.getCompany(credentials: creds)
                                         superPDPTestMessage = "Connexion réussie — \(company.formalName ?? "société") (env : \(company.env ?? "?"))"
                                     } catch {
                                         superPDPTestMessage = "Échec : \(error.localizedDescription)"
@@ -6643,14 +6708,15 @@ struct ConnectionsSettingsView: View {
                                 }
                             } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
                                 .buttonStyle(.bordered)
-                                .disabled(superPDPTesting || !superPDPSettings.credentials.isConfigured)
+                                .disabled(superPDPTesting || !superPDPSettings.credentials(for: connectionsSocietyID).isConfigured)
                             Button {
                                 pdpSessionChecking = true
                                 pdpSessionMessage = nil
+                                let creds = superPDPSettings.credentials(for: connectionsSocietyID)
                                 Task {
                                     do {
                                         let service = SuperPDPService()
-                                        let session = try await service.getSession(credentials: superPDPSettings.credentials)
+                                        let session = try await service.getSession(credentials: creds)
                                         if session.isAuthorized {
                                             pdpSessionMessage = "Session autorisée — statut : \(session.status)\(session.companyNumber.map { " (société \($0))" } ?? "")."
                                         } else {
@@ -6669,7 +6735,7 @@ struct ConnectionsSettingsView: View {
                                 }
                             }
                             .buttonStyle(.bordered)
-                            .disabled(pdpSessionChecking || !superPDPSettings.credentials.isConfigured)
+                            .disabled(pdpSessionChecking || !superPDPSettings.credentials(for: connectionsSocietyID).isConfigured)
                             .help("Vérifier l'autorisation de la session OAuth (diagnostic des erreurs 403)")
                             Spacer()
                         }
