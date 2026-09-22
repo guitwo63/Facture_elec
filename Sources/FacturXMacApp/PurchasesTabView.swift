@@ -414,16 +414,17 @@ struct PurchaseInvoiceEditorView: View {
     /// réforme (transitions acheteur) ou une facture jamais déposée par le fournisseur sur
     /// PDP (saisie manuelle sans `superPDPRemoteID` : rien à notifier, personne à qui l'envoyer).
     private func notifyPDPStatusChange(to newStatus: PurchaseInvoiceStatus) {
+        let creds = superPDPSettings.credentials(for: record.invoice.companyID)
         guard let code = purchaseInvoiceStatusStore.pdpFeedback(for: newStatus),
               let remoteID = record.invoice.superPDPRemoteID, !remoteID.isEmpty,
-              superPDPSettings.credentials.usePDP else { return }
+              creds.usePDP else { return }
         sendingPDPFeedback = true
         pdpFeedbackMessage = nil
         let detailLabel = newStatus.label
         let invoiceNumber = record.invoice.number
         Task {
             do {
-                try await SuperPDPService().sendInvoiceEvent(remoteID: remoteID, statusCode: code, credentials: superPDPSettings.credentials)
+                try await SuperPDPService().sendInvoiceEvent(remoteID: remoteID, statusCode: code, credentials: creds)
                 pdpFeedbackMessage = "↑ Envoyé à SUPER PDP : statut \(detailLabel) — id distant \(remoteID)."
                 store.audit?.record(actor: store.actorName, action: "purchase_pdp_status_sent", target: invoiceNumber,
                                      details: "Statut \(detailLabel) envoyé au fournisseur — id distant \(remoteID)",
