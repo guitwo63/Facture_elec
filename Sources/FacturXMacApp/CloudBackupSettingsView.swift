@@ -21,34 +21,49 @@ struct CloudBackupSettingsView: View {
     @State private var restoring = false
     @State private var restoreMessage: String?
     @State private var listingBackups = false
-    /// Filtre la sauvegarde manuelle sur une seule société — `nil` = toutes (comportement
-    /// historique, inchangé). La sauvegarde automatique au lancement reste toujours non
+    /// Société dont on édite le compte pCloud ET dont on filtre la sauvegarde manuelle —
+    /// une seule sélection pour les deux, cohérent avec "sauvegarder la société A" voulant
+    /// naturellement dire "avec son propre compte pCloud si elle en a un, et seulement ses
+    /// documents". `nil` = réglage par défaut (comportement historique, inchangé). La
+    /// sauvegarde automatique au lancement reste toujours sur le réglage par défaut, non
     /// filtrée (voir `RootView.runAutoBackupIfNeeded()`), décision actée dans le plan.
     @State private var backupSocietyID: UUID?
+
+    /// Pré-sélectionne la société — voir `ValueTablesView.init(initialSocietyID:)`, même
+    /// principe ; utilisé par `ConnectionsSettingsView` pour partager sa société sélectionnée
+    /// avec cette vue embarquée.
+    init(initialSocietyID: UUID? = nil) {
+        _backupSocietyID = State(initialValue: initialSocietyID)
+    }
+
+    /// Identifiants pCloud en cours d'édition — même principe qu'`activeSuperPDPCredentialsBinding`.
+    private var activePCloudCredentialsBinding: Binding<PCloudCredentials> {
+        Binding(
+            get: {
+                guard let cid = backupSocietyID else { return pcloudSettings.credentials }
+                return pcloudSettings.credentialsBySociety[cid] ?? pcloudSettings.credentials(for: cid)
+            },
+            set: { newValue in
+                if let cid = backupSocietyID {
+                    pcloudSettings.setOverride(newValue, companyID: cid)
+                } else {
+                    pcloudSettings.credentials = newValue
+                    pcloudSettings.save()
+                }
+            }
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Sauvegarde les factures, commandes, devis, factures d'achat et l'annuaire vers votre compte pCloud, dans un fichier JSON horodaté. La restauration ajoute/met à jour les données à partir d'une sauvegarde — elle n'efface jamais rien.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            TextField("Email pCloud", text: $pcloudSettings.credentials.username)
-                .textFieldStyle(.roundedBorder).frame(width: 280)
-                .disableAutocorrection(true)
-            SecureField("Mot de passe pCloud", text: $pcloudSettings.credentials.password)
-                .textFieldStyle(.roundedBorder).frame(width: 280)
-            Picker("Région du compte", selection: $pcloudSettings.credentials.region) {
-                ForEach(PCloudRegion.allCases, id: \.self) { r in Text(r.label).tag(r) }
-            }
-            .frame(width: 380)
-            .help("Le compte pCloud est hébergé aux États-Unis ou en Europe selon l'inscription initiale — une mauvaise région empêche toute connexion.")
-            TextField("Dossier de sauvegarde", text: $pcloudSettings.credentials.backupFolderPath)
-                .textFieldStyle(.roundedBorder).frame(width: 280)
-
             if !auth.visibleSocieties(for: auth.currentUser).isEmpty {
                 HStack(spacing: 6) {
-                    Text("Sauvegarder").font(.caption).foregroundStyle(.secondary)
+                    Text("Société").font(.caption).foregroundStyle(.secondary)
                     Picker("Société", selection: $backupSocietyID) {
-                        Text("Toutes les sociétés").tag(UUID?.none)
+                        Text("Toutes (réglage par défaut)").tag(UUID?.none)
                         ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
                             Text(s.displayName).tag(UUID?.some(s.id))
                         }
@@ -56,10 +71,46 @@ struct CloudBackupSettingsView: View {
                     .labelsHidden()
                     .frame(width: 220)
                 }
-                .help("Limite la sauvegarde manuelle aux documents de la société choisie. La sauvegarde automatique au lancement reste toujours complète.")
+                .help("Détermine à la fois le compte pCloud utilisé ci-dessous et, pour « Sauvegarder maintenant », le filtre sur les documents de cette société. La sauvegarde automatique au lancement reste toujours sur le réglage par défaut, non filtrée.")
+                if let cid = backupSocietyID {
+                    if pcloudSettings.credentialsBySociety[cid] == nil {
+                        HStack(spacing: 6) {
+                            Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                            Button("Personnaliser pour cette société") {
+                                pcloudSettings.setOverride(pcloudSettings.credentials(for: cid), companyID: cid)
+                            }.buttonStyle(.link).font(.caption2)
+                        }
+                    } else {
+                        Button("Revenir au réglage hérité", role: .destructive) {
+                            pcloudSettings.removeOverride(companyID: cid)
+                        }.buttonStyle(.link).font(.caption2)
+                    }
+                }
             }
 
+            TextField("Email pCloud", text: activePCloudCredentialsBinding.username)
+                .textFieldStyle(.roundedBorder).frame(width: 280)
+                .disableAutocorrection(true)
+            SecureField("Mot de passe pCloud", text: activePCloudCredentialsBinding.password)
+                .textFieldStyle(.roundedBorder).frame(width: 280)
+            Picker("Région du compte", selection: activePCloudCredentialsBinding.region) {
+                ForEach(PCloudRegion.allCases, id: \.self) { r in Text(r.label).tag(r) }
+            }
+            .frame(width: 380)
+            .help("Le compte pCloud est hébergé aux États-Unis ou en Europe selon l'inscription initiale — une mauvaise région empêche toute connexion.")
+            TextField("Dossier de sauvegarde", text: activePCloudCredentialsBinding.backupFolderPath)
+                .textFieldStyle(.roundedBorder).frame(width: 280)
+
             HStack {
+                Button {
+                    if let cid = backupSocietyID {
+                        pcloudSettings.setOverride(activePCloudCredentialsBinding.wrappedValue, companyID: cid)
+                    } else {
+                        pcloudSettings.save()
+                    }
+                } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
+                    .buttonStyle(.borderedProminent)
+
                 Button {
                     testConnection()
                 } label: {
@@ -70,7 +121,7 @@ struct CloudBackupSettingsView: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                .disabled(testing || !pcloudSettings.credentials.isConfigured)
+                .disabled(testing || !pcloudSettings.credentials(for: backupSocietyID).isConfigured)
 
                 Button {
                     backupNow()
@@ -82,13 +133,13 @@ struct CloudBackupSettingsView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(backingUp || !pcloudSettings.credentials.isConfigured)
+                .disabled(backingUp || !pcloudSettings.credentials(for: backupSocietyID).isConfigured)
 
                 Button {
                     openRestoreSheet()
                 } label: { Label("Restaurer…", systemImage: "icloud.and.arrow.down") }
                     .buttonStyle(.bordered)
-                    .disabled(!pcloudSettings.credentials.isConfigured)
+                    .disabled(!pcloudSettings.credentials(for: backupSocietyID).isConfigured)
             }
 
             if let m = testMessage {
@@ -123,7 +174,6 @@ struct CloudBackupSettingsView: View {
                 }
             }
         }
-        .onChange(of: pcloudSettings.credentials) { _ in pcloudSettings.save() }
         .onChange(of: backupStrategyStore.settings) { _ in backupStrategyStore.save() }
         .sheet(isPresented: $showRestoreSheet) {
             RestoreBackupSheet(
@@ -140,7 +190,7 @@ struct CloudBackupSettingsView: View {
     private func testConnection() {
         testing = true
         testMessage = nil
-        let credentials = pcloudSettings.credentials
+        let credentials = pcloudSettings.credentials(for: backupSocietyID)
         Task {
             do {
                 _ = try await PCloudService().login(credentials: credentials)
@@ -155,7 +205,7 @@ struct CloudBackupSettingsView: View {
     private func backupNow() {
         backingUp = true
         backupMessage = nil
-        let credentials = pcloudSettings.credentials
+        let credentials = pcloudSettings.credentials(for: backupSocietyID)
         let strategy = backupStrategyStore.settings
         let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: purchaseInvoiceStore, companyID: backupSocietyID)
         Task {
@@ -183,7 +233,7 @@ struct CloudBackupSettingsView: View {
         listingBackups = true
         restoreMessage = nil
         restoreCandidates = []
-        let credentials = pcloudSettings.credentials
+        let credentials = pcloudSettings.credentials(for: backupSocietyID)
         Task {
             do {
                 let service = PCloudService()
@@ -202,7 +252,7 @@ struct CloudBackupSettingsView: View {
     private func restoreBackup(_ file: PCloudBackupFile) {
         restoring = true
         restoreMessage = nil
-        let credentials = pcloudSettings.credentials
+        let credentials = pcloudSettings.credentials(for: backupSocietyID)
         Task {
             do {
                 let service = PCloudService()

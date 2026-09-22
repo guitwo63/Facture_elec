@@ -6925,7 +6925,8 @@ struct ConnectionsSettingsView: View {
                 }
 
                 DisclosureGroup(isExpanded: $pcloudExpanded) {
-                    CloudBackupSettingsView()
+                    CloudBackupSettingsView(initialSocietyID: connectionsSocietyID)
+                        .id(connectionsSocietyID)
                         .padding(8)
                 } label: {
                     Label("Sauvegarde cloud (pCloud)", systemImage: "icloud.and.arrow.up")
