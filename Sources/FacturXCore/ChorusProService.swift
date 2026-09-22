@@ -304,10 +304,14 @@ public final class ChorusProSettings: ObservableObject {
     public static let shared = ChorusProSettings()
 
     @Published public var credentials: ChorusProCredentials
+    /// Surcharge éparse par société (Réglages > Connexions) — voir `SuperPDPSettings.
+    /// credentialsBySociety`, même patron.
+    @Published public var credentialsBySociety: [UUID: ChorusProCredentials] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.choruspro.credentials.v1") }
+    private var credentialsBySocietyKey: String { env.key("facturx.choruspro.credentials.bysociety.v1") }
     private var clientSecretKeychainKey: String { env.key("facturx.choruspro.clientSecret.v1") }
     private var techPasswordKeychainKey: String { env.key("facturx.choruspro.techPassword.v1") }
     private var keychainCleanupDoneKey: String { env.key("facturx.choruspro.keychainCleanupDone.v1") }
@@ -331,6 +335,10 @@ public final class ChorusProSettings: ObservableObject {
             defaults: defaults
         )
         credentials = decoded
+        if let data = defaults.data(forKey: env.key("facturx.choruspro.credentials.bysociety.v1")),
+           let decodedBySociety = try? JSONDecoder().decode([UUID: ChorusProCredentials].self, from: data) {
+            credentialsBySociety = decodedBySociety
+        }
     }
 
     /// Ne touche au Keychain qu'une seule fois, jamais plus ensuite — voir le commentaire
@@ -353,5 +361,26 @@ public final class ChorusProSettings: ObservableObject {
         if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(credentialsBySociety) {
+            defaults.set(data, forKey: credentialsBySocietyKey)
+        }
+    }
+
+    /// Identifiants effectifs pour une société — voir `SuperPDPSettings.credentials(for:)`,
+    /// même patron.
+    public func credentials(for companyID: UUID?) -> ChorusProCredentials {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let override = credentialsBySociety[effectiveID] { return override }
+        return credentials
+    }
+
+    public func setOverride(_ creds: ChorusProCredentials, companyID: UUID) {
+        credentialsBySociety[companyID] = creds
+        save()
+    }
+
+    public func removeOverride(companyID: UUID) {
+        credentialsBySociety.removeValue(forKey: companyID)
+        save()
     }
 }
