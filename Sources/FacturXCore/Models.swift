@@ -415,6 +415,12 @@ public enum InvoiceTypeCode: String, Codable, CaseIterable {
     public var requiresPrecedingInvoice: Bool {
         self == .creditNote || self == .correction || self == .finalSettlement
     }
+
+    /// Une facture d'acompte ou de solde ne doit être créée qu'à partir d'une facture
+    /// commerciale ou rectificative — jamais depuis un avoir, un acompte ou un solde existant.
+    public var allowsDepositCreation: Bool {
+        self == .commercialInvoice || self == .correction
+    }
 }
 
 /// Cycle de vie **fonctionnel** d'une facture — volontairement réduit et stable, distinct
@@ -730,6 +736,11 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var internalComment: String?
     /// Date du dernier envoi par email au client — pour avertir avant un renvoi accidentel.
     public var lastEmailSentAt: Date?
+    /// Purement interne (aide de saisie) : numéro de la facture de solde dans laquelle cet
+    /// acompte a déjà été repris, le cas échéant. N'est jamais émis dans le XML EN16931/
+    /// Factur-X ni imprimé sur le PDF — sert uniquement à avertir (sans bloquer) si le même
+    /// acompte est repris dans plusieurs soldes.
+    public var linkedSettlementRef: String?
 
     public init(
         id: UUID = UUID(),
@@ -762,7 +773,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         optionalFields: [OptionalField] = [],
         attachments: [Attachment] = [],
         internalComment: String? = nil,
-        lastEmailSentAt: Date? = nil
+        lastEmailSentAt: Date? = nil,
+        linkedSettlementRef: String? = nil
     ) {
         self.id = id
         self.number = number
@@ -794,6 +806,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.attachments = attachments
         self.internalComment = internalComment
         self.lastEmailSentAt = lastEmailSentAt
+        self.linkedSettlementRef = linkedSettlementRef
         self.buyerReference = buyerReference
     }
 
@@ -841,7 +854,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         case id, number, type, status, issueDate, createdAt, dueDate, currency, profile, seller, buyer, companyID
         case purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
-        case attachments, internalComment, lastEmailSentAt
+        case attachments, internalComment, lastEmailSentAt, linkedSettlementRef
     }
 
     private enum LegacyReferenceKeys: String, CodingKey {
@@ -882,6 +895,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
         internalComment = try c.decodeIfPresent(String.self, forKey: .internalComment)
         lastEmailSentAt = try c.decodeIfPresent(Date.self, forKey: .lastEmailSentAt)
+        linkedSettlementRef = try c.decodeIfPresent(String.self, forKey: .linkedSettlementRef)
         migrateReference("ram:BuyerReference", legacyBuyerReference)
         migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
         migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))
