@@ -2710,12 +2710,12 @@ struct InvoiceEditorView: View {
                     .disabled(sendingInvoiceEmail
                               || !emailTemplateStore.isSendEnabled(.invoiceSent, companyID: invoice.companyID)
                               || (invoice.buyer.contactEmail ?? "").isEmpty
-                              || !smtpSettings.credentials.isConfigured)
+                              || !smtpSettings.credentials(for: invoice.companyID).isConfigured)
                     .help(!emailTemplateStore.template(for: .invoiceSent, companyID: invoice.companyID).enabled
                           ? "Cet email est désactivé (Réglages > Application)"
                           : (invoice.buyer.contactEmail ?? "").isEmpty
                           ? "Aucune adresse email cliente renseignée"
-                          : !smtpSettings.credentials.isConfigured
+                          : !smtpSettings.credentials(for: invoice.companyID).isConfigured
                           ? "Configurez l'envoi d'email (Réglages) pour envoyer la facture"
                           : "Envoyer la facture par email au client")
                     .confirmationDialog(
@@ -2753,12 +2753,12 @@ struct InvoiceEditorView: View {
                             .disabled(sendingReminder
                                       || !emailTemplateStore.isSendEnabled(.invoiceReminder, companyID: invoice.companyID)
                                       || (invoice.buyer.contactEmail ?? "").isEmpty
-                                      || !smtpSettings.credentials.isConfigured)
+                                      || !smtpSettings.credentials(for: invoice.companyID).isConfigured)
                             .help(!emailTemplateStore.template(for: .invoiceReminder, companyID: invoice.companyID).enabled
                                   ? "Les relances sont désactivées (Réglages > Application)"
                                   : (invoice.buyer.contactEmail ?? "").isEmpty
                                   ? "Aucune adresse email cliente renseignée"
-                                  : !smtpSettings.credentials.isConfigured
+                                  : !smtpSettings.credentials(for: invoice.companyID).isConfigured
                                   ? "Configurez l'envoi d'email (Réglages) pour envoyer une relance"
                                   : "Envoyer un email de relance au client")
                         }
@@ -3561,7 +3561,7 @@ struct InvoiceEditorView: View {
             reminderMessage = "Échec relance : aucune adresse email cliente renseignée."
             return
         }
-        let credentials = smtpSettings.credentials
+        let credentials = smtpSettings.credentials(for: invoice.companyID)
         guard credentials.isConfigured else {
             reminderMessage = "Échec relance : envoi d'email non configuré (Réglages)."
             return
@@ -3585,7 +3585,7 @@ struct InvoiceEditorView: View {
             invoiceEmailMessage = "Échec envoi : aucune adresse email cliente renseignée."
             return
         }
-        let credentials = smtpSettings.credentials
+        let credentials = smtpSettings.credentials(for: invoice.companyID)
         guard credentials.isConfigured else {
             invoiceEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
             return
@@ -3650,7 +3650,7 @@ struct InvoiceEditorView: View {
     /// changement vient d'une synchronisation SUPER PDP en arrière-plan plutôt
     /// que d'un clic explicite) — n'échoue jamais la mise à jour du statut.
     private func sendInvoiceStatusAlertIfNeeded(_ newStatus: InvoiceStatus) {
-        let smtp = smtpSettings.credentials
+        let smtp = smtpSettings.credentials(for: invoice.companyID)
         guard smtp.alertsEnabled, smtp.alertOnInvoiceStatusChange, smtp.isConfigured,
               [InvoiceStatus.accepted, .disputed, .refused, .partiallyPaid, .paid, .cancelled].contains(newStatus),
               let recipient = auth.currentUser?.username else { return }
@@ -6547,6 +6547,24 @@ struct ConnectionsSettingsView: View {
         )
     }
 
+    /// Identifiants SMTP en cours d'édition — même principe qu'`activeSuperPDPCredentialsBinding`.
+    private var activeSMTPCredentialsBinding: Binding<SMTPCredentials> {
+        Binding(
+            get: {
+                guard let cid = connectionsSocietyID else { return smtpSettings.credentials }
+                return smtpSettings.credentialsBySociety[cid] ?? smtpSettings.credentials(for: cid)
+            },
+            set: { newValue in
+                if let cid = connectionsSocietyID {
+                    smtpSettings.setOverride(newValue, companyID: cid)
+                } else {
+                    smtpSettings.credentials = newValue
+                    smtpSettings.save()
+                }
+            }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -6810,56 +6828,74 @@ struct ConnectionsSettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Envoie des alertes par email (nouvel utilisateur, changement de statut de facture) via votre propre serveur SMTP. Seul le TLS implicite (port 465) est supporté ; STARTTLS (587) ne l'est pas.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Toggle(isOn: $smtpSettings.credentials.alertsEnabled) {
+                        if let cid = connectionsSocietyID {
+                            if smtpSettings.credentialsBySociety[cid] == nil {
+                                HStack(spacing: 6) {
+                                    Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                    Button("Personnaliser pour cette société") {
+                                        smtpSettings.setOverride(smtpSettings.credentials(for: cid), companyID: cid)
+                                    }.buttonStyle(.link).font(.caption2)
+                                }
+                            } else {
+                                Button("Revenir au réglage hérité", role: .destructive) {
+                                    smtpSettings.removeOverride(companyID: cid)
+                                }.buttonStyle(.link).font(.caption2)
+                            }
+                        }
+                        Toggle(isOn: activeSMTPCredentialsBinding.alertsEnabled) {
                             Text("Activer les alertes email").font(.body.weight(.semibold))
                         }
                         .toggleStyle(.switch)
-                        .onChange(of: smtpSettings.credentials.alertsEnabled) { _ in smtpSettings.save() }
-                        if smtpSettings.credentials.alertsEnabled {
+                        if activeSMTPCredentialsBinding.wrappedValue.alertsEnabled {
                             HStack {
                                 Text("Serveur").frame(width: 100, alignment: .leading)
-                                TextField("smtp.exemple.fr", text: $smtpSettings.credentials.host)
+                                TextField("smtp.exemple.fr", text: activeSMTPCredentialsBinding.host)
                                 Text("Port").foregroundStyle(.secondary)
-                                TextField("465", value: $smtpSettings.credentials.port, format: .number)
+                                TextField("465", value: activeSMTPCredentialsBinding.port, format: .number)
                                     .frame(width: 70)
                             }
-                            Toggle("TLS implicite (recommandé, port 465)", isOn: $smtpSettings.credentials.useTLS)
+                            Toggle("TLS implicite (recommandé, port 465)", isOn: activeSMTPCredentialsBinding.useTLS)
                                 .toggleStyle(.switch)
                             HStack {
                                 Text("Utilisateur").frame(width: 100, alignment: .leading)
-                                TextField("Identifiant SMTP", text: $smtpSettings.credentials.username)
+                                TextField("Identifiant SMTP", text: activeSMTPCredentialsBinding.username)
                             }
                             HStack {
                                 Text("Mot de passe").frame(width: 100, alignment: .leading)
-                                SecureField("Mot de passe SMTP", text: $smtpSettings.credentials.password)
+                                SecureField("Mot de passe SMTP", text: activeSMTPCredentialsBinding.password)
                             }
                             HStack {
                                 Text("Expéditeur").frame(width: 100, alignment: .leading)
-                                TextField("alertes@votre-domaine.fr", text: $smtpSettings.credentials.fromAddress)
-                                TextField("Nom affiché", text: $smtpSettings.credentials.fromName).frame(width: 160)
+                                TextField("alertes@votre-domaine.fr", text: activeSMTPCredentialsBinding.fromAddress)
+                                TextField("Nom affiché", text: activeSMTPCredentialsBinding.fromName).frame(width: 160)
                             }
                             Divider()
                             Text("Déclencheurs").font(.caption.bold())
-                            Toggle("Nouvel utilisateur créé", isOn: $smtpSettings.credentials.alertOnNewUser)
+                            Toggle("Nouvel utilisateur créé", isOn: activeSMTPCredentialsBinding.alertOnNewUser)
                                 .toggleStyle(.switch)
-                            Toggle("Changement de statut de facture (Acceptée/Rejetée/Payée/Annulée)", isOn: $smtpSettings.credentials.alertOnInvoiceStatusChange)
+                            Toggle("Changement de statut de facture (Acceptée/Rejetée/Payée/Annulée)", isOn: activeSMTPCredentialsBinding.alertOnInvoiceStatusChange)
                                 .toggleStyle(.switch)
                             HStack {
                                 Button {
-                                    smtpSettings.save()
+                                    if let cid = connectionsSocietyID {
+                                        smtpSettings.setOverride(activeSMTPCredentialsBinding.wrappedValue, companyID: cid)
+                                    } else {
+                                        smtpSettings.save()
+                                    }
                                 } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
                                     .buttonStyle(.borderedProminent)
                                 Button {
                                     smtpTesting = true
                                     smtpTestMessage = nil
-                                    let recipient = auth.currentUser?.username ?? smtpSettings.credentials.fromAddress
+                                    let creds = smtpSettings.credentials(for: connectionsSocietyID)
+                                    let recipient = auth.currentUser?.username ?? creds.fromAddress
                                     Task {
                                         do {
                                             try await SMTPService().send(
                                                 to: recipient,
                                                 subject: "Test SMTP — Factur-X",
                                                 body: "Ceci est un email de test envoyé depuis les Réglages de Factur-X.",
-                                                credentials: smtpSettings.credentials
+                                                credentials: creds
                                             )
                                             smtpTestMessage = "Email de test envoyé à \(recipient)."
                                         } catch {
@@ -6875,7 +6911,7 @@ struct ConnectionsSettingsView: View {
                                     }
                                 }
                                 .buttonStyle(.bordered)
-                                .disabled(smtpTesting || !smtpSettings.credentials.isConfigured)
+                                .disabled(smtpTesting || !smtpSettings.credentials(for: connectionsSocietyID).isConfigured)
                                 Spacer()
                             }
                             if let m = smtpTestMessage {
@@ -10904,12 +10940,12 @@ struct QuoteEditorView: View {
                         .disabled(sendingQuoteEmail
                                   || !emailTemplateStore.isSendEnabled(.quoteSent, companyID: quote.companyID)
                                   || (quote.buyer.contactEmail ?? "").isEmpty
-                                  || !smtpSettings.credentials.isConfigured)
+                                  || !smtpSettings.credentials(for: quote.companyID).isConfigured)
                         .help(!emailTemplateStore.template(for: .quoteSent, companyID: quote.companyID).enabled
                               ? "Cet email est désactivé (Réglages > Application)"
                               : (quote.buyer.contactEmail ?? "").isEmpty
                               ? "Aucune adresse email cliente renseignée"
-                              : !smtpSettings.credentials.isConfigured
+                              : !smtpSettings.credentials(for: quote.companyID).isConfigured
                               ? "Configurez l'envoi d'email (Réglages) pour envoyer un devis"
                               : "Envoyer le devis par email au client")
                     }
@@ -11042,7 +11078,7 @@ struct QuoteEditorView: View {
             quoteEmailMessage = "Échec envoi : aucune adresse email cliente renseignée."
             return
         }
-        let credentials = smtpSettings.credentials
+        let credentials = smtpSettings.credentials(for: quote.companyID)
         guard credentials.isConfigured else {
             quoteEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
             return
@@ -11567,12 +11603,12 @@ struct OrderEditorView: View {
         .disabled(sendingOrderEmail != nil
                   || !emailTemplateStore.isSendEnabled(kind, companyID: order.companyID)
                   || (order.buyer.contactEmail ?? "").isEmpty
-                  || !smtpSettings.credentials.isConfigured)
+                  || !smtpSettings.credentials(for: order.companyID).isConfigured)
         .help(!emailTemplateStore.template(for: kind, companyID: order.companyID).enabled
               ? "Cet email est désactivé (Réglages > Application)"
               : (order.buyer.contactEmail ?? "").isEmpty
               ? "Aucune adresse email cliente renseignée"
-              : !smtpSettings.credentials.isConfigured
+              : !smtpSettings.credentials(for: order.companyID).isConfigured
               ? "Configurez l'envoi d'email (Réglages) pour envoyer cet email"
               : "Envoyer « \(kind.label) » par email au client")
     }
@@ -11582,7 +11618,7 @@ struct OrderEditorView: View {
             orderEmailMessage = "Échec envoi : aucune adresse email cliente renseignée."
             return
         }
-        let credentials = smtpSettings.credentials
+        let credentials = smtpSettings.credentials(for: order.companyID)
         guard credentials.isConfigured else {
             orderEmailMessage = "Échec envoi : envoi d'email non configuré (Réglages)."
             return
