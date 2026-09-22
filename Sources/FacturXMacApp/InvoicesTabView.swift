@@ -302,6 +302,100 @@ struct InvoicePickerSheet: View {
     }
 }
 
+struct DepositsPickerSheet: View {
+    let source: Invoice
+    let deposits: [Invoice]
+    let onConfirm: ([Invoice]) -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var selected: Set<UUID> = []
+
+    private var filtered: [Invoice] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return deposits }
+        return deposits.filter { inv in
+            inv.number.lowercased().contains(q)
+                || inv.seller.name.lowercased().contains(q)
+                || inv.buyer.name.lowercased().contains(q)
+                || (inv.buyer.siren ?? "").lowercased().contains(q)
+        }
+    }
+
+    private var selectedTotal: Double {
+        deposits.filter { selected.contains($0.id) }.reduce(0) { $0 + $1.grandTotal }.rounded(toPlaces: 2)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sélectionner les acomptes à solder").font(.headline)
+                Spacer()
+            }
+            .padding(12)
+            Divider()
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Rechercher (numéro, client, SIREN…)", text: $query)
+                    .textFieldStyle(.plain)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if filtered.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Aucun acompte disponible dans votre périmètre.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(filtered) { dep in
+                    Toggle(isOn: Binding(
+                        get: { selected.contains(dep.id) },
+                        set: { isOn in
+                            if isOn { selected.insert(dep.id) } else { selected.remove(dep.id) }
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(dep.number).font(.headline)
+                                Spacer()
+                                Text(dep.issueDate, format: .dateTime.day().month().year())
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text(dep.buyer.name.isEmpty ? "Sans client" : dep.buyer.name)
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(String(format: "%.2f %@ TTC", dep.grandTotal, dep.currency))
+                                .font(.caption2).foregroundStyle(.secondary)
+                            if let ref = dep.linkedSettlementRef, !ref.isEmpty {
+                                Label("Déjà utilisé dans \(ref)", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Annuler", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                if !selected.isEmpty {
+                    Text("Total sélectionné : \(String(format: "%.2f", selectedTotal)) — \(selected.count) acompte(s)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Créer le solde") {
+                    onConfirm(deposits.filter { selected.contains($0.id) })
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selected.isEmpty)
+            }
+            .padding(12)
+        }
+        .frame(width: 620, height: 460)
+    }
+}
+
 struct InvoicesTabView: View {
     @EnvironmentObject var store: InvoiceStore
     @EnvironmentObject var auth: AuthStore
@@ -317,6 +411,8 @@ struct InvoicesTabView: View {
     @State private var showQuotePicker = false
     @State private var showQuickInvoiceWizard = false
     @State private var showScanImport = false
+    @State private var showDepositsPicker = false
+    @State private var depositsPickerSource: Invoice?
     @State private var exportMessage: String?
     @State private var showAdvancedFilters = false
     @State private var advField1: InvoiceFilterField = .none
@@ -517,7 +613,7 @@ struct InvoicesTabView: View {
                                     .font(.caption2)
                                 Text(invoice.status.label).font(.caption2)
                                     .foregroundColor(Color(hex: invoice.status.hexColor))
-                                Text(invoice.type == .creditNote ? "Avoir" : invoice.type.isInternalCreditNote ? "Avoir interne" : "Facture")
+                                Text(invoice.type.isInternalCreditNote ? "Avoir interne" : invoice.type == .creditNote ? "Avoir" : invoice.type.isDeposit ? "Acompte" : invoice.type.isFinalSettlement ? "Solde" : "Facture")
                                     .font(.caption2).foregroundStyle(invoice.type.isCreditNote ? Color.orange : Color.accentColor)
                                 if invoice.isOverdue {
                                     Label("En retard", systemImage: "exclamationmark.triangle.fill")
@@ -542,6 +638,17 @@ struct InvoicesTabView: View {
                                 selectedID = credit.id
                             } label: { Label("Créer un avoir", systemImage: "arrow.uturn.backward.circle") }
                             .disabled(invoice.type.isCreditNote)
+                            Button {
+                                let deposit = store.newDeposit(from: invoice)
+                                store.upsert(deposit)
+                                selectedID = deposit.id
+                            } label: { Label("Créer un acompte", systemImage: "eurosign.circle") }
+                            .disabled(!invoice.type.allowsDepositCreation)
+                            Button {
+                                depositsPickerSource = invoice
+                                showDepositsPicker = true
+                            } label: { Label("Créer le solde", systemImage: "checkmark.seal") }
+                            .disabled(!invoice.type.allowsDepositCreation)
                             Divider()
                             Button(role: .destructive) {
                                 store.invoices.removeAll { $0.id == invoice.id }
@@ -630,6 +737,31 @@ struct InvoicesTabView: View {
                 onCancel: { showScanImport = false }
             )
         }
+        .sheet(isPresented: $showDepositsPicker) {
+            if let source = depositsPickerSource {
+                DepositsPickerSheet(
+                    source: source,
+                    deposits: candidateDeposits(for: source),
+                    onConfirm: { selectedDeposits in
+                        let final = store.newFinalSettlement(from: source, deposits: selectedDeposits)
+                        store.upsert(final)
+                        for dep in selectedDeposits {
+                            var updated = dep
+                            updated.linkedSettlementRef = final.number
+                            store.upsert(updated)
+                        }
+                        selectedID = final.id
+                        showDepositsPicker = false
+                    },
+                    onCancel: { showDepositsPicker = false }
+                )
+            } else {
+                EmptyView()
+            }
+        }
+        .onChange(of: showDepositsPicker) { showing in
+            if !showing { depositsPickerSource = nil }
+        }
         .onChange(of: filteredInvoices) { newList in
             if let id = selectedID, !newList.contains(where: { $0.id == id }) {
                 selectedID = nil
@@ -669,6 +801,28 @@ struct InvoicesTabView: View {
             }
         }
         return result.sorted { $0.issueDate > $1.issueDate }
+    }
+
+    /// Acomptes candidats pour un solde : même règle de périmètre société que
+    /// `InvoiceEditorView.linkableInvoices`, en excluant la facture source elle-même. Les
+    /// acomptes dont le client correspond à celui de la facture source remontent en tête,
+    /// puis tri antéchronologique (le plus récent en premier).
+    private func candidateDeposits(for source: Invoice) -> [Invoice] {
+        let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
+        let sourceBuyerName = source.buyer.name.trimmingCharacters(in: .whitespaces).lowercased()
+        var result = store.invoices.filter { inv in
+            guard inv.type.isDeposit, inv.id != source.id else { return false }
+            if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
+            if scope != nil && inv.companyID == nil { return false }
+            return true
+        }
+        result.sort { a, b in
+            let aMatch = !sourceBuyerName.isEmpty && a.buyer.name.trimmingCharacters(in: .whitespaces).lowercased() == sourceBuyerName
+            let bMatch = !sourceBuyerName.isEmpty && b.buyer.name.trimmingCharacters(in: .whitespaces).lowercased() == sourceBuyerName
+            if aMatch != bMatch { return aMatch }
+            return a.issueDate > b.issueDate
+        }
+        return result
     }
 
     private func binding(for id: UUID) -> Binding<Invoice> {

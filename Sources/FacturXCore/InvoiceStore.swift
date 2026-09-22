@@ -236,6 +236,7 @@ public final class InvoiceStore: ObservableObject {
         copy.issueDate = Date()
         copy.precedingInvoiceRef = nil
         copy.precedingInvoiceDate = nil
+        copy.linkedSettlementRef = nil
         copy.lines = invoice.lines.map { line in
             var l = line
             l.id = UUID()
@@ -255,6 +256,7 @@ public final class InvoiceStore: ObservableObject {
         credit.purchaseOrderRef = nil
         credit.precedingInvoiceRef = invoice.number
         credit.precedingInvoiceDate = invoice.issueDate
+        credit.linkedSettlementRef = nil
         credit.notes = "Avoir relatif à la facture \(invoice.number)"
         credit.lines = invoice.lines.map { line in
             var l = line
@@ -271,8 +273,10 @@ public final class InvoiceStore: ObservableObject {
         deposit.type = .deposit
         deposit.status = .draft
         deposit.issueDate = Date()
+        deposit.dueDate = deposit.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
         deposit.precedingInvoiceRef = nil
         deposit.precedingInvoiceDate = nil
+        deposit.linkedSettlementRef = nil
         deposit.notes = "Facture d'acompte"
         deposit.prepaidAmount = 0
         return deposit
@@ -285,8 +289,10 @@ public final class InvoiceStore: ObservableObject {
         final.type = .finalSettlement
         final.status = .draft
         final.issueDate = Date()
+        final.dueDate = final.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
         final.precedingInvoiceRef = deposits.first?.number
         final.precedingInvoiceDate = deposits.first?.issueDate
+        final.linkedSettlementRef = nil
         final.prepaidAmount = deposits.reduce(0) { $0 + $1.grandTotal }.rounded(toPlaces: 2)
         final.notes = "Facture de solde"
         return final
