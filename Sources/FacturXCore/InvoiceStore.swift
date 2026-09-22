@@ -234,6 +234,7 @@ public final class InvoiceStore: ObservableObject {
         copy.number = nextNumber(companyID: invoice.companyID)
         copy.status = .draft
         copy.issueDate = Date()
+        copy.dueDate = copy.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
         copy.precedingInvoiceRef = nil
         copy.precedingInvoiceDate = nil
         copy.lines = invoice.lines.map { line in
