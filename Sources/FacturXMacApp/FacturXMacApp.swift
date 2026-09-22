@@ -595,9 +595,13 @@ struct RootView: View {
         // un cycle de synchronisation en cours avec les anciens identifiants n'a plus de
         // sens après une bascule — on relance avec ceux qui viennent d'être rechargés.
         pdpSync.stop()
-        pdpSync.start(store: store) { superPDPSettings.credentials }
+        pdpSync.start(store: store) { companyID in superPDPSettings.credentials(for: companyID) }
         purchaseReceptionSync.stop()
-        purchaseReceptionSync.start(store: purchaseInvoiceStore) { superPDPSettings.credentials }
+        purchaseReceptionSync.start(
+            store: purchaseInvoiceStore,
+            defaultCredentials: { superPDPSettings.credentials },
+            credentialsBySociety: { superPDPSettings.credentialsBySociety }
+        )
     }
 
     /// Migration Keychain one-shot par clé, jamais rejouée ensuite — voir le commentaire
@@ -861,8 +865,12 @@ struct RootView: View {
             syncAuditActor()
             maybeShowSetupWizard()
             runAutoBackupIfNeeded()
-            pdpSync.start(store: store) { superPDPSettings.credentials }
-            purchaseReceptionSync.start(store: purchaseInvoiceStore) { superPDPSettings.credentials }
+            pdpSync.start(store: store) { companyID in superPDPSettings.credentials(for: companyID) }
+            purchaseReceptionSync.start(
+                store: purchaseInvoiceStore,
+                defaultCredentials: { superPDPSettings.credentials },
+                credentialsBySociety: { superPDPSettings.credentialsBySociety }
+            )
         }
         .onChange(of: auth.currentUser) { _ in
             syncAuditActor()
@@ -1074,7 +1082,7 @@ struct ConnectionStatusView: View {
             Button {
                 syncingNow = true
                 Task {
-                    await pdpSync.runOnce(store: store, credentials: superPDPSettings.credentials)
+                    await pdpSync.runOnce(store: store) { companyID in superPDPSettings.credentials(for: companyID) }
                     syncingNow = false
                 }
             } label: {
@@ -1113,7 +1121,11 @@ struct ConnectionStatusView: View {
             Button {
                 syncingPurchasesNow = true
                 Task {
-                    await purchaseReceptionSync.runOnce(store: purchaseInvoiceStore, credentials: superPDPSettings.credentials)
+                    await purchaseReceptionSync.runOnce(
+                        store: purchaseInvoiceStore,
+                        defaultCredentials: superPDPSettings.credentials,
+                        credentialsBySociety: superPDPSettings.credentialsBySociety
+                    )
                     syncingPurchasesNow = false
                 }
             } label: {
