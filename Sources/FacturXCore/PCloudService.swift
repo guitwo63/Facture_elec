@@ -262,10 +262,14 @@ public final class PCloudSettings: ObservableObject {
     public static let shared = PCloudSettings()
 
     @Published public var credentials: PCloudCredentials
+    /// Surcharge éparse par société (Réglages > Connexions) — voir `SuperPDPSettings.
+    /// credentialsBySociety`, même patron.
+    @Published public var credentialsBySociety: [UUID: PCloudCredentials] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.pcloud.credentials.v1") }
+    private var credentialsBySocietyKey: String { env.key("facturx.pcloud.credentials.bysociety.v1") }
     private var passwordKeychainKey: String { env.key("facturx.pcloud.password.v1") }
     private var keychainCleanupDoneKey: String { env.key("facturx.pcloud.keychainCleanupDone.v1") }
 
@@ -282,6 +286,7 @@ public final class PCloudSettings: ObservableObject {
         }
         Self.migrateFromKeychainOnce(into: &decoded, passwordKeychainKey: env.key("facturx.pcloud.password.v1"), keychainCleanupDoneKey: env.key("facturx.pcloud.keychainCleanupDone.v1"), defaults: defaults)
         credentials = decoded
+        loadCredentialsBySociety()
     }
 
     public func load() {
@@ -294,6 +299,14 @@ public final class PCloudSettings: ObservableObject {
         }
         Self.migrateFromKeychainOnce(into: &decoded, passwordKeychainKey: passwordKeychainKey, keychainCleanupDoneKey: keychainCleanupDoneKey, defaults: defaults)
         credentials = decoded
+        loadCredentialsBySociety()
+    }
+
+    private func loadCredentialsBySociety() {
+        if let data = defaults.data(forKey: credentialsBySocietyKey),
+           let decoded = try? JSONDecoder().decode([UUID: PCloudCredentials].self, from: data) {
+            credentialsBySociety = decoded
+        }
     }
 
     /// Ne touche au Keychain qu'une seule fois, jamais plus ensuite — voir le commentaire
@@ -312,5 +325,26 @@ public final class PCloudSettings: ObservableObject {
         if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(credentialsBySociety) {
+            defaults.set(data, forKey: credentialsBySocietyKey)
+        }
+    }
+
+    /// Identifiants effectifs pour une société — voir `SuperPDPSettings.credentials(for:)`,
+    /// même patron.
+    public func credentials(for companyID: UUID?) -> PCloudCredentials {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let override = credentialsBySociety[effectiveID] { return override }
+        return credentials
+    }
+
+    public func setOverride(_ creds: PCloudCredentials, companyID: UUID) {
+        credentialsBySociety[companyID] = creds
+        save()
+    }
+
+    public func removeOverride(companyID: UUID) {
+        credentialsBySociety.removeValue(forKey: companyID)
+        save()
     }
 }
