@@ -77,6 +77,18 @@ public final class InvoicePDFRenderer {
         drawText(context: context, text: title, x: titleX, y: y, font: boldFont(size: 24), color: .black)
         drawText(context: context, text: invoice.number, x: pageWidth - margin - 180, y: y, font: boldFont(size: 14), color: .black)
 
+        if let ref = invoice.precedingInvoiceRef?.trimmingCharacters(in: .whitespaces), !ref.isEmpty {
+            let refDf = DateFormatter()
+            refDf.dateFormat = "dd/MM/yyyy"
+            let refLine: String
+            if let date = invoice.precedingInvoiceDate {
+                refLine = "Facture antérieure: \(ref) du \(refDf.string(from: date))"
+            } else {
+                refLine = "Facture antérieure: \(ref)"
+            }
+            drawText(context: context, text: refLine, x: titleX, y: y - 34, font: font(size: 10), color: .darkGray)
+        }
+
         let df = DateFormatter()
         df.dateFormat = "dd/MM/yyyy"
         let issueLine = "Date: \(df.string(from: invoice.issueDate))"
