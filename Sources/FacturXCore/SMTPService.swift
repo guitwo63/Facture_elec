@@ -294,10 +294,14 @@ public final class SMTPSettings: ObservableObject {
     public static let shared = SMTPSettings()
 
     @Published public var credentials: SMTPCredentials
+    /// Surcharge éparse par société (Réglages > Connexions) — voir `SuperPDPSettings.
+    /// credentialsBySociety`, même patron.
+    @Published public var credentialsBySociety: [UUID: SMTPCredentials] = [:]
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.smtp.credentials.v1") }
+    private var credentialsBySocietyKey: String { env.key("facturx.smtp.credentials.bysociety.v1") }
     private var passwordKeychainKey: String { env.key("facturx.smtp.password.v1") }
     private var keychainCleanupDoneKey: String { env.key("facturx.smtp.keychainCleanupDone.v1") }
 
@@ -324,6 +328,10 @@ public final class SMTPSettings: ObservableObject {
             defaults: defaults
         )
         credentials = decoded
+        if let data = defaults.data(forKey: env.key("facturx.smtp.credentials.bysociety.v1")),
+           let decodedBySociety = try? JSONDecoder().decode([UUID: SMTPCredentials].self, from: data) {
+            credentialsBySociety = decodedBySociety
+        }
     }
 
     /// Ne touche au Keychain qu'une seule fois, jamais plus ensuite (drapeau posé qu'un
@@ -345,5 +353,26 @@ public final class SMTPSettings: ObservableObject {
         if let data = try? JSONEncoder().encode(credentials) {
             defaults.set(data, forKey: storageKey)
         }
+        if let data = try? JSONEncoder().encode(credentialsBySociety) {
+            defaults.set(data, forKey: credentialsBySocietyKey)
+        }
+    }
+
+    /// Identifiants effectifs pour une société — voir `SuperPDPSettings.credentials(for:)`,
+    /// même patron.
+    public func credentials(for companyID: UUID?) -> SMTPCredentials {
+        let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
+        if let effectiveID, let override = credentialsBySociety[effectiveID] { return override }
+        return credentials
+    }
+
+    public func setOverride(_ creds: SMTPCredentials, companyID: UUID) {
+        credentialsBySociety[companyID] = creds
+        save()
+    }
+
+    public func removeOverride(companyID: UUID) {
+        credentialsBySociety.removeValue(forKey: companyID)
+        save()
     }
 }
