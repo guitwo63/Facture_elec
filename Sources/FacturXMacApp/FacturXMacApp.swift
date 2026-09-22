@@ -6529,6 +6529,24 @@ struct ConnectionsSettingsView: View {
         )
     }
 
+    /// Identifiants Chorus Pro en cours d'édition — même principe qu'`activeSuperPDPCredentialsBinding`.
+    private var activeChorusProCredentialsBinding: Binding<ChorusProCredentials> {
+        Binding(
+            get: {
+                guard let cid = connectionsSocietyID else { return chorusSettings.credentials }
+                return chorusSettings.credentialsBySociety[cid] ?? chorusSettings.credentials(for: cid)
+            },
+            set: { newValue in
+                if let cid = connectionsSocietyID {
+                    chorusSettings.setOverride(newValue, companyID: cid)
+                } else {
+                    chorusSettings.credentials = newValue
+                    chorusSettings.save()
+                }
+            }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -6567,48 +6585,67 @@ struct ConnectionsSettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Text("Renseignez les identifiants de votre application PISTE (client_id / client_secret) et le compte technique Chorus Pro requis pour appeler l'API.")
                             .font(.caption).foregroundStyle(.secondary)
+                        if let cid = connectionsSocietyID {
+                            if chorusSettings.credentialsBySociety[cid] == nil {
+                                HStack(spacing: 6) {
+                                    Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                    Button("Personnaliser pour cette société") {
+                                        chorusSettings.setOverride(chorusSettings.credentials(for: cid), companyID: cid)
+                                    }.buttonStyle(.link).font(.caption2)
+                                }
+                            } else {
+                                Button("Revenir au réglage hérité", role: .destructive) {
+                                    chorusSettings.removeOverride(companyID: cid)
+                                }.buttonStyle(.link).font(.caption2)
+                            }
+                        }
                         HStack {
                             Text("Client ID").frame(width: 100, alignment: .leading)
-                            TextField("Client ID", text: $chorusSettings.credentials.clientID)
+                            TextField("Client ID", text: activeChorusProCredentialsBinding.clientID)
                         }
                         HStack {
                             Text("Client Secret").frame(width: 100, alignment: .leading)
-                            SecureField("Client Secret", text: $chorusSettings.credentials.clientSecret)
+                            SecureField("Client Secret", text: activeChorusProCredentialsBinding.clientSecret)
                         }
                         HStack {
                             Text("Scope").frame(width: 100, alignment: .leading)
-                            TextField("openid", text: $chorusSettings.credentials.scope)
+                            TextField("openid", text: activeChorusProCredentialsBinding.scope)
                         }
                         HStack {
                             Text("URL Token").frame(width: 100, alignment: .leading)
-                            TextField("URL Token", text: $chorusSettings.credentials.tokenURL)
+                            TextField("URL Token", text: activeChorusProCredentialsBinding.tokenURL)
                         }
                         HStack {
                             Text("Base API").frame(width: 100, alignment: .leading)
-                            TextField("Base API", text: $chorusSettings.credentials.apiBaseURL)
+                            TextField("Base API", text: activeChorusProCredentialsBinding.apiBaseURL)
                         }
                         Divider()
                         Text("Compte technique Chorus Pro (en-tête cpro-account)").font(.caption.bold())
                         HStack {
                             Text("Login tech.").frame(width: 100, alignment: .leading)
-                            TextField("login technique", text: $chorusSettings.credentials.techLogin)
+                            TextField("login technique", text: activeChorusProCredentialsBinding.techLogin)
                         }
                         HStack {
                             Text("Mot de passe").frame(width: 100, alignment: .leading)
-                            SecureField("mot de passe technique", text: $chorusSettings.credentials.techPassword)
+                            SecureField("mot de passe technique", text: activeChorusProCredentialsBinding.techPassword)
                         }
                         HStack {
                             Button {
-                                chorusSettings.save()
+                                if let cid = connectionsSocietyID {
+                                    chorusSettings.setOverride(activeChorusProCredentialsBinding.wrappedValue, companyID: cid)
+                                } else {
+                                    chorusSettings.save()
+                                }
                             } label: { Label("Enregistrer", systemImage: "checkmark.circle") }
                                 .buttonStyle(.borderedProminent)
                             Button {
                                 testing = true
                                 testMessage = nil
+                                let creds = chorusSettings.credentials(for: connectionsSocietyID)
                                 Task {
                                     do {
                                         let service = ChorusProService()
-                                        _ = try await service.fetchToken(credentials: chorusSettings.credentials)
+                                        _ = try await service.fetchToken(credentials: creds)
                                         testMessage = "Connexion réussie — jeton obtenu."
                                     } catch {
                                         testMessage = "Échec : \(error.localizedDescription)"
@@ -6617,7 +6654,7 @@ struct ConnectionsSettingsView: View {
                                 }
                             } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
                                 .buttonStyle(.bordered)
-                                .disabled(testing || !chorusSettings.credentials.isConfigured)
+                                .disabled(testing || !chorusSettings.credentials(for: connectionsSocietyID).isConfigured)
                             Spacer()
                         }
                         if let m = testMessage {
