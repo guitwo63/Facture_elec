@@ -48,17 +48,20 @@ final class PDPPeriodicSyncEngine: ObservableObject {
 
     private var task: Task<Void, Never>?
 
-    func start(store: InvoiceStore, credentials: @escaping () -> SuperPDPCredentials) {
+    /// `credentialsProvider` résout les identifiants pour une société donnée (`nil` = le
+    /// réglage par défaut/société principale) — voir `SuperPDPSettings.credentials(for:)`.
+    /// La cadence reste pilotée par le seul réglage par défaut (simplification assumée :
+    /// pas de cadence différente par société pour l'instant).
+    func start(store: InvoiceStore, credentialsProvider: @escaping (UUID?) -> SuperPDPCredentials) {
         guard task == nil else { return }
         isRunning = true
         task = Task { [weak self] in
             while !Task.isCancelled {
-                let current = credentials()
-                await self?.runOnce(store: store, credentials: current)
+                await self?.runOnce(store: store, credentialsProvider: credentialsProvider)
                 // Relu à chaque cycle (pas capturé une fois pour toutes) : un changement de
                 // `syncIntervalMinutes` dans Réglages > Application > SUPER PDP prend effet
                 // dès le prochain cycle, sans redémarrer le moteur.
-                let minutes = max(SuperPDPCredentials.minSyncIntervalMinutes, current.syncIntervalMinutes)
+                let minutes = max(SuperPDPCredentials.minSyncIntervalMinutes, credentialsProvider(nil).syncIntervalMinutes)
                 try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
             }
         }
@@ -72,53 +75,66 @@ final class PDPPeriodicSyncEngine: ObservableObject {
 
     /// Exposé séparément de `start()` pour permettre un déclenchement immédiat (bouton
     /// "Synchroniser maintenant" dans Réglages) sans attendre le prochain cycle.
-    func runOnce(store: InvoiceStore, credentials: SuperPDPCredentials) async {
-        // `usePDP` coupe TOUTES les fonctions PDP, y compris ce cycle en arrière-plan —
-        // sans quoi désactiver le bouton dans Réglages n'empêchait pas l'app d'interroger
-        // SUPER PDP en silence pour des identifiants restés `isConfigured`.
-        guard credentials.usePDP, credentials.isConfigured else { return }
-        let candidates = store.invoices.filter { invoice in
+    /// `credentialsProvider` résout les identifiants par société (chaque société a les
+    /// siens — voir `SuperPDPSettings.credentials(for:)`) : les factures candidates sont
+    /// regroupées par `companyID` et chaque groupe est interrogé avec ses propres
+    /// identifiants, jamais ceux d'une autre société ni un jeu partagé pour tout le lot.
+    func runOnce(store: InvoiceStore, credentialsProvider: (UUID?) -> SuperPDPCredentials) async {
+        let allCandidates = store.invoices.filter { invoice in
             guard let rid = invoice.superPDPRemoteID, !rid.isEmpty else { return false }
             return !PDPStatusMapper.terminalStatuses.contains(invoice.status)
         }
+        let byCompany = Dictionary(grouping: allCandidates, by: \.companyID)
         var updatedCount = 0
         var errorCount = 0
-        for invoice in candidates {
-            guard let rid = invoice.superPDPRemoteID else { continue }
-            do {
-                let service = SuperPDPService()
-                let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: credentials)
-                guard let mapped = PDPStatusMapper.functionalTransition(for: updated.status) else { continue }
-                let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
-                let isCancellation = mapped == .cancelled && invoice.status != .cancelled && invoice.status != .paid
-                guard (isAdvance || isCancellation) && mapped != invoice.status else { continue }
-                var next = invoice
-                next.status = mapped
-                store.upsert(next)
-                updatedCount += 1
-                store.audit?.record(
-                    actor: "system",
-                    action: "pdp_status_received",
-                    target: invoice.number,
-                    details: "Synchronisation périodique : \(updated.status) → \(mapped.label)",
-                    objectType: .invoice,
-                    objectCode: invoice.number
-                )
-            } catch {
-                errorCount += 1
-                store.audit?.record(
-                    actor: "system",
-                    action: "pdp_status_error",
-                    target: invoice.number,
-                    details: "Synchronisation périodique échouée : \(error.localizedDescription)",
-                    objectType: .invoice,
-                    objectCode: invoice.number
-                )
+        var queriedCount = 0
+        for (companyID, candidates) in byCompany {
+            // `usePDP` coupe TOUTES les fonctions PDP pour cette société, y compris ce
+            // cycle en arrière-plan — sans quoi désactiver le bouton dans Réglages n'empêchait
+            // pas l'app d'interroger SUPER PDP en silence pour des identifiants restés
+            // `isConfigured`.
+            let credentials = credentialsProvider(companyID)
+            guard credentials.usePDP, credentials.isConfigured else { continue }
+            queriedCount += candidates.count
+            for invoice in candidates {
+                guard let rid = invoice.superPDPRemoteID else { continue }
+                do {
+                    let service = SuperPDPService()
+                    let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: credentials)
+                    guard let mapped = PDPStatusMapper.functionalTransition(for: updated.status) else { continue }
+                    let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
+                    let isCancellation = mapped == .cancelled && invoice.status != .cancelled && invoice.status != .paid
+                    guard (isAdvance || isCancellation) && mapped != invoice.status else { continue }
+                    var next = invoice
+                    next.status = mapped
+                    store.upsert(next)
+                    updatedCount += 1
+                    store.audit?.record(
+                        actor: "system",
+                        action: "pdp_status_received",
+                        target: invoice.number,
+                        details: "Synchronisation périodique : \(updated.status) → \(mapped.label)",
+                        objectType: .invoice,
+                        objectCode: invoice.number,
+                        companyID: invoice.companyID
+                    )
+                } catch {
+                    errorCount += 1
+                    store.audit?.record(
+                        actor: "system",
+                        action: "pdp_status_error",
+                        target: invoice.number,
+                        details: "Synchronisation périodique échouée : \(error.localizedDescription)",
+                        objectType: .invoice,
+                        objectCode: invoice.number,
+                        companyID: invoice.companyID
+                    )
+                }
             }
         }
         lastRunAt = Date()
-        lastRunSummary = candidates.isEmpty
+        lastRunSummary = queriedCount == 0
             ? "Aucune facture à interroger."
-            : "\(candidates.count) facture(s) interrogée(s), \(updatedCount) mise(s) à jour" + (errorCount > 0 ? ", \(errorCount) échec(s)" : "") + "."
+            : "\(queriedCount) facture(s) interrogée(s), \(updatedCount) mise(s) à jour" + (errorCount > 0 ? ", \(errorCount) échec(s)" : "") + "."
     }
 }
