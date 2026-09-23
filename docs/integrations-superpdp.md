@@ -342,3 +342,33 @@ Statut retenu : **`partiallyPaid`** — l'AIFE distingue `PAYEE_PARTIELLEMENT` d
   "Acceptée" ne gagne pas automatiquement "Payée partiellement" comme cible : il faut cocher
   la case manuellement une fois. Seul le nouveau statut lui-même (id inédit) reçoit ses
   transitions par défaut (`disputed`, `paid`) au premier chargement, comme toute nouvelle ligne.
+
+## 12. Rapport de validation : la ligne en cause (2026-09-23)
+
+`POST /v1.beta/validation_reports` range les échecs par validateur (`subreports[]`), dans
+`failures[]` et `messages[]`, au schéma `message` : `message`, `raw`, `location`. L'OpenAPI
+(1.34.0.beta) décrit `location` comme « location of error in the XML if available »,
+optionnelle, sans exemple. Vérifié sur une vraie réponse (facture fictive, BR-Z-05 en échec sur
+les lignes 2 et 3) : `location` est le chemin SVRL du XSLT officiel, repris tel quel.
+
+```
+/*:CrossIndustryInvoice[namespace-uri()='…'][1]/*:SupplyChainTradeTransaction[namespace-uri()='…'][1]/*:IncludedSupplyChainTradeLineItem[namespace-uri()='…'][2]/*:SpecifiedLineTradeSettlement[namespace-uri()='…'][1]/*:ApplicableTradeTax[namespace-uri()='…'][1]
+```
+
+- Les deux échecs BR-Z-05 avaient exactement le même `message` : seul le rang `[2]`/`[3]` les
+  distinguait. Le rang est le dernier prédicat de l'étape `IncludedSupplyChainTradeLineItem`,
+  après le filtre de namespace.
+- `CIIXMLGenerator` émet les lignes dans l'ordre de l'éditeur, avec `LineID` (BT-126) = rang :
+  la « ligne 2 » du rapport est la 2e ligne de l'éditeur.
+- `raw` contient le fragment SVRL complet (`<svrl:failed-assert … location="…">…`).
+- La réponse contient aussi un champ `rule` (ex. `BR-Z-05`) absent de l'OpenAPI. L'app ne s'en
+  sert pas : le message commence déjà par `[BR-Z-05]`.
+- L'endpoint est public (`security: []` dans l'OpenAPI) : il répond sans jeton.
+
+Côté app, `SuperPDPValidationMessage` garde `message` et `location`. L'éditeur relève les
+désignations des lignes (BT-153) avec le fichier envoyé et les range dans le rapport
+(`lineNames`). `displayText(for:)` vaut alors « Ligne 2 (Désignation) — [BR-Z-05]-… » pour un
+échec de ligne, « Ligne 2 — … » si la désignation manque, et le message seul sinon (en-tête,
+pas de `location`). Relever les désignations à la validation garde le libellé juste même si
+une ligne est ensuite supprimée ou déplacée dans l'éditeur. `errors`/`warnings` restent le
+texte seul, un par échec : le compteur « n erreur(s) » ne change pas.

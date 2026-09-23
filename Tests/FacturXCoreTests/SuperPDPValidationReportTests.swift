@@ -180,4 +180,138 @@ final class SuperPDPValidationReportTests: XCTestCase {
         XCTAssertEqual(report.warnings.count, 2)
         XCTAssertEqual(Set(report.warnings).count, 1)
     }
+
+    // MARK: - Ligne en cause (`location`)
+
+    /// Vraie réponse de POST /v1.beta/validation_reports (2026-09-23) pour une facture fictive
+    /// générée par l'app, lignes 2 et 3 en catégorie Z à 20 %. Recopiée telle quelle, sauf `raw`
+    /// (le fragment SVRL complet) abrégé. `location` est le chemin SVRL du XSLT officiel, et
+    /// `rule` un champ absent de l'OpenAPI (1.34.0.beta), ignoré.
+    private let realReportJSON = """
+    {
+      "data": [
+        {
+          "file_name": "invoice.xml",
+          "file_size": 45673,
+          "is_valid": false,
+          "duration": 69,
+          "format": "factur-x",
+          "conformance_level": "urn:cen.eu:en16931:2017",
+          "subreports": [
+            {
+              "validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/1xsd/Factur-X_EN16931.xsd",
+              "checks_count": 1,
+              "messages": [],
+              "failures": []
+            },
+            {
+              "validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/FACTUR-X_EN16931.xslt",
+              "checks_count": 130,
+              "messages": [],
+              "failures": [
+                {
+                  "message": "[BR-Z-09]-The VAT category tax amount (BT-117) in a VAT breakdown (BG-23) where VAT category code (BT-118) is \\"Zero rated\\" shall equal 0 (zero).",
+                  "raw": "svrl:failed-assert BR-Z-09",
+                  "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:SupplyChainTradeTransaction[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:ApplicableHeaderTradeSettlement[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]/*:ApplicableTradeTax[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][2]/*:CategoryCode[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]",
+                  "rule": "BR-Z-09"
+                },
+                {
+                  "message": "[BR-Z-05]-In an Invoice line (BG-25) where the Invoiced item VAT category code (BT-151) is \\"Zero rated\\" the Invoiced item VAT rate (BT-152) shall be 0 (zero).",
+                  "raw": "svrl:failed-assert BR-Z-05",
+                  "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:SupplyChainTradeTransaction[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:IncludedSupplyChainTradeLineItem[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][2]/*:SpecifiedLineTradeSettlement[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]/*:ApplicableTradeTax[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]",
+                  "rule": "BR-Z-05"
+                },
+                {
+                  "message": "[BR-Z-05]-In an Invoice line (BG-25) where the Invoiced item VAT category code (BT-151) is \\"Zero rated\\" the Invoiced item VAT rate (BT-152) shall be 0 (zero).",
+                  "raw": "svrl:failed-assert BR-Z-05",
+                  "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:SupplyChainTradeTransaction[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:IncludedSupplyChainTradeLineItem[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][3]/*:SpecifiedLineTradeSettlement[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]/*:ApplicableTradeTax[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]",
+                  "rule": "BR-Z-05"
+                }
+              ]
+            },
+            {
+              "validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/BR-FR-Flux2-Schematron-CII_WARNING.xslt",
+              "checks_count": 83,
+              "messages": [],
+              "failures": []
+            }
+          ]
+        }
+      ]
+    }
+    """
+
+    /// BR-Z-05 échoue sur les lignes 2 et 3 avec le même message : le rang lu dans `location` et
+    /// la désignation relevée à la validation les départagent à l'affichage. Le compteur et le
+    /// texte brut ne changent pas, et BR-Z-09 (2e sous-total de TVA d'en-tête,
+    /// `ApplicableTradeTax[2]`) ne vise aucune ligne.
+    func testRealReportLabelsEachFailingLine() throws {
+        var report = try SuperPDPService().parseValidationReport(data: Data(realReportJSON.utf8))
+        // Les désignations de la facture fictive qui a produit ce rapport.
+        report.lineNames = ["Prestation correcte", "Article Z fautif A", "Article Z fautif B"]
+        XCTAssertEqual(report.errors.count, 3, "un échec = une erreur, comme avant")
+        XCTAssertEqual(report.errorEntries.map(\.lineNumber), [nil, 2, 3])
+        let brZ05 = "[BR-Z-05]-In an Invoice line (BG-25) where the Invoiced item VAT category code (BT-151) is \"Zero rated\" the Invoiced item VAT rate (BT-152) shall be 0 (zero)."
+        XCTAssertEqual(report.errorEntries.map(report.displayText(for:)), [
+            report.errors[0],
+            "Ligne 2 (Article Z fautif A) — \(brZ05)",
+            "Ligne 3 (Article Z fautif B) — \(brZ05)",
+        ])
+        XCTAssertEqual(report.errors[1], report.errors[2], "le texte brut reste celui du validateur")
+    }
+
+    /// Sans désignation relevée pour ce rang (aucune, rang au-delà, désignation vide), le libellé
+    /// garde le rang seul ; une désignation est débarrassée de ses blancs.
+    func testLineLabelFallsBackToRankWithoutDesignation() {
+        let onLine2 = SuperPDPValidationMessage(message: "[BR-X]-M", location: "/ram:IncludedSupplyChainTradeLineItem[2]")
+        let onLine3 = SuperPDPValidationMessage(message: "[BR-X]-M", location: "/ram:IncludedSupplyChainTradeLineItem[3]")
+        var report = SuperPDPValidationReport(isValid: false, errorEntries: [onLine2, onLine3])
+        XCTAssertEqual(report.displayText(for: onLine2), "Ligne 2 — [BR-X]-M", "aucune désignation relevée")
+        report.lineNames = ["Première", "  Deuxième \n"]
+        XCTAssertEqual(report.displayText(for: onLine2), "Ligne 2 (Deuxième) — [BR-X]-M")
+        XCTAssertEqual(report.displayText(for: onLine3), "Ligne 3 — [BR-X]-M", "rang au-delà des lignes relevées")
+        report.lineNames = ["Première", "   "]
+        XCTAssertEqual(report.displayText(for: onLine2), "Ligne 2 — [BR-X]-M", "désignation vide")
+    }
+
+    /// Le rang est le dernier prédicat numérique de l'étape `IncludedSupplyChainTradeLineItem`,
+    /// quel que soit le style de chemin. Une étape d'en-tête indexée, une étape de ligne sans rang
+    /// ou un rang nul ne donnent rien.
+    func testInvoiceLineNumberFromLocationFormats() {
+        func line(_ location: String) -> Int? { SuperPDPValidationMessage.invoiceLineNumber(in: location) }
+        let rsm = "[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100']"
+        let ram = "[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100']"
+        XCTAssertEqual(line("/*:CrossIndustryInvoice\(rsm)[1]/*:SupplyChainTradeTransaction\(rsm)[1]/*:IncludedSupplyChainTradeLineItem\(ram)[12]"), 12,
+                       "règle dont le contexte est la ligne elle-même, rang à deux chiffres")
+        XCTAssertEqual(line("/rsm:CrossIndustryInvoice[1]/rsm:SupplyChainTradeTransaction[1]/ram:IncludedSupplyChainTradeLineItem[4]/ram:SpecifiedTradeProduct[1]/ram:Name[1]"), 4)
+        XCTAssertEqual(line("/Q{urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100}IncludedSupplyChainTradeLineItem[5]/Q{urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100}SpecifiedLineTradeSettlement[1]"), 5)
+        XCTAssertEqual(line("/CrossIndustryInvoice/.../IncludedSupplyChainTradeLineItem[2]/.../ApplicableTradeTax[1]"), 2)
+        XCTAssertNil(line("/*:CrossIndustryInvoice\(rsm)[1]/*:SupplyChainTradeTransaction\(rsm)[1]/*:ApplicableHeaderTradeSettlement\(ram)[1]/*:ApplicableTradeTax\(ram)[2]"))
+        XCTAssertNil(line("/rsm:CrossIndustryInvoice/rsm:SupplyChainTradeTransaction/ram:IncludedSupplyChainTradeLineItem/ram:SpecifiedTradeProduct"),
+                     "sans rang explicite, on ne devine pas")
+        XCTAssertNil(line("/ram:IncludedSupplyChainTradeLineItem[0]"))
+        XCTAssertNil(line("/CrossIndustryInvoice/.../PostcodeCode"))
+        XCTAssertNil(line(""))
+    }
+
+    /// Les avertissements (schematron français) reçoivent aussi le libellé de ligne. Une entrée
+    /// sans `location` (texte simple, clé absente, erreur générique du rapport) reste telle quelle.
+    func testWarningsGetLineLabelAndEntriesWithoutLocationStayPlain() throws {
+        let json = """
+        {"data": [{"is_valid": false, "error": "Fichier illisible", "subreports": [
+          {"validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/FACTUR-X_EN16931.xslt", "checks_count": 2,
+           "failures": ["[BR-1]-Texte seul", {"message": "[BR-2]-Sans location", "raw": "svrl:failed-assert BR-2"}],
+           "messages": []},
+          {"validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/BR-FR-Flux2-Schematron-CII_WARNING.xslt", "checks_count": 74,
+           "failures": [{"message": "[BR-FR-WARN-1]-Some non-blocking recommendation.", "raw": "svrl:failed-assert BR-FR-WARN-1",
+                         "location": "/*:CrossIndustryInvoice[1]/*:SupplyChainTradeTransaction[1]/*:IncludedSupplyChainTradeLineItem[3]/*:SpecifiedTradeProduct[1]"}],
+           "messages": []}
+        ]}]}
+        """
+        var report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
+        report.lineNames = ["Prestation A", "Prestation B", "Prestation C"]
+        XCTAssertEqual(report.errorEntries.map(report.displayText(for:)), ["[BR-1]-Texte seul", "[BR-2]-Sans location", "Fichier illisible"])
+        XCTAssertEqual(report.warningEntries.map(report.displayText(for:)), ["Ligne 3 (Prestation C) — [BR-FR-WARN-1]-Some non-blocking recommendation."])
+        XCTAssertEqual(report.warnings, ["[BR-FR-WARN-1]-Some non-blocking recommendation."])
+    }
 }
