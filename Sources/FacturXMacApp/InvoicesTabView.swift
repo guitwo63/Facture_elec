@@ -2412,8 +2412,12 @@ struct InvoiceEditorView: View {
         Task {
             do {
                 let facturx = try FacturXGenerator().generate(invoice: invoice, logo: sellerLogo)
+                // Relevées avec le fichier envoyé, avant l'attente réseau : « Ligne 2 (…) » nomme
+                // la ligne validée, même si les lignes changent ensuite dans l'éditeur.
+                let lineNames = invoice.lines.map(\.name)
                 let service = SuperPDPService()
-                let report = try await service.validateInvoice(fileData: facturx, credentials: superPDPSettings.credentials(for: invoice.companyID))
+                var report = try await service.validateInvoice(fileData: facturx, credentials: superPDPSettings.credentials(for: invoice.companyID))
+                report.lineNames = lineNames
                 pdpValidationReport = report
                 showPDPValidationPanel = true
                 superPDPMessage = nil
@@ -2672,14 +2676,15 @@ struct InvoiceEditorView: View {
                 if !report.errors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
                     // Identité = position, pas le texte : un même message Schematron revient
-                    // pour chaque ligne fautive, et deux textes égaux auraient le même `id`.
+                    // pour chaque élément fautif (« Ligne n » ne départage que des lignes
+                    // différentes), et deux textes égaux auraient le même `id`.
                     // Le rapport est remplacé d'un bloc à chaque validation, sans état par ligne.
-                    ForEach(Array(report.errors.enumerated()), id: \.offset) { _, msg in
+                    ForEach(Array(report.errorEntries.enumerated()), id: \.offset) { _, entry in
                         HStack(alignment: .top, spacing: 4) {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.red)
-                            Text(msg)
+                            Text(report.displayText(for: entry))
                                 .font(.caption)
                                 .foregroundStyle(.red)
                         }
@@ -2688,12 +2693,12 @@ struct InvoiceEditorView: View {
                 if !report.warnings.isEmpty {
                     if !report.errors.isEmpty { Divider().padding(.vertical, 2) }
                     Text("Avertissements :").font(.caption.bold())
-                    ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, msg in
+                    ForEach(Array(report.warningEntries.enumerated()), id: \.offset) { _, entry in
                         HStack(alignment: .top, spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.orange)
-                            Text(msg)
+                            Text(report.displayText(for: entry))
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }
