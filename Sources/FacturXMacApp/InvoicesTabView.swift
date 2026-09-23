@@ -1939,8 +1939,12 @@ struct InvoiceEditorView: View {
                                     }
                                     if line.vatCategory.requiresExemptionReason {
                                         HStack(spacing: 2) {
-                                            TextField("Motif d'exonération (BT-120)", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
-                                                .frame(minWidth: 280)
+                                            // Liseré seulement sur un motif vide : la règle (BR-E-10…) vaut
+                                            // pour la facture entière, pas pour cette ligne.
+                                            fieldHighlight(TextField("Motif d'exonération (BT-120)", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                                                .frame(minWidth: 280),
+                                                forRuleIDs: (line.vatExemptionReason ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                                                    ? ["BR-E-10", "BR-AE-10", "BR-IC-10", "BR-G-10", "BR-O-10"] : [])
                                             InfoBadge(text: "BT-120 — Motif d'exonération, obligatoire pour cette catégorie de TVA.")
                                         }
                                     }
