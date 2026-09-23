@@ -134,8 +134,15 @@ struct PurchasesTabView: View {
 
                 if let id = selectedID,
                    filteredInvoices.contains(where: { $0.id == id }) {
-                    PurchaseInvoiceEditorView(record: binding(for: id))
-                        .frame(minWidth: 420)
+                    // Une instance d'éditeur par facture d'achat, dans un conteneur stable pour le
+                    // HSplitView (voir InvoicesTabView). Sans cela, `onChange(of: record.status)`
+                    // se déclenchait au changement de sélection et envoyait à SUPER PDP, donc au
+                    // fournisseur, le statut de la facture ouverte pour celle qu'on quitte.
+                    VStack(spacing: 0) {
+                        PurchaseInvoiceEditorView(record: binding(for: id))
+                            .id(id)
+                    }
+                    .frame(minWidth: 420)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
