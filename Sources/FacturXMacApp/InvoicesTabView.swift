@@ -1770,7 +1770,7 @@ struct InvoiceEditorView: View {
                             VStack(alignment: .trailing, spacing: 4) {
                                 VStack(alignment: .trailing) {
                                 ForEach(invoice.vatBreakdown, id: \.rate) { item in
-                                    row("TVA \(String(format: "%.0f%%", item.rate))", item.amount)
+                                    row("TVA \(String(format: "%g%%", item.rate))", item.amount)
                                 }
                                 row("Total TTC", invoice.grandTotal, bold: true)
                                 if invoice.prepaidAmount > 0 {

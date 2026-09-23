@@ -1,11 +1,13 @@
 import XCTest
+import PDFKit
 import FacturXCore
 
 /// Taux de TVA non entiers émis arrondis à l'entier (5,5 % → « 6 »), trouvé le 2026-09-23 avec
 /// les validateurs officiels : BR-FR-16 (Schematron France CTC) rejetait en fatal « Taux
 /// fourni : "6" », pour BT-152 (ligne) comme pour BT-119 (récapitulatif). Le test d'entier de
 /// `formatRate` (`rate == rate.rounded()`) appelait l'extension `rounded(toPlaces: Int = 2)` de
-/// FacturXCore et non l'arrondi à l'entier de la bibliothèque standard.
+/// FacturXCore et non l'arrondi à l'entier de la bibliothèque standard. Le PDF lisible,
+/// formaté sans décimale, imprimait lui aussi « TVA 6% ».
 final class VATRateFormattingTests: XCTestCase {
 
     /// `custom:is-valid-vat-rate` de `cii-schematron-fr-ctc/BR-FR-Flux2-Schematron-CII.xslt`
@@ -91,6 +93,10 @@ final class VATRateFormattingTests: XCTestCase {
         element.children?.compactMap { $0 as? XMLElement }.first { $0.localName == name }?.stringValue.flatMap(Double.init)
     }
 
+    private func pdfText(_ pdf: Data) throws -> String {
+        try XCTUnwrap(PDFDocument(data: pdf)?.string, "texte du PDF illisible")
+    }
+
     // MARK: - Cause racine
 
     /// `x.rounded()` doit rester l'arrondi à l'entier de la bibliothèque standard, y compris là où
@@ -151,5 +157,23 @@ final class VATRateFormattingTests: XCTestCase {
         let rates = try emittedRates(OrderCIOXMLGenerator().generate(order: order(rates: sampleRates)))
         XCTAssertEqual(rates.lines, ["5.50", "2.10", "8.50", "10", "20"])
         XCTAssertEqual(rates.header, ["2.10", "5.50", "8.50", "10", "20"])
+    }
+
+    // MARK: - PDF lisible
+
+    func testInvoicePDFPrintsTheDecimalRate() throws {
+        let text = try pdfText(InvoicePDFRenderer().render(invoice: invoice(rates: [5.5, 20])))
+        XCTAssertTrue(text.contains("Article 1 1.00 100.00 5.5 100.00"), "colonne TVA% de la ligne : \(text)")
+        XCTAssertTrue(text.contains("TVA 5.5%:"), text)
+        XCTAssertTrue(text.contains("TVA 20%:"), text)
+        XCTAssertFalse(text.contains("TVA 6%:"), text)
+    }
+
+    func testOrderPDFPrintsTheDecimalRate() throws {
+        let text = try pdfText(OrderPDFRenderer().render(order: order(rates: [5.5, 20])))
+        XCTAssertTrue(text.contains("Article 1 1.00 100.00 5.5 100.00"), "colonne TVA% de la ligne : \(text)")
+        XCTAssertTrue(text.contains("TVA 5.5%:"), text)
+        XCTAssertTrue(text.contains("TVA 20%:"), text)
+        XCTAssertFalse(text.contains("TVA 6%:"), text)
     }
 }
