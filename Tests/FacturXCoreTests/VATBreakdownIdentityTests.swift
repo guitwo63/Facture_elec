@@ -67,4 +67,20 @@ final class VATBreakdownIdentityTests: XCTestCase {
         XCTAssertEqual(Set(after.map(\.id)), Set(before.map(\.id)))
         XCTAssertNotEqual(after.map(\.basis).sorted(), before.map(\.basis).sorted(), "les bases ont bien changé")
     }
+
+    /// À taux égal, l'ordre suit `VATCategory.allCases`, quel que soit l'ordre des lignes. Il
+    /// dépendait avant de l'itération d'un dictionnaire, qui change à chaque lancement : les
+    /// deux lignes « TVA 0 % » à l'écran et les deux blocs BG-23 du XML pouvaient s'inverser.
+    func testSameRateEntriesAreOrderedByCategoryWhateverTheLineOrder() throws {
+        for lineOrder in [lines(), lines().reversed()] {
+            let invoice = Invoice(number: "F-1", seller: seller, buyer: buyer, lines: Array(lineOrder))
+            XCTAssertEqual(invoice.vatBreakdown.map { "\($0.rate)/\($0.category.rawValue)" }, ["0.0/Z", "0.0/E", "20.0/S"])
+
+            let doc = try XMLDocument(data: CIIXMLGenerator().generate(invoice: invoice))
+            let categories = try doc.nodes(forXPath: "//*[local-name()='ApplicableHeaderTradeSettlement']"
+                                           + "/*[local-name()='ApplicableTradeTax']/*[local-name()='CategoryCode']")
+                .compactMap(\.stringValue)
+            XCTAssertEqual(categories, ["Z", "E", "S"], "ordre des sous-totaux BG-23 dans le XML")
+        }
+    }
 }

@@ -445,7 +445,10 @@ public struct VATBreakdownEntry: Hashable, Identifiable {
 
     public var id: Key { Key(rate: rate, category: category) }
 
-    /// Ventilation commune aux factures, commandes et devis (`vatBreakdown`), triée par taux.
+    /// Ventilation commune aux factures, commandes et devis (`vatBreakdown`), triée par taux
+    /// puis dans l'ordre de `VATCategory.allCases` (celui du sélecteur de catégorie). Sans ce
+    /// second critère, deux catégories au même taux sortaient dans l'ordre d'itération d'un
+    /// dictionnaire, qui change d'un lancement de l'app à l'autre (écran, PDF et XML).
     static func breakdown(of lines: [InvoiceLine]) -> [VATBreakdownEntry] {
         var basisByKey: [Key: Double] = [:]
         var reasonByKey: [Key: String] = [:]
@@ -457,12 +460,13 @@ public struct VATBreakdownEntry: Hashable, Identifiable {
                 reasonByKey[key] = reason
             }
         }
+        func position(_ category: VATCategory) -> Int { VATCategory.allCases.firstIndex(of: category) ?? 0 }
         return basisByKey.map { (key, basis) in
             let basisR = basis.rounded(toPlaces: 2)
             let amount = (basisR * key.rate / 100).rounded(toPlaces: 2)
             return VATBreakdownEntry(rate: key.rate, category: key.category, exemptionReason: reasonByKey[key],
                                      basis: basisR, amount: amount)
-        }.sorted { $0.rate < $1.rate }
+        }.sorted { ($0.rate, position($0.category)) < ($1.rate, position($1.category)) }
     }
 }
 
