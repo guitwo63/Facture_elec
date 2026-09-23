@@ -429,13 +429,18 @@ public struct CIIXMLGenerator {
     }
 
     /// BT-119 / BT-152 : « 20 » pour un taux entier, « 5.50 » sinon, deux formes admises par la
-    /// liste fermée de BR-FR-16 (France CTC). Le test d'entier ne passe pas par `rate.rounded()`,
-    /// qui appelait `rounded(toPlaces:)` (arrondi à 2 décimales) : 5,5 % était émis « 6 ».
-    private func formatRate(_ rate: Double) -> String {
+    /// liste fermée de BR-FR-16 (France CTC). `EN16931BusinessRules` compare cette même chaîne
+    /// à la liste, comme le Schematron. Le test d'entier ne passe pas par `rate.rounded()`, qui
+    /// appelait `rounded(toPlaces:)` (arrondi à 2 décimales) : 5,5 % était émis « 6 ».
+    static func xmlRate(_ rate: Double) -> String {
         if rate.truncatingRemainder(dividingBy: 1) == 0 {
             return String(format: "%.0f", rate)
         }
         return String(format: "%.2f", rate)
+    }
+
+    private func formatRate(_ rate: Double) -> String {
+        Self.xmlRate(rate)
     }
 
     private func xmlTypeCode(for type: InvoiceTypeCode) -> String {

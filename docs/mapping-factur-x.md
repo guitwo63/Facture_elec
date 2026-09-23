@@ -70,7 +70,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `line.quantity` | `ram:SpecifiedLineTradeDelivery/ram:BilledQuantity` | BT-129 | BT-129-POSITIVE (contrôle interne : EN 16931 admet une quantité nulle ou négative) | erreur |
 | `line.unit` | `ram:BilledQuantity/@unitCode` (C62 si vide) | BT-130 | BR-23 | avertissement |
 | `line.unitPrice` | `ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount` | BT-146 | BR-27 | erreur |
-| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) ; BR-FR-16 (taux négatif) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; avertissement ; avertissement |
+| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) ; BR-FR-16 (taux hors de la liste des taux français) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; erreur ; avertissement |
 | `line.vatCategory` (déduit du taux) | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | — | — |
 | `line.vatExemptionReason` | `ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:ExemptionReason` (ventilation de TVA) | BT-120 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | erreur |
 | `line.lineTotal` | `ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount` | BT-131 | BT-131-CALCUL (contrôle interne : quantité × prix unitaire) | erreur |
@@ -123,7 +123,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-FR-10 | SIREN émetteur (BT-30) | avertissement | 9 chiffres, clé Luhn |
 | BR-FR-12 | identifiant électronique destinataire (BT-49) | erreur | SIREN ou identifiant électronique obligatoire (BT-49 déduit du SIREN si vide) |
 | BR-FR-13 | identifiant électronique émetteur (BT-34) | erreur | SIREN ou identifiant électronique obligatoire (BT-34 déduit du SIREN si vide) |
-| BR-FR-16 | taux de TVA (BT-152) | avertissement | Taux négatif, absent de la liste des taux admis en France |
+| BR-FR-16 | taux de TVA (BT-152) | erreur | Taux absent de la liste fermée des taux français (0 ; 0,9 ; 1,05 ; 1,75 ; 2,1 ; 5,5 ; 7 ; 8,5 ; 9,2 ; 9,6 ; 10 ; 13 ; 19,6 ; 20 ; 20,6), comparé sous sa forme émise ; facture reçue : taux négatif seulement, en avertissement |
 | BR-FR-32 | SIREN destinataire (BT-47) | avertissement | 9 chiffres (schéma 0002), clé Luhn |
 | BR-FR-CO-04 | facture antérieure (BT-25/26) | erreur | Facture rectificative (384) : référence + date obligatoires |
 | BR-FR-CO-05 | facture antérieure (BT-25/26) | erreur | Avoir (381) : référence + date obligatoires |
@@ -148,7 +148,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 - **Code type 387** (facture de solde) : émis en `380` dans le CII car non admis par le flux FR EN16931 ; le type métier interne `finalSettlement` est conservé pour la UI et le calcul du net à payer.
 - **internalCreditNote** (INT) : émis en `381` (avoir) dans le CII pour la conformité.
 - **TotalPrepaidAmount** : doit suivre `GrandTotalAmount` dans l'ordre du XSD (sinon erreur de validation).
-- **Taux de TVA** (BT-119, BT-152, `RateApplicablePercent`) : « 20 » pour un taux entier, « 5.50 » sinon (idem Order-X). Le BR-FR-16 du Schematron France CTC (fatal) compare la chaîne à une liste fermée où « 5.5 » et « 5.50 » passent, mais pas « 5.500 » ni « 6 » ; le contrôle BR-FR-16 de l'app ne signale, lui, que les taux négatifs. Jusqu'au 2026-09-23, 5,5 % était émis « 6 » : `rate.rounded()` appelait l'extension `Double.rounded(toPlaces:)` du module, qui n'a plus de valeur par défaut.
+- **Taux de TVA** (BT-119, BT-152, `RateApplicablePercent`) : « 20 » pour un taux entier, « 5.50 » sinon (idem Order-X). Le BR-FR-16 du Schematron France CTC (fatal) compare la chaîne à une liste fermée où « 5.5 » et « 5.50 » passent, mais pas « 5.500 » ni « 6 » ; le contrôle BR-FR-16 de l'app compare cette même chaîne (`CIIXMLGenerator.xmlRate`) à la liste et bloque l'export, sauf sur une facture reçue, où seul un taux négatif est signalé. Jusqu'au 2026-09-23, 5,5 % était émis « 6 » : `rate.rounded()` appelait l'extension `Double.rounded(toPlaces:)` du module, qui n'a plus de valeur par défaut.
 - Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-CO-10/14/15, et BR-CO-16 respectée par construction) ne sont pas mappées à un champ d'encadré.
 
 
@@ -205,3 +205,15 @@ La section condensée « Champs optionnels » (en-tête + ligne) permet de saisi
 - Ordre d'émission : celui des séquences du XSD (ex. `GlobalID`, `SellerAssignedID`, `BuyerAssignedID` avant `Name` ; avis d'expédition avant avis de réception ; `AdditionalReferencedDocument` entre le contrat et le projet), indépendamment de l'ordre de saisie. `OptionalFieldsConformanceTests` le vérifie.
 - Les champs libres (balise non reconnue du catalogue) sont stockés et affichés mais ne sont pas injectés dans le XML pour ne pas risquer de casser la conformité.
 - **Vérification (2026-09-23)** : chaque champ du catalogue, seul puis tous ensemble, et chaque cadre de facturation, contre le XSD Factur-X 1.09 EN16931 (`facturx.xml_check_xsd`) et les Schematron EN16931 (`Factur-X_1.09_EN16931.xsl`) et France CTC (`BR-FR-Flux2-Schematron-CII.xslt`), exécutés avec `saxonche`. Attention en relisant un rapport SVRL : le Schematron EN16931 de Factur-X ne pose quasiment jamais `flag="fatal"` (424 assertions sur 427 n'ont aucun flag) et signale les éléments hors profil par des `svrl:successful-report` — ne retenir que `flag="fatal"` masquerait toutes ses erreurs.
+
+## Order-X (commandes) : structure par profil
+
+`OrderCIOXMLGenerator` suit le XSD du profil que la commande déclare (`OrderXProfile`, URN `urn:order-x.eu:1p0:…`) :
+
+| Profil | Récapitulatif de TVA d'en-tête (`ApplicableTradeTax`) | TVA de ligne | Description de ligne |
+|---|---|---|---|
+| BASIC | non | non | non |
+| COMFORT | non | oui | oui |
+| EXTENDED | oui | oui | oui |
+
+Dans les trois profils, la référence de commande (`BuyerOrderReferencedDocument`) précède celle du devis (`QuotationReferencedDocument`), et le total de TVA (`TaxTotalAmount`) reste émis. **Vérification (2026-09-23)** : pour chaque profil, une commande minimale et une commande complète (références, contacts, description, trois taux dont une exonération) passent le XSD et le Schematron Order-X de ce profil (paquet `factur-x`, dossiers `orderx-<profil>/`). Avant ce correctif, seul EXTENDED passait, et seulement sans référence de devis. Le Schematron Order-X ne contrôle ni les taux ni le code type du document.

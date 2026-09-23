@@ -18,13 +18,16 @@ public struct OrderCIOXMLGenerator {
         let issue = DocumentDate.xmlString(order.issueDate)
         let requested = DocumentDate.xmlString(order.requestedDeliveryDate)
 
-        let xmlLines = order.lines.enumerated().map { xmlLine($0.element, index: $0.offset) }.joined()
+        let xmlLines = order.lines.enumerated().map { xmlLine($0.element, index: $0.offset, profile: order.profile) }.joined()
 
         let seller = xmlParty(order.seller, role: .seller)
         let buyer = xmlParty(order.buyer, role: .buyer)
+        // Ordre du XSD (HeaderTradeAgreementType, les trois profils) : la commande
+        // (BuyerOrderReferencedDocument) AVANT le devis (QuotationReferencedDocument). L'ordre
+        // inverse rendait le XML invalide dès qu'une référence de devis était saisie.
         let agreement = """
         <ram:ApplicableHeaderTradeAgreement>
-\(buyerReferenceXML(order))\(seller)\(buyer)\(quotationXML(order))\(buyerOrderXML(order))\(contractXML(order))\(blanketOrderXML(order))\(previousOrderChangeXML(order))\(previousOrderResponseXML(order))
+\(buyerReferenceXML(order))\(seller)\(buyer)\(buyerOrderXML(order))\(quotationXML(order))\(contractXML(order))\(blanketOrderXML(order))\(previousOrderChangeXML(order))\(previousOrderResponseXML(order))
         </ram:ApplicableHeaderTradeAgreement>
 """
         let delivery = """
@@ -65,7 +68,10 @@ public struct OrderCIOXMLGenerator {
         return data
     }
 
-    private func xmlLine(_ line: InvoiceLine, index: Int) -> String {
+    /// BASIC n'admet ni description d'article (TradeProductType : identifiants et nom) ni TVA de
+    /// ligne (LineTradeSettlementType : montant seul) ; COMFORT et EXTENDED admettent les deux.
+    private func xmlLine(_ line: InvoiceLine, index: Int, profile: OrderXProfile) -> String {
+        let detailed = profile != .basic
         let lineID = String(index + 1)
         let qty = String(format: "%.4f", line.quantity)
         let price = String(format: "%.4f", line.unitPrice)
@@ -76,11 +82,19 @@ public struct OrderCIOXMLGenerator {
         let desc = line.description.map { """
             <ram:Description>\(escape($0))</ram:Description>
 """ } ?? ""
+        let tax = """
+            <ram:ApplicableTradeTax>
+              <ram:TypeCode>VAT</ram:TypeCode>
+              <ram:CategoryCode>\(category)</ram:CategoryCode>
+              <ram:RateApplicablePercent>\(rate)</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+
+"""
         return """
         <ram:IncludedSupplyChainTradeLineItem>
           <ram:AssociatedDocumentLineDocument><ram:LineID>\(lineID)</ram:LineID></ram:AssociatedDocumentLineDocument>
           <ram:SpecifiedTradeProduct>
-            <ram:Name>\(escape(line.name))</ram:Name>\(desc.isEmpty ? "" : desc)
+            <ram:Name>\(escape(line.name))</ram:Name>\(detailed ? desc : "")
           </ram:SpecifiedTradeProduct>
           <ram:SpecifiedLineTradeAgreement>
             <ram:NetPriceProductTradePrice>
@@ -91,12 +105,7 @@ public struct OrderCIOXMLGenerator {
             <ram:RequestedQuantity unitCode="\(unitCode)">\(qty)</ram:RequestedQuantity>
           </ram:SpecifiedLineTradeDelivery>
           <ram:SpecifiedLineTradeSettlement>
-            <ram:ApplicableTradeTax>
-              <ram:TypeCode>VAT</ram:TypeCode>
-              <ram:CategoryCode>\(category)</ram:CategoryCode>
-              <ram:RateApplicablePercent>\(rate)</ram:RateApplicablePercent>
-            </ram:ApplicableTradeTax>
-            <ram:SpecifiedTradeSettlementLineMonetarySummation>
+\(detailed ? tax : "")            <ram:SpecifiedTradeSettlementLineMonetarySummation>
               <ram:LineTotalAmount>\(total)</ram:LineTotalAmount>
             </ram:SpecifiedTradeSettlementLineMonetarySummation>
           </ram:SpecifiedLineTradeSettlement>
@@ -266,6 +275,9 @@ public struct OrderCIOXMLGenerator {
 """
     }
 
+    /// Le récapitulatif de TVA d'en-tête (`ApplicableTradeTax`) n'existe qu'en EXTENDED : le XSD
+    /// de COMFORT et de BASIC (HeaderTradeSettlementType) le refuse. En COMFORT, la TVA reste
+    /// portée par les lignes et par TaxTotalAmount.
     private func xmlSettlement(_ order: SalesOrder) -> String {
         let tradeTax = order.vatBreakdown.map { item -> String in
             let amount = String(format: "%.2f", item.amount)
@@ -292,7 +304,7 @@ public struct OrderCIOXMLGenerator {
         return """
     <ram:ApplicableHeaderTradeSettlement>
       <ram:OrderCurrencyCode>\(escape(order.currency))</ram:OrderCurrencyCode>
-\(tradeTax)      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+\(order.profile == .extended ? tradeTax : "")      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         <ram:LineTotalAmount>\(lineTotal)</ram:LineTotalAmount>
         <ram:TaxBasisTotalAmount>\(taxBasis)</ram:TaxBasisTotalAmount>
         <ram:TaxTotalAmount currencyID="\(escape(order.currency))">\(taxTotal)</ram:TaxTotalAmount>
