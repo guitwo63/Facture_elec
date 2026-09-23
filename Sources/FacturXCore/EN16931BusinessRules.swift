@@ -8,13 +8,21 @@ public enum BusinessRuleSeverity: String, Codable {
 }
 
 public struct BusinessRuleResult: Identifiable, Hashable {
+    /// Identité pour `ForEach`, propre à chaque résultat. Le `ruleId` seul ne suffit pas :
+    /// une même règle sort souvent plusieurs fois (les trois mentions BR-FR-05, une fois par
+    /// ligne fautive, émetteur et destinataire…), et des identités en double font afficher
+    /// à SwiftUI des lignes dupliquées ou manquantes. Dérivée du contenu plutôt que d'un
+    /// UUID, elle reste stable d'une validation à l'autre. Elle suppose que les résultats
+    /// d'une même règle ont des messages différents : une règle par ligne cite la ligne.
     public let id: String
+    /// Partagé par plusieurs résultats : c'est lui, pas `id`, que le surlignage des champs
+    /// en erreur utilise.
     public let ruleId: String
     public let severity: BusinessRuleSeverity
     public let message: String
 
     public init(ruleId: String, severity: BusinessRuleSeverity, message: String) {
-        self.id = ruleId
+        self.id = "\(ruleId)|\(severity.rawValue)|\(message)"
         self.ruleId = ruleId
         self.severity = severity
         self.message = message
@@ -48,6 +56,14 @@ public enum EN16931BusinessRules {
     private static func rulePrefix(_ category: VATCategory) -> String {
         category == .intraCommunity ? "IC" : category.rawValue
     }
+
+    /// BR-FR-16 : liste fermée `custom:is-valid-vat-rate` du Schematron France CTC, qui compare
+    /// des chaînes (« 5.5 » et « 5.50 » passent, « 5.500 » non).
+    private static let brFR16Rates: Set<String> = [
+        "0", "0.0", "0.00", "10", "10.0", "10.00", "13", "13.0", "13.00", "20", "20.0", "20.00",
+        "8.5", "8.50", "19.6", "19.60", "2.1", "2.10", "5.5", "5.50", "7", "7.0", "7.00",
+        "20.6", "20.60", "1.05", "0.9", "0.90", "1.75", "9.2", "9.20", "9.6", "9.60",
+    ]
 
     public static func evaluate(invoice: Invoice, context: EN16931RuleContext = .issued) -> [BusinessRuleResult] {
         var results: [BusinessRuleResult] = []
@@ -327,14 +343,20 @@ public enum EN16931BusinessRules {
             }
         }
 
-        // BR-FR-16 n'admet qu'une liste fermée de taux français : un taux négatif en est exclu.
-        if invoice.lines.contains(where: { $0.vatRate < 0 }) {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .warning,
-                message: "BR-FR-16 : Un taux de TVA négatif (BT-152) ne fait pas partie des taux admis en France ; vérifiez la catégorie de TVA (BT-151)."))
-        }
-
         for (idx, line) in invoice.lines.enumerated() {
             let label = "Ligne \(idx + 1)"
+            // BR-FR-16 (France CTC, fatal) : on compare au Schematron la chaîne que le générateur
+            // écrira en BT-152 (reprise en BT-119). Contrôle propre à l'émission : une facture
+            // d'achat étrangère peut porter un autre taux (19 % allemand…), seul un taux négatif
+            // y reste signalé.
+            let rate = CIIXMLGenerator.xmlRate(line.vatRate)
+            if context == .issued && !brFR16Rates.contains(rate) {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .error,
+                    message: "BR-FR-16 : \(label) — le taux de TVA « \(rate) » (BT-152) ne fait pas partie des taux admis en France (0 ; 0,9 ; 1,05 ; 1,75 ; 2,1 ; 5,5 ; 7 ; 8,5 ; 9,2 ; 9,6 ; 10 ; 13 ; 19,6 ; 20 ; 20,6 %) : la PDP rejetterait la facture."))
+            } else if context == .received && line.vatRate < 0 {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .warning,
+                    message: "BR-FR-16 : \(label) — un taux de TVA négatif (BT-152) ne fait pas partie des taux admis en France ; vérifiez la catégorie de TVA (BT-151)."))
+            }
             // Contrôle interne : simple rappel, un taux nul en catégorie Z est conforme.
             if line.vatRate == 0 && line.vatCategory == .zeroRated {
                 results.append(BusinessRuleResult(ruleId: "BT-152-ZERO", severity: .warning,

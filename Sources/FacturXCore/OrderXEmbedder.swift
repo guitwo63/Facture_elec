@@ -8,7 +8,8 @@ public enum OrderXEmbedError: Error {
 
 /// Embarque le XML Order-X (CIO) dans un PDF/A-3 sous le nom `order-x.xml`
 /// avec /AFRelationship /Alternative, plus les métadonnées XMP Order-X
-/// (fx:DocumentType = ORDER, namespace urn:factur-x:pdfa:CrossIndustryDocument:1p0#).
+/// (fx:DocumentType = ORDER, ORDER_CHANGE ou ORDER_RESPONSE selon le type de document,
+/// namespace urn:factur-x:pdfa:CrossIndustryDocument:1p0#).
 public struct OrderXEmbedder {
     public init() {}
 
@@ -156,8 +157,10 @@ public struct OrderXEmbedder {
         let buyerName = escapeXML(order.buyer.name)
         let number = escapeXML(order.number)
         let date = isoDate(order.issueDate)
-        let title = "\(buyerName): Order \(number)"
-        let desc = "Order \(number) dated \(date) issued by \(buyerName)"
+        let kind = order.type.xmpName
+        let title = "\(buyerName): \(kind) \(number)"
+        let desc = "\(kind) \(number) dated \(date) issued by \(buyerName)"
+        let documentType = kind.uppercased().replacingOccurrences(of: " ", with: "_")
         let conformance = order.profile.conformanceLevel
 
         return """
@@ -233,7 +236,7 @@ public struct OrderXEmbedder {
       </pdfaExtension:schemas>
     </rdf:Description>
     <rdf:Description xmlns:fx="urn:factur-x:pdfa:CrossIndustryDocument:1p0#" rdf:about="">
-      <fx:DocumentType>ORDER</fx:DocumentType>
+      <fx:DocumentType>\(documentType)</fx:DocumentType>
       <fx:DocumentFileName>order-x.xml</fx:DocumentFileName>
       <fx:Version>1.0</fx:Version>
       <fx:ConformanceLevel>\(conformance)</fx:ConformanceLevel>

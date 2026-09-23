@@ -209,8 +209,8 @@ public struct DirectoryEntry: Codable, Hashable, Identifiable {
     public var tagIDs: [UUID]
     public var logoData: Data?
     public var profile: FacturXProfile
-    /// Vrai pour au plus une société du périmètre à la fois — sert de repli pour tous les
-    /// réglages par société non personnalisés (voir `PartyDirectory.principaleSocieteID`).
+    /// Vrai pour au plus une société du périmètre à la fois — ses réglages s'appliquent à ce
+    /// qui n'est rattaché à aucune société (voir `PartyDirectory.principaleSocieteID`).
     /// L'unicité est garantie par `PartyDirectory.setPrincipale(_:)`, pas par ce champ seul.
     public var isPrincipale: Bool
 
@@ -402,9 +402,12 @@ public final class PartyDirectory: ObservableObject {
         }
     }
 
-    /// La société qui sert de repli pour tous les réglages par société non personnalisés
-    /// (remplace l'ancien « défaut global » abstrait — voir `SocietyScopedCatalog`). `nil`
-    /// avant qu'une société principale ait été désignée.
+    /// La société dont les réglages s'appliquent quand un store est interrogé avec
+    /// `companyID == nil` : document, tiers ou traitement rattaché à aucune société. Une
+    /// autre société sans personnalisation propre n'en hérite PAS : elle suit le réglage par
+    /// défaut (global), comme dans le portage ARVERNX-SaaS — voir
+    /// `SocietePrincipaleInheritanceTests`. `nil` avant qu'une société principale ait été
+    /// désignée.
     public var principaleSocieteID: UUID? {
         entries.first { $0.kinds.contains(.societe) && $0.isPrincipale }?.id
     }

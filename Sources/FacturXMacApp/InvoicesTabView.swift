@@ -678,8 +678,20 @@ struct InvoicesTabView: View {
 
                 if let id = selectedID,
                    filteredInvoices.contains(where: { $0.id == id }) {
-                    InvoiceEditorView(invoice: binding(for: id))
-                        .frame(minWidth: 420)
+                    // Une instance d'éditeur par facture (`.id(id)`). Sans cela, SwiftUI réutilise la
+                    // vue et ses `@State` d'une facture sélectionnée à l'autre, et chaque
+                    // `onChange(of: invoice.…)` de l'éditeur se déclenche au simple changement de
+                    // sélection. Avec `onChange(of:perform:)` (API macOS 13), c'est en plus la closure
+                    // du rendu précédent qui s'exécute : elle agit sur la facture qu'on quitte, avec la
+                    // valeur de celle qu'on ouvre (échéance réécrite, statut envoyé à SUPER PDP).
+                    // Le VStack garde le panneau du HSplitView stable : un `.id` posé sur l'enfant
+                    // direct du HSplitView remplace le panneau et ramène le séparateur à sa largeur
+                    // par défaut à chaque sélection.
+                    VStack(spacing: 0) {
+                        InvoiceEditorView(invoice: binding(for: id))
+                            .id(id)
+                    }
+                    .frame(minWidth: 420)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
@@ -1189,6 +1201,27 @@ struct InvoiceEditorView: View {
         )
     }
 
+    /// Date facture (BT-2). Quand l'utilisateur la change, l'échéance (BT-9) suit la règle du
+    /// préréglage de conditions de paiement actif, dans la même écriture. Le recalcul vit dans
+    /// ce setter, appelé seulement par une saisie dans le DatePicker, et non dans un
+    /// `onChange(of: invoice.issueDate)` qui se déclenchait aussi au changement de facture
+    /// sélectionnée. Pas de recalcul sur une facture verrouillée : `.lockable` bloque la
+    /// souris mais pas le clavier, le DatePicker reste modifiable aux flèches.
+    private var issueDateBinding: Binding<Date> {
+        Binding(
+            get: { invoice.issueDate },
+            set: { newDate in
+                guard newDate != invoice.issueDate else { return }
+                var updated = invoice
+                updated.issueDate = newDate
+                if !fieldLocked, let preset = activePaymentTermsPreset {
+                    updated.dueDate = preset.dueRule.dueDate(from: newDate)
+                }
+                invoice = updated
+            }
+        )
+    }
+
     /// Vrai si le préréglage actif calcule réellement une échéance (jours nets /
     /// fin de mois + jours) — le champ Échéance se grise alors, pour éviter une
     /// saisie manuelle immédiatement écrasée par le prochain recalcul. Un
@@ -1649,11 +1682,7 @@ struct InvoiceEditorView: View {
                                             Text("Date facture").font(.caption)
                                             InfoBadge(text: "BT-2 — Date d'émission de la facture. Obligatoire.")
                                         }
-                                        DatePicker("", selection: $invoice.issueDate, displayedComponents: .date).labelsHidden()
-                                            .onChange(of: invoice.issueDate) { newDate in
-                                                guard let preset = activePaymentTermsPreset else { return }
-                                                invoice.dueDate = preset.dueRule.dueDate(from: newDate)
-                                            }
+                                        DatePicker("", selection: issueDateBinding, displayedComponents: .date).labelsHidden()
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
@@ -1847,7 +1876,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    VATRatePicker(rate: $line.vatRate)
+                                    fieldHighlight(VATRatePicker(rate: $line.vatRate), forRuleIDs: ["BR-FR-16"])
                                     InfoBadge(text: "BT-152 — Taux de TVA appliqué (%). Catégorie (BT-151) et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))

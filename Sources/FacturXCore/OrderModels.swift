@@ -24,14 +24,38 @@ public enum OrderXProfile: String, Codable, CaseIterable {
 
 public enum OrderTypeCode: String, Codable, CaseIterable {
     case order = "220"
-    case orderChange = "221"
-    case orderResponse = "222"
+    case orderChange = "230"
+    case orderResponse = "231"
+
+    /// Order-X n'admet que 220, 230 et 231 (`ORDERX_code2type` de la bibliothèque de référence
+    /// factur-x). Jusqu'au 2026-09-23, la modification et la réponse partaient en 221 et 222,
+    /// « commande ouverte » et « commande ponctuelle » dans l'UNTDID 1001 : une commande
+    /// enregistrée avec ces codes est relue en 230 / 231. Sans cette relecture, `OrderStore`,
+    /// qui décode la liste d'un bloc, perdrait toutes les commandes.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "221": self = .orderChange
+        case "222": self = .orderResponse
+        default: self = OrderTypeCode(rawValue: raw) ?? .order
+        }
+    }
 
     public var label: String {
         switch self {
         case .order: return "Commande (220)"
-        case .orderChange: return "Modification de commande (221)"
-        case .orderResponse: return "Réponse à commande (222)"
+        case .orderChange: return "Modification de commande (230)"
+        case .orderResponse: return "Réponse à commande (231)"
+        }
+    }
+
+    /// Nom du document dans les métadonnées XMP, comme la bibliothèque factur-x : en titre
+    /// (« Order Change ») et, en majuscules, dans `fx:DocumentType` (« ORDER_CHANGE »).
+    public var xmpName: String {
+        switch self {
+        case .order: return "Order"
+        case .orderChange: return "Order Change"
+        case .orderResponse: return "Order Response"
         }
     }
 }
