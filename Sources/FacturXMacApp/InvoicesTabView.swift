@@ -1965,7 +1965,9 @@ struct InvoiceEditorView: View {
                         // Forcée dépliée en lecture seule : les mentions légales et les notes
                         // libres sont des champs saisis, pas de la documentation statique —
                         // à consulter sans clic supplémentaire une fois la facture verrouillée.
-                        get: { showLegalMentions || fieldLocked },
+                        // Dépliée aussi tant qu'une mention manque (BR-FR-05, bloquante) : le
+                        // champ à compléter est sous les yeux.
+                        get: { showLegalMentions || fieldLocked || errorRuleIDs.contains("BR-FR-05") },
                         set: { showLegalMentions = $0 }
                     )) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -1982,6 +1984,8 @@ struct InvoiceEditorView: View {
                             .font(.headline)
                     }
                 }.lockable(fieldLocked)
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.red, lineWidth: errorRuleIDs.contains("BR-FR-05") ? 1.5 : 0))
                 AttachmentsAndCommentSection(attachments: $invoice.attachments, internalComment: $invoice.internalComment, locked: fieldLocked)
                 statusJournalSection
             }.padding()

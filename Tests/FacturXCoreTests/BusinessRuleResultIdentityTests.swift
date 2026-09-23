@@ -58,8 +58,8 @@ final class BusinessRuleResultIdentityTests: XCTestCase {
     }
 
     /// Cas le plus courant à l'écran : une facture sans mentions légales doit afficher trois
-    /// avertissements BR-FR-05 distincts (PMT, PMD, AAB), pas trois fois le même.
-    func testMissingLegalNotesGiveThreeDistinctBRFR05Warnings() {
+    /// erreurs BR-FR-05 distinctes (PMT, PMD, AAB), pas trois fois la même.
+    func testMissingLegalNotesGiveThreeDistinctBRFR05Errors() {
         let invoice = Invoice(
             number: "2026-0001",
             seller: InvoiceParty(name: "Émetteur", street: "1 rue Test", postcode: "75001", city: "Paris",
@@ -71,12 +71,12 @@ final class BusinessRuleResultIdentityTests: XCTestCase {
             legalNotePMD: "",
             legalNoteAAB: ""
         )
-        let warnings = EN16931BusinessRules.evaluate(invoice: invoice).filter { $0.ruleId == "BR-FR-05" }
+        let errors = EN16931BusinessRules.evaluate(invoice: invoice).filter { $0.ruleId == "BR-FR-05" }
 
-        XCTAssertEqual(warnings.map(\.ruleId), ["BR-FR-05", "BR-FR-05", "BR-FR-05"], "le ruleId, utilisé par le surlignage, ne change pas")
-        XCTAssertEqual(Set(warnings.map(\.id)).count, 3, "trois identités distinctes : \(warnings.map(\.id))")
+        XCTAssertEqual(errors.map(\.ruleId), ["BR-FR-05", "BR-FR-05", "BR-FR-05"], "le ruleId, utilisé par le surlignage, ne change pas")
+        XCTAssertEqual(Set(errors.map(\.id)).count, 3, "trois identités distinctes : \(errors.map(\.id))")
         for code in ["PMT", "PMD", "AAB"] {
-            XCTAssertEqual(warnings.filter { $0.message.contains("SubjectCode \(code)") }.count, 1, code)
+            XCTAssertEqual(errors.filter { $0.message.contains("SubjectCode \(code)") }.count, 1, code)
         }
     }
 

@@ -315,20 +315,23 @@ public enum EN16931BusinessRules {
                 message: "\(ruleId) : Le cadre de facturation \(mode.rawValue) (facture \(isMultiVendor ? "multi-vendeurs" : "bidirectionnelle")) exige des lignes de regroupement par vendeur (sous-type GROUP) que l'application ne produit pas ; choisissez un autre cadre."))
         }
 
-        // Mentions légales françaises : obligatoires sur une facture qu'on émet (BR-FR-05),
-        // mais sans objet sur un document reçu — on ne les a pas rédigées, rien à corriger.
+        // Mentions légales françaises (BR-FR-05) : bloquantes sur une facture qu'on émet, quel
+        // qu'en soit le type (vérifié le 2026-09-23 sur 380, 381 et 386) : le Schematron France
+        // CTC les classe fatales, et SUPER PDP répond is_valid=false dès qu'une manque. Une
+        // mention faite d'espaces compte comme absente : le générateur ne l'écrit pas. Sans objet
+        // sur un document reçu — on ne les a pas rédigées, rien à corriger.
         if context == .issued {
-            if invoice.legalNotePMT.trimmingCharacters(in: .whitespaces).isEmpty {
-                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
-                    message: "BR-FR-05 : La mention sur les frais de recouvrement (SubjectCode PMT) est obligatoire en France."))
+            if invoice.legalNotePMT.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .error,
+                    message: "BR-FR-05 : La mention sur les frais de recouvrement (SubjectCode PMT) est obligatoire en France ; renseignez-la dans « Mentions légales (FR) »."))
             }
-            if invoice.legalNotePMD.trimmingCharacters(in: .whitespaces).isEmpty {
-                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
-                    message: "BR-FR-05 : La mention sur les pénalités de retard (SubjectCode PMD) est obligatoire en France."))
+            if invoice.legalNotePMD.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .error,
+                    message: "BR-FR-05 : La mention sur les pénalités de retard (SubjectCode PMD) est obligatoire en France ; renseignez-la dans « Mentions légales (FR) »."))
             }
-            if invoice.legalNoteAAB.trimmingCharacters(in: .whitespaces).isEmpty {
-                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .warning,
-                    message: "BR-FR-05 : La mention sur l'escompte (SubjectCode AAB) est obligatoire en France."))
+            if invoice.legalNoteAAB.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-05", severity: .error,
+                    message: "BR-FR-05 : La mention sur l'escompte (SubjectCode AAB) est obligatoire en France, même sans escompte (« Escompte pour paiement anticipé : aucun ») ; renseignez-la dans « Mentions légales (FR) »."))
             }
         }
 

@@ -26,10 +26,12 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `invoice.deliveryCountry` (champ optionnel) | `ram:ApplicableHeaderTradeDelivery/ram:ShipToTradeParty/ram:PostalTradeAddress/ram:CountryID` — sur une facture K, pays de l'acheteur à défaut de saisie (`effectiveDeliveryCountry`) | BT-80 | BR-IC-12 (respectée à l'émission), BR-CL-14 (code ISO 3166-1), BT-80-UE (contrôle interne) | erreur (code invalide) / avertissement (BT-80-UE) |
 | `invoice.precedingInvoiceRef` | `ram:ApplicableHeaderTradeSettlement/.../ram:IssuerAssignedID` (invoiceReferencedXML) | BT-25 | BR-FR-CO-04 (rectificative 384), BR-FR-CO-05 (avoir 381), BT-25-SOLDE (facture de solde, contrôle interne) | erreur |
 | `invoice.precedingInvoiceDate` | `ram:ApplicableHeaderTradeSettlement/.../ram:FormattedIssueDateTime` | BT-26 | BR-FR-CO-04, BR-FR-CO-05, BT-25-SOLDE | erreur |
-| `invoice.notes` | `ram:IncludedNote/ram:Content` (sans SubjectCode) | BT-22 | — | — |
-| `invoice.legalNotePMT` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMT` | BT-22 (BT-21 = PMT) | BR-FR-05 | avertissement |
-| `invoice.legalNotePMD` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMD` | BT-22 (BT-21 = PMD) | BR-FR-05 | avertissement |
-| `invoice.legalNoteAAB` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `AAB` | BT-22 (BT-21 = AAB) | BR-FR-05 | avertissement |
+| `invoice.notes` | `ram:IncludedNote/ram:Content` (sans SubjectCode) ; pas émise si vide ou faite d'espaces | BT-22 | — | — |
+| `invoice.legalNotePMT` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMT` | BT-22 (BT-21 = PMT) | BR-FR-05 | erreur (facture émise) |
+| `invoice.legalNotePMD` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMD` | BT-22 (BT-21 = PMD) | BR-FR-05 | erreur (facture émise) |
+| `invoice.legalNoteAAB` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `AAB` | BT-22 (BT-21 = AAB) | BR-FR-05 | erreur (facture émise) |
+
+Les notes (BT-22) sont émises sans leurs espaces de début et de fin, comme sur le PDF. Une note vide ou faite d'espaces n'est pas émise : `<ram:Content>   </ram:Content>` est un élément vide pour PEPPOL-EN16931-R008, et SUPER PDP répond alors `is_valid=false`. Une mention légale dans ce cas manque donc au XML, et BR-FR-05 bloque la facture. BR-FR-05 est fatale dans le Schematron France CTC. SUPER PDP la range dans les avertissements (validateur `…_WARNING.xslt`, `flag="warning"`) mais répond quand même `is_valid=false` pour chacune des trois mentions, sur un 380, un 381 ou un 386 (vérifié le 2026-09-23 sur des factures fictives).
 
 ## Émetteur / Destinataire (Party)
 
@@ -123,7 +125,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-S-05 | taux de TVA (BT-152) | erreur | Taux nul ou négatif en catégorie S (ligne à 0 % mise en « Taux normal » ; le menu Catégorie d'une ligne à 0 % ne propose plus S) |
 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | motif d'exonération (BT-120) | erreur | Motif obligatoire pour la catégorie de TVA (BT-151) de la ligne |
 | BR-FR-04 | code type (BT-3) | — | Respectée à l'émission : 387 émis en 380, INT en 381 |
-| BR-FR-05 | mentions légales (BT-22, BT-21 = PMT/PMD/AAB) | avertissement | Mentions PMT/PMD/AAB obligatoires FR |
+| BR-FR-05 | mentions légales (BT-22, BT-21 = PMT/PMD/AAB) | erreur | Mentions PMT/PMD/AAB obligatoires FR sur une facture émise, quel qu'en soit le type ; vide ou faite d'espaces = absente ; facture reçue : non contrôlée |
 | BR-FR-09 | SIRET émetteur / destinataire | avertissement | 14 chiffres, clé Luhn (SIRET non émis dans le XML) |
 | BR-FR-10 | SIREN émetteur (BT-30) | avertissement | 9 chiffres, clé Luhn |
 | BR-FR-12 | identifiant électronique destinataire (BT-49) | erreur | SIREN ou identifiant électronique obligatoire (BT-49 déduit du SIREN si vide) |
