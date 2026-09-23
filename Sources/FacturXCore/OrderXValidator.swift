@@ -66,7 +66,7 @@ public struct OrderXValidator {
 
         switch order.profile {
         case .basic:
-            warnings.append("Le profil BASIC est limité ; le profil COMFORT est recommandé pour Order-X.")
+            warnings.append("Le profil BASIC est limité (ni TVA ni description des lignes dans le XML) ; le profil COMFORT est recommandé pour Order-X.")
         case .comfort, .extended:
             break
         }

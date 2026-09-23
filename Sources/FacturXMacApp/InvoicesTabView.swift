@@ -1906,7 +1906,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    VATRatePicker(rate: $line.vatRate)
+                                    fieldHighlight(VATRatePicker(rate: $line.vatRate), forRuleIDs: ["BR-FR-16"])
                                     InfoBadge(text: "BT-152 — Taux de TVA appliqué (%). Catégorie (BT-151) et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
