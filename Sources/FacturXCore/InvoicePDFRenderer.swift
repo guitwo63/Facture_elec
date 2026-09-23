@@ -147,7 +147,7 @@ public final class InvoicePDFRenderer {
             drawText(context: context, text: line.name, x: colX[0], y: cy, font: font(size: 10), color: .black)
             drawText(context: context, text: fmt(line.quantity), x: colX[1], y: cy, font: font(size: 10), color: .black)
             drawText(context: context, text: fmt(line.unitPrice), x: colX[2], y: cy, font: font(size: 10), color: .black)
-            drawText(context: context, text: fmtRate(line.vatRate), x: colX[3], y: cy, font: font(size: 10), color: .black)
+            drawText(context: context, text: line.pdfVATRate, x: colX[3], y: cy, font: font(size: 10), color: .black)
             drawText(context: context, text: fmt(line.lineTotal), x: colX[4], y: cy, font: font(size: 10), color: .black)
             cy -= 16
         }
@@ -166,7 +166,7 @@ public final class InvoicePDFRenderer {
     private func drawTotals(context: CGContext, invoice: Invoice, y: CGFloat) {
         let amount = { (value: Double) in "\(invoice.currency) \(self.fmt(value))" }
         let rowsAboveRule = [TotalsRow(label: "Total HT:", amount: amount(invoice.lineTotal), font: font(size: 11), amountFont: boldFont(size: 11))]
-            + invoice.vatBreakdown.map { TotalsRow(label: "\($0.label):", amount: amount($0.amount), font: font(size: 11)) }
+            + invoice.vatBreakdown.map { TotalsRow(label: "\($0.pdfLabel):", amount: amount($0.amount), font: font(size: 11)) }
         var rowsBelowRule = [TotalsRow(label: "Total TTC:", amount: amount(invoice.grandTotal), font: boldFont(size: 13))]
         if invoice.prepaidAmount > 0 {
             rowsBelowRule.append(TotalsRow(label: "\(invoice.prepaidAmountLabel):", amount: amount(invoice.prepaidAmount), font: font(size: 11), color: .darkGray))
@@ -193,8 +193,8 @@ public final class InvoicePDFRenderer {
     private var totalsAmountX: CGFloat { pageWidth - margin - 90 }
 
     /// Colonne des libellés : 90 pt avant les montants, décalée vers la gauche dès qu'un libellé
-    /// n'y tient plus avec 12 pt d'écart. « TVA 0% — Livraison intracommunautaire: » fait 203 pt,
-    /// et « Acompte déjà payé: » (97 pt) chevauchait déjà son montant.
+    /// n'y tient plus avec 12 pt d'écart. « TVA 0% — Livraison intracommunautaire (K): » fait
+    /// 221 pt, et « Acompte déjà payé: » (97 pt) chevauchait déjà son montant.
     private func totalsLabelX(_ rows: [TotalsRow]) -> CGFloat {
         let widest = rows.map { textWidth($0.label, font: $0.font) }.max() ?? 0
         return min(totalsAmountX - 90, totalsAmountX - 12 - widest)
@@ -206,7 +206,16 @@ public final class InvoicePDFRenderer {
     }
 
     private func drawFooter(context: CGContext, invoice: Invoice) {
-        var y: CGFloat = 120
+        // Mentions d'exonération de TVA au-dessus des mentions légales, qui restent à y=120 :
+        // le pied de page monte de 11 pt par ligne de mention, et une facture sans exonération
+        // garde la même page.
+        let vatMentions = invoice.vatBreakdown.compactMap(\.pdfExemptionMention)
+            .flatMap { wrappedLines($0, font: font(size: 8), width: pageWidth - 2 * margin) }
+        var y: CGFloat = 120 + 11 * CGFloat(vatMentions.count)
+        for mention in vatMentions {
+            drawText(context: context, text: mention, x: margin, y: y, font: font(size: 8), color: .darkGray)
+            y -= 11
+        }
         let legalNotes: [(String, String)] = [
             ("Pénalités de retard", invoice.legalNotePMD),
             ("Frais de recouvrement", invoice.legalNotePMT),
@@ -251,6 +260,24 @@ public final class InvoicePDFRenderer {
         return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
     }
 
+    /// Lignes d'au plus `width` pt, coupées entre les mots : un motif saisi librement ne sort
+    /// pas de la page.
+    private func wrappedLines(_ text: String, font: CTFont, width: CGFloat) -> [String] {
+        let attr = NSAttributedString(string: text, attributes: [.font: font])
+        let typesetter = CTTypesetterCreateWithAttributedString(attr as CFAttributedString)
+        let string = attr.string as NSString
+        var lines: [String] = []
+        var start = 0
+        while start < string.length {
+            let count = CTTypesetterSuggestLineBreak(typesetter, start, Double(width))
+            guard count > 0 else { break }
+            lines.append(string.substring(with: NSRange(location: start, length: count))
+                .trimmingCharacters(in: .whitespacesAndNewlines))
+            start += count
+        }
+        return lines.filter { !$0.isEmpty }
+    }
+
     private func boldFont(size: CGFloat) -> CTFont {
         CTFontCreateWithName("Helvetica-Bold" as CFString, size, nil)
     }
@@ -264,11 +291,5 @@ public final class InvoicePDFRenderer {
             return String(format: "%.0f", value)
         }
         return String(format: "%.\(dec)f", value)
-    }
-
-    /// Taux de TVA sans décimale superflue (« 20 », « 5.5 ») : `fmt(_:dec: 0)` imprimait
-    /// « 6 » pour 5,5 %, alors que le XML embarqué porte 5.50.
-    private func fmtRate(_ rate: Double) -> String {
-        String(format: "%g", rate)
     }
 }

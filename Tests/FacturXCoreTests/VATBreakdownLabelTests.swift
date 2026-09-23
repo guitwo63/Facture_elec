@@ -57,13 +57,15 @@ final class VATBreakdownLabelTests: XCTestCase {
 
     // MARK: - PDF
 
+    /// Dans les PDF, le code de catégorie suit le libellé hors S (« (E) »), comme dans la colonne
+    /// « TVA% » des lignes : voir `VATExemptionMentionPDFTests`.
     func testInvoiceAndOrderPDFsNameTheCategoryOfEachZeroRateSubtotal() throws {
         let lines = [vatLine(100, 20), vatLine(50, 0, .zeroRated), vatLine(30, 0, .exempt)]
         let pdfs = [("facture", InvoicePDFRenderer().render(invoice: invoice(lines))),
                     ("commande", OrderPDFRenderer().render(order: order(lines)))]
         for (document, pdf) in pdfs {
             let text = try XCTUnwrap(PDFDocument(data: pdf)?.string, "\(document) : texte du PDF illisible")
-            for label in ["TVA 0% — Taux zéro:", "TVA 0% — Exonérée:", "TVA 20%:"] {
+            for label in ["TVA 0% — Taux zéro (Z):", "TVA 0% — Exonérée (E):", "TVA 20%:"] {
                 XCTAssertTrue(text.contains(label), "\(document) : « \(label) » absent de\n\(text)")
             }
             XCTAssertFalse(text.contains("TVA 0%:"), "\(document) : sous-total à 0 % sans sa catégorie\n\(text)")
@@ -71,17 +73,17 @@ final class VATBreakdownLabelTests: XCTestCase {
     }
 
     /// La colonne des libellés du bloc des totaux (90 pt avant les montants) s'élargit vers la
-    /// gauche pour le plus long : « TVA 0% — Livraison intracommunautaire: » fait 203 pt. Avant ce
-    /// changement, « Acompte déjà payé: » (97 pt) chevauchait déjà son montant.
+    /// gauche pour le plus long : « TVA 0% — Livraison intracommunautaire (K): » fait 221 pt. Avant
+    /// ce changement, « Acompte déjà payé: » (97 pt) chevauchait déjà son montant.
     func testTotalsLabelsEndBeforeTheirAmounts() throws {
         var deposit = invoice([vatLine(500, 0, .intraCommunity)])
         deposit.prepaidAmount = 100
         try assertLabelsEndBeforeTheirAmounts(
             InvoicePDFRenderer().render(invoice: deposit),
-            ["Total HT:", "TVA 0% — Livraison intracommunautaire:", "Total TTC:", "Acompte déjà payé:", "Net à payer:"])
+            ["Total HT:", "TVA 0% — Livraison intracommunautaire (K):", "Total TTC:", "Acompte déjà payé:", "Net à payer:"])
         try assertLabelsEndBeforeTheirAmounts(
             OrderPDFRenderer().render(order: order([vatLine(500, 0, .intraCommunity)])),
-            ["Total HT:", "TVA 0% — Livraison intracommunautaire:", "Total TTC:"])
+            ["Total HT:", "TVA 0% — Livraison intracommunautaire (K):", "Total TTC:"])
     }
 
     private func assertLabelsEndBeforeTheirAmounts(_ pdf: Data, _ labels: [String],
