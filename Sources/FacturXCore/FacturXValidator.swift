@@ -43,7 +43,7 @@ public struct FacturXValidator {
         let sellerHasEndpoint = (invoice.seller.endpointID?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         let sellerHasSiren = (invoice.seller.siren?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         if !sellerHasEndpoint && !sellerHasSiren {
-            errors.append("L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-49).")
+            errors.append("L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-34).")
         }
 
         if invoice.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -55,7 +55,7 @@ public struct FacturXValidator {
         let buyerHasEndpoint = (invoice.buyer.endpointID?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         let buyerHasSiren = (invoice.buyer.siren?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         if !buyerHasEndpoint && !buyerHasSiren {
-            errors.append("Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-34).")
+            errors.append("Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-49).")
         }
 
         if invoice.lines.isEmpty {
@@ -83,18 +83,14 @@ public struct FacturXValidator {
             errors.append("La devise doit être un code ISO 4217 à 3 lettres (ex. EUR).")
         }
 
-        if invoice.issueDate > invoice.dueDate {
-            warnings.append("La date d'échéance est antérieure à la date d'émission.")
-        }
-
         if invoice.seller.endpointID == nil || (invoice.seller.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
             if (invoice.seller.siren ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-                warnings.append("L'identifiant électronique de l'émetteur (BT-49) sera déduit du SIREN si renseigné.")
+                warnings.append("L'identifiant électronique de l'émetteur (BT-34) sera déduit du SIREN si renseigné.")
             }
         }
         if invoice.buyer.endpointID == nil || (invoice.buyer.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
             if (invoice.buyer.siren ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-                warnings.append("L'identifiant électronique du destinataire (BT-34) sera déduit du SIREN si renseigné.")
+                warnings.append("L'identifiant électronique du destinataire (BT-49) sera déduit du SIREN si renseigné.")
             }
         }
 
@@ -119,13 +115,6 @@ public struct FacturXValidator {
                     errors.append("L'IBAN est invalide (clé de contrôle mod 97 incorrecte ou longueur pays inattendue).")
                 }
             }
-        }
-
-        switch invoice.profile {
-        case .minimum, .basicWL, .basic:
-            warnings.append("Le profil \(invoice.profile.rawValue) est limité ; le profil EN 16931 est recommandé pour la réforme française.")
-        case .en16931, .extended:
-            break
         }
 
         let hasRuleErrors = rules.contains { $0.severity == .error }

@@ -34,7 +34,20 @@ public enum EN16931RuleContext {
     case received
 }
 
+/// Identifiants de règle : ceux des Schematron officiels fournis avec le paquet `factur-x`
+/// (EN 16931 : `facturx-en16931/Factur-X_1.09_EN16931.xsl`, dont les numéros à un chiffre
+/// s'écrivent BR-01…BR-09 ; France CTC : `cii-schematron-fr-ctc/BR-FR-Flux2-Schematron-CII.xslt`),
+/// pour qu'un contrôle local se rapproche directement du rejet qu'émettrait la PDP. Un contrôle
+/// sans règle officielle correspondante porte un identifiant interne « BT-<n>-<MOTIF> »
+/// (n = terme métier contrôlé, ex. BT-157-GTIN) : jamais un BR-xx, qui désignerait une autre
+/// règle officielle.
 public enum EN16931BusinessRules {
+
+    /// Préfixe des règles EN 16931 propres à une catégorie de TVA : le code de la catégorie,
+    /// sauf pour K (livraison intracommunautaire), dont les règles sont les BR-IC-xx.
+    private static func rulePrefix(_ category: VATCategory) -> String {
+        category == .intraCommunity ? "IC" : category.rawValue
+    }
 
     public static func evaluate(invoice: Invoice, context: EN16931RuleContext = .issued) -> [BusinessRuleResult] {
         var results: [BusinessRuleResult] = []
@@ -45,54 +58,68 @@ public enum EN16931BusinessRules {
         let currency = invoice.currency.trimmingCharacters(in: .whitespaces)
 
         if invoiceNumber.isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-1", severity: .error,
-                message: "BR-1 : Le numéro de facture (BT-1) est obligatoire."))
+            results.append(BusinessRuleResult(ruleId: "BR-02", severity: .error,
+                message: "BR-02 : Le numéro de facture (BT-1) est obligatoire."))
         }
 
+        // Contrôle interne : aucune règle officielle n'interdit une date d'émission future.
         if invoice.issueDate > Date() + 86400 {
-            results.append(BusinessRuleResult(ruleId: "BR-2", severity: .warning,
-                message: "BR-2 : La date d'émission (BT-2) est postérieure à aujourd'hui."))
+            results.append(BusinessRuleResult(ruleId: "BT-2-FUTURE", severity: .warning,
+                message: "BT-2 : La date d'émission est postérieure à aujourd'hui."))
         }
 
-        if invoice.dueDate < invoice.issueDate {
-            results.append(BusinessRuleResult(ruleId: "BR-9", severity: .warning,
-                message: "BR-9 : La date d'échéance (BT-9) est antérieure à la date d'émission (BT-2)."))
+        // BR-FR-CO-07 (Schematron France CTC, bloquant à la PDP) : l'échéance ne peut pas
+        // précéder la date de facture, sauf sur un acompte (386) ou en cadre « déjà payée »
+        // (B2/S2/M2), où elle est la date du paiement. Comparaison au jour près des dates
+        // écrites dans le XML, comme le Schematron : une échéance du même jour est admise,
+        // même à une heure antérieure.
+        if !invoice.type.isDeposit && !invoice.billingMode.isAlreadyPaid {
+            let issueDay = CIIXMLGenerator.xmlDate(invoice.issueDate)
+            let dueDay = CIIXMLGenerator.xmlDate(invoice.dueDate)
+            if dueDay < issueDay {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-CO-07", severity: .error,
+                    message: "BR-FR-CO-07 : L'échéance (BT-9) du \(frenchDay(dueDay)) est antérieure à la date de facture (BT-2) du \(frenchDay(issueDay)) : la PDP rejetterait la facture. Une échéance antérieure n'est admise que pour une facture d'acompte (386) ou déjà payée (cadre B2, S2 ou M2)."))
+            }
         }
 
         let knownCurrencies = Set(NormRefs.currencies.map { $0.code })
+        // Présence : BR-05 ; format et liste ISO 4217 : BR-CL-04 (règle de liste de codes, sans
+        // identifiant dans le Schematron Factur-X EN16931, nommée dans les artefacts CEN).
         if currency.isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-5", severity: .error,
-                message: "BR-5 : La devise (BT-5) est obligatoire (code ISO 4217 à 3 lettres)."))
+            results.append(BusinessRuleResult(ruleId: "BR-05", severity: .error,
+                message: "BR-05 : La devise (BT-5) est obligatoire (code ISO 4217 à 3 lettres)."))
         } else if currency.count != 3 {
-            results.append(BusinessRuleResult(ruleId: "BR-5", severity: .error,
-                message: "BR-5 : La devise (BT-5) doit être un code ISO 4217 à 3 lettres."))
+            results.append(BusinessRuleResult(ruleId: "BR-CL-04", severity: .error,
+                message: "BR-CL-04 : La devise (BT-5) doit être un code ISO 4217 à 3 lettres."))
         } else if !knownCurrencies.contains(currency) {
-            results.append(BusinessRuleResult(ruleId: "BR-5", severity: .warning,
-                message: "BR-5 : La devise (BT-5) « \(currency) » n'est pas dans la liste de référence ISO 4217 ; vérifiez le code."))
+            results.append(BusinessRuleResult(ruleId: "BR-CL-04", severity: .warning,
+                message: "BR-CL-04 : La devise (BT-5) « \(currency) » n'est pas dans la liste de référence ISO 4217 ; vérifiez le code."))
         }
 
         if sellerName.isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-6", severity: .error,
-                message: "BR-6 : Le nom de l'émetteur (BT-27) est obligatoire."))
+            results.append(BusinessRuleResult(ruleId: "BR-06", severity: .error,
+                message: "BR-06 : Le nom de l'émetteur (BT-27) est obligatoire."))
         }
         if invoice.seller.country.trimmingCharacters(in: .whitespaces).isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-7", severity: .error,
-                message: "BR-7 : Le pays de l'émetteur (BT-40) est obligatoire (code ISO à 2 lettres)."))
+            results.append(BusinessRuleResult(ruleId: "BR-09", severity: .error,
+                message: "BR-09 : Le pays de l'émetteur (BT-40) est obligatoire (code ISO à 2 lettres)."))
         }
+        // Le générateur déduit l'adresse électronique (BT-34) du SIREN quand elle est vide :
+        // l'un ou l'autre suffit à satisfaire BR-FR-13 (« Le BT-34 est obligatoire »).
         let sellerEndpoint = (invoice.seller.endpointID ?? "").trimmingCharacters(in: .whitespaces)
         let sellerSiren = (invoice.seller.siren ?? "").trimmingCharacters(in: .whitespaces)
         if sellerEndpoint.isEmpty && sellerSiren.isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-49", severity: .error,
-                message: "BR-49 : L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-49)."))
+            results.append(BusinessRuleResult(ruleId: "BR-FR-13", severity: .error,
+                message: "BR-FR-13 : L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-34)."))
         }
         if !sellerSiren.isEmpty && !SireneValidator.isValidSiren(invoice.seller.siren) {
-            results.append(BusinessRuleResult(ruleId: "BR-49", severity: .warning,
-                message: "BR-49 : Le SIREN de l'émetteur (BT-29) doit comporter 9 chiffres et être valide (clé Luhn)."))
+            results.append(BusinessRuleResult(ruleId: "BR-FR-10", severity: .warning,
+                message: "BR-FR-10 : Le SIREN de l'émetteur (BT-30) doit comporter 9 chiffres et être valide (clé Luhn)."))
         }
         if let sellerSiret = invoice.seller.siret?.trimmingCharacters(in: .whitespaces), !sellerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.seller.siret) {
-            results.append(BusinessRuleResult(ruleId: "BR-49", severity: .warning,
-                message: "BR-49 : Le SIRET de l'émetteur doit comporter 14 chiffres et être valide (clé Luhn)."))
+            results.append(BusinessRuleResult(ruleId: "BR-FR-09", severity: .warning,
+                message: "BR-FR-09 : Le SIRET de l'émetteur doit comporter 14 chiffres et être valide (clé Luhn)."))
         }
         let sellerVAT = (invoice.seller.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
         let hasStandardRatedLine = invoice.lines.contains { $0.vatRate > 0 }
@@ -115,27 +142,30 @@ public enum EN16931BusinessRules {
         }
 
         if buyerName.isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-25", severity: .error,
-                message: "BR-25 : Le nom du destinataire (BT-44) est obligatoire."))
+            results.append(BusinessRuleResult(ruleId: "BR-07", severity: .error,
+                message: "BR-07 : Le nom du destinataire (BT-44) est obligatoire."))
         }
         if invoice.buyer.country.trimmingCharacters(in: .whitespaces).isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-26", severity: .error,
-                message: "BR-26 : Le pays du destinataire (BT-55) est obligatoire (code ISO à 2 lettres)."))
+            results.append(BusinessRuleResult(ruleId: "BR-11", severity: .error,
+                message: "BR-11 : Le pays du destinataire (BT-55) est obligatoire (code ISO à 2 lettres)."))
         }
+        // Même déduction que pour l'émetteur : à défaut d'adresse, le BT-49 vient du SIREN (BR-FR-12).
         let buyerEndpoint = (invoice.buyer.endpointID ?? "").trimmingCharacters(in: .whitespaces)
         let buyerSiren = (invoice.buyer.siren ?? "").trimmingCharacters(in: .whitespaces)
         if buyerEndpoint.isEmpty && buyerSiren.isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-46", severity: .error,
-                message: "BR-46 : Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-34)."))
+            results.append(BusinessRuleResult(ruleId: "BR-FR-12", severity: .error,
+                message: "BR-FR-12 : Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-49)."))
         }
+        // BR-FR-32 (tout identifiant légal de schéma 0002 : 9 chiffres) plutôt que BR-FR-11,
+        // qui ne vaut qu'en présence d'une note BAR = B2B, que l'application n'émet pas.
         if !buyerSiren.isEmpty && !SireneValidator.isValidSiren(invoice.buyer.siren) {
-            results.append(BusinessRuleResult(ruleId: "BR-46", severity: .warning,
-                message: "BR-46 : Le SIREN du destinataire (BT-48) doit comporter 9 chiffres et être valide (clé Luhn)."))
+            results.append(BusinessRuleResult(ruleId: "BR-FR-32", severity: .warning,
+                message: "BR-FR-32 : Le SIREN du destinataire (BT-47) doit comporter 9 chiffres et être valide (clé Luhn)."))
         }
         if let buyerSiret = invoice.buyer.siret?.trimmingCharacters(in: .whitespaces), !buyerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.buyer.siret) {
-            results.append(BusinessRuleResult(ruleId: "BR-46", severity: .warning,
-                message: "BR-46 : Le SIRET du destinataire doit comporter 14 chiffres et être valide (clé Luhn)."))
+            results.append(BusinessRuleResult(ruleId: "BR-FR-09", severity: .warning,
+                message: "BR-FR-09 : Le SIRET du destinataire doit comporter 14 chiffres et être valide (clé Luhn)."))
         }
         if !VATNumberValidator.hasValidCountryPrefix(invoice.buyer.vatNumber) {
             results.append(BusinessRuleResult(ruleId: "BR-CO-09", severity: .error,
@@ -143,66 +173,80 @@ public enum EN16931BusinessRules {
         }
 
         if invoice.lines.isEmpty {
-            results.append(BusinessRuleResult(ruleId: "BR-15", severity: .error,
-                message: "BR-15 : La facture doit contenir au moins une ligne (BG-25)."))
+            results.append(BusinessRuleResult(ruleId: "BR-16", severity: .error,
+                message: "BR-16 : La facture doit contenir au moins une ligne (BG-25)."))
         }
 
         for (idx, line) in invoice.lines.enumerated() {
             let label = "Ligne \(idx + 1)"
             if line.name.trimmingCharacters(in: .whitespaces).isEmpty {
-                results.append(BusinessRuleResult(ruleId: "BR-21", severity: .error,
-                    message: "BR-21 : \(label) — la désignation (BT-153) est obligatoire."))
+                results.append(BusinessRuleResult(ruleId: "BR-25", severity: .error,
+                    message: "BR-25 : \(label) — la désignation (BT-153) est obligatoire."))
             }
+            // Contrôle interne : EN 16931 admet une quantité nulle ou négative (BR-22 n'exige
+            // que sa présence) ; l'application porte le sens d'un avoir par le type 381.
             if line.quantity <= 0 {
-                results.append(BusinessRuleResult(ruleId: "BR-16", severity: .error,
-                    message: "BR-16 : \(label) — la quantité (BT-129) doit être positive."))
+                results.append(BusinessRuleResult(ruleId: "BT-129-POSITIVE", severity: .error,
+                    message: "BT-129 : \(label) — la quantité doit être positive."))
             }
             if line.unitPrice < 0 {
-                results.append(BusinessRuleResult(ruleId: "BR-17", severity: .error,
-                    message: "BR-17 : \(label) — le prix unitaire (BT-146) ne peut pas être négatif."))
+                results.append(BusinessRuleResult(ruleId: "BR-27", severity: .error,
+                    message: "BR-27 : \(label) — le prix unitaire (BT-146) ne peut pas être négatif."))
             }
             if line.unit.trimmingCharacters(in: .whitespaces).isEmpty {
-                results.append(BusinessRuleResult(ruleId: "BR-20", severity: .warning,
-                    message: "BR-20 : \(label) — l'unité (BT-130) n'est pas renseignée (code UN/ECE, ex. C62, DAY)."))
+                results.append(BusinessRuleResult(ruleId: "BR-23", severity: .warning,
+                    message: "BR-23 : \(label) — l'unité (BT-130) n'est pas renseignée (code UN/ECE, ex. C62, DAY)."))
             }
+            // Contrôle interne : EN 16931 décrit ce calcul du montant net de ligne sans en
+            // faire une règle BR.
             let computed = (line.quantity * line.unitPrice).rounded(toPlaces: 2)
             if (computed - line.lineTotal).rounded(toPlaces: 2) != 0 {
-                results.append(BusinessRuleResult(ruleId: "BR-27", severity: .error,
-                    message: "BR-27 : \(label) — le total ligne (BT-149) ≠ quantité × prix unitaire."))
+                results.append(BusinessRuleResult(ruleId: "BT-131-CALCUL", severity: .error,
+                    message: "BT-131 : \(label) — le montant net de la ligne ≠ quantité × prix unitaire."))
             }
         }
 
         let computedLineTotal = invoice.lines.reduce(0) { $0 + $1.lineTotal }.rounded(toPlaces: 2)
         if (computedLineTotal - invoice.lineTotal).rounded(toPlaces: 2) != 0 {
-            results.append(BusinessRuleResult(ruleId: "BR-12", severity: .error,
-                message: "BR-12 : Le total HT (BT-106) ≠ somme des totaux ligne."))
+            results.append(BusinessRuleResult(ruleId: "BR-CO-10", severity: .error,
+                message: "BR-CO-10 : Le total HT (BT-106) ≠ somme des montants nets de ligne (BT-131)."))
         }
 
         let computedVat = invoice.vatBreakdown.reduce(0) { $0 + $1.amount }.rounded(toPlaces: 2)
         if (computedVat - invoice.taxTotal).rounded(toPlaces: 2) != 0 {
-            results.append(BusinessRuleResult(ruleId: "BR-53", severity: .error,
-                message: "BR-53 : Le total TVA (BT-110) ≠ somme des montants de TVA par taux."))
+            results.append(BusinessRuleResult(ruleId: "BR-CO-14", severity: .error,
+                message: "BR-CO-14 : Le total TVA (BT-110) ≠ somme des montants de TVA par taux (BT-117)."))
         }
 
         let computedGrand = (invoice.lineTotal + invoice.taxTotal).rounded(toPlaces: 2)
         if (computedGrand - invoice.grandTotal).rounded(toPlaces: 2) != 0 {
-            results.append(BusinessRuleResult(ruleId: "BR-13", severity: .error,
-                message: "BR-13 : Le total TTC (BT-112) ≠ total HT + total TVA."))
+            results.append(BusinessRuleResult(ruleId: "BR-CO-15", severity: .error,
+                message: "BR-CO-15 : Le total TTC (BT-112) ≠ total HT (BT-109) + total TVA (BT-110)."))
         }
 
         if invoice.type.requiresPrecedingInvoice {
+            // France CTC : BR-FR-CO-04 pour une facture rectificative (384), BR-FR-CO-05 pour
+            // un avoir (381). Aucune règle officielle pour la facture de solde, émise en 380 :
+            // l'application y exige la référence de l'acompte (contrôle interne).
+            let ruleId: String
+            switch invoice.type {
+            case .correction: ruleId = "BR-FR-CO-04"
+            case .finalSettlement: ruleId = "BT-25-SOLDE"
+            default: ruleId = "BR-FR-CO-05"
+            }
             let ref = (invoice.precedingInvoiceRef ?? "").trimmingCharacters(in: .whitespaces)
             if ref.isEmpty {
-                results.append(BusinessRuleResult(ruleId: "BR-FR-CO-05", severity: .error,
-                    message: "BR-FR-CO-05 / BT-25 : Ce type de facture doit référencer la facture antérieure (numéro + date)."))
+                results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
+                    message: "\(ruleId) / BT-25 : Ce type de facture doit référencer la facture antérieure (numéro + date)."))
             } else if invoice.precedingInvoiceDate == nil {
-                results.append(BusinessRuleResult(ruleId: "BR-FR-CO-05", severity: .error,
-                    message: "BR-FR-CO-05 / BT-26 : La date de la facture antérieure référencée est obligatoire pour ce type de facture."))
+                results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
+                    message: "\(ruleId) / BT-26 : La date de la facture antérieure référencée est obligatoire pour ce type de facture."))
             }
         }
+        // Contrôle interne (aucune règle officielle ne l'exige).
         if invoice.type.isFinalSettlement, invoice.prepaidAmount <= 0 {
-            results.append(BusinessRuleResult(ruleId: "BR-AC-01", severity: .warning,
-                message: "BR-AC-01 : Une facture de solde devrait indiquer le montant des acomptes déjà payés (PrepaidAmount)."))
+            results.append(BusinessRuleResult(ruleId: "BT-113-SOLDE", severity: .warning,
+                message: "BT-113 : Une facture de solde devrait indiquer le montant des acomptes déjà payés."))
         }
 
         // Cadre de facturation (BT-23) : contrôles du Schematron France CTC, bloquants à la
@@ -247,48 +291,53 @@ public enum EN16931BusinessRules {
             }
         }
 
+        // Contrôle interne : BR-50/BR-61 n'exigent que la présence de l'identifiant du compte
+        // (BT-84), aucune règle officielle ne vérifie la clé de l'IBAN.
         if let iban = invoice.paymentIBAN, !iban.trimmingCharacters(in: .whitespaces).isEmpty {
             if !IBANValidator.isValid(iban) {
                 let cleaned = IBANValidator.normalize(iban)
                 if cleaned.count < 15 || cleaned.count > 34 {
-                    results.append(BusinessRuleResult(ruleId: "BR-50", severity: .warning,
-                        message: "BR-50 : L'IBAN (BT-91) semble avoir une longueur inhabituelle (15 à 34 caractères)."))
+                    results.append(BusinessRuleResult(ruleId: "BT-84-IBAN", severity: .warning,
+                        message: "BT-84 : L'IBAN semble avoir une longueur inhabituelle (15 à 34 caractères)."))
                 } else if cleaned.uppercased() != cleaned {
-                    results.append(BusinessRuleResult(ruleId: "BR-50", severity: .warning,
-                        message: "BR-50 : L'IBAN (BT-91) doit être en majuscules."))
+                    results.append(BusinessRuleResult(ruleId: "BT-84-IBAN", severity: .warning,
+                        message: "BT-84 : L'IBAN doit être en majuscules."))
                 } else {
-                    results.append(BusinessRuleResult(ruleId: "BR-50", severity: .error,
-                        message: "BR-50 : L'IBAN (BT-91) est invalide (clé de contrôle mod 97 incorrecte ou longueur pays inattendue)."))
+                    results.append(BusinessRuleResult(ruleId: "BT-84-IBAN", severity: .error,
+                        message: "BT-84 : L'IBAN est invalide (clé de contrôle mod 97 incorrecte ou longueur pays inattendue)."))
                 }
             }
         }
 
+        // BR-FR-16 n'admet qu'une liste fermée de taux français : un taux négatif en est exclu.
         if invoice.lines.contains(where: { $0.vatRate < 0 }) {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-06", severity: .warning,
-                message: "BR-FR-06 : Un taux de TVA négatif est inhabituel ; vérifiez la catégorie de TVA (BT-151)."))
+            results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .warning,
+                message: "BR-FR-16 : Un taux de TVA négatif (BT-152) ne fait pas partie des taux admis en France ; vérifiez la catégorie de TVA (BT-151)."))
         }
 
         for (idx, line) in invoice.lines.enumerated() {
             let label = "Ligne \(idx + 1)"
+            // Contrôle interne : simple rappel, un taux nul en catégorie Z est conforme.
             if line.vatRate == 0 && line.vatCategory == .zeroRated {
-                results.append(BusinessRuleResult(ruleId: "BR-CO-16", severity: .warning,
-                    message: "BR-CO-16 : \(label) — taux nul (BT-151=Z) : vérifiez qu'il s'agit bien d'une exonération et non d'un oubli de taux."))
+                results.append(BusinessRuleResult(ruleId: "BT-152-ZERO", severity: .warning,
+                    message: "BT-152 : \(label) — taux nul en catégorie Z (BT-151) : vérifiez qu'il s'agit bien d'une exonération et non d'un oubli de taux."))
             }
             // Toute catégorie autre que "Standard" (Z, AE, K, G, E, O) implique un taux à 0 — sinon
             // le sous-total de TVA calculé pour ce groupe (BG-23) est non nul alors que sa catégorie
             // l'exige à zéro, rejeté par le validateur EN16931 officiel (confirmé en conditions
-            // réelles via SUPER PDP : BR-Z-05/BR-Z-09 pour la catégorie Z). Le suffixe -RATE est
-            // interne (pas un vrai numéro de règle officiel) pour les autres catégories, dont
-            // l'identifiant exact de cette règle précise n'est pas vérifié ici.
+            // réelles via SUPER PDP : BR-Z-05/BR-Z-09 pour la catégorie Z). Règle BR-<catégorie>-05
+            // du Schematron : BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05 (K), BR-G-05, BR-O-05.
             if line.vatCategory != .standard && line.vatRate != 0 {
-                let ruleId = line.vatCategory == .zeroRated ? "BR-Z-05" : "BR-\(line.vatCategory.rawValue)-RATE"
+                let ruleId = "BR-\(rulePrefix(line.vatCategory))-05"
                 results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
                     message: "\(ruleId) : \(label) — catégorie « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) incompatible avec un taux non nul (BT-152=\(line.vatRate)) ; changez la catégorie ou repassez le taux à 0."))
             }
+            // Motif d'exonération : BR-E-10, BR-AE-10, BR-IC-10 (K), BR-G-10, BR-O-10.
             if line.vatCategory.requiresExemptionReason,
                (line.vatExemptionReason ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-                results.append(BusinessRuleResult(ruleId: "BR-\(line.vatCategory.rawValue)-05", severity: .error,
-                    message: "BR-\(line.vatCategory.rawValue)-05 : \(label) — catégorie de TVA « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) : un motif d'exonération (BT-120) est obligatoire."))
+                let ruleId = "BR-\(rulePrefix(line.vatCategory))-10"
+                results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
+                    message: "\(ruleId) : \(label) — catégorie de TVA « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) : un motif d'exonération (BT-120) est obligatoire."))
             }
             // Contrôle interne (aucun Schematron officiel ne vérifie la clé) : le BT-157 est
             // émis avec le schéma 0160 (GTIN), une référence interne y serait mal qualifiée —
@@ -303,18 +352,36 @@ public enum EN16931BusinessRules {
             }
         }
 
-        // Recommandation de profil : pertinente pour un choix qu'on fait nous-mêmes en
-        // émettant, pas pour un profil déjà choisi par le fournisseur sur un document reçu.
-        if context == .issued {
-            switch invoice.profile {
-            case .minimum, .basicWL, .basic:
-                results.append(BusinessRuleResult(ruleId: "BR-PROFIL", severity: .warning,
-                    message: "Le profil \(invoice.profile.rawValue) est limité ; EN 16931 est recommandé pour la réforme française."))
-            case .en16931, .extended:
-                break
-            }
+        // Profil (BT-24) : le générateur produit la structure EN 16931, que le XSD des profils
+        // plus restreints rejette (voir `FacturXProfile`) — bloquant sur une facture qu'on émet.
+        // Sans objet sur un document reçu : son émetteur a choisi le profil et produit le XML.
+        if context == .issued, let rejection = xsdRejection(of: invoice.profile) {
+            results.append(BusinessRuleResult(ruleId: "BR-PROFIL", severity: .error,
+                message: "BR-PROFIL : Le profil \(invoice.profile.rawValue) (BT-24) n'est plus proposé à l'émission : l'application produit un XML de structure EN 16931, que le XSD du profil \(invoice.profile.rawValue) \(rejection). Repassez la facture en EN 16931 (ou EXTENDED)."))
         }
 
         return results
+    }
+
+    /// Ce que le XSD du profil rejette dans le XML de `CIIXMLGenerator` (mesure du
+    /// 2026-09-23), `nil` pour les profils où ce XML est conforme (`FacturXProfile.isIssuable`).
+    private static func xsdRejection(of profile: FacturXProfile) -> String? {
+        switch profile {
+        case .minimum:
+            return "le rejette toujours : ce profil ne comporte ni lignes, ni mentions légales, ni adresses électroniques (BT-34/BT-49), pourtant exigées en France"
+        case .basicWL:
+            return "le rejette toujours : ce profil ne comporte pas de lignes de facture"
+        case .basic:
+            return "le rejette dès qu'il contient notamment un contact, un IBAN (moyen de paiement « SEPA »), un BIC ou une description de ligne"
+        case .en16931, .extended:
+            return nil
+        }
+    }
+
+    /// "20260923" (date du XML) → "23/09/2026", pour la citer telle quelle dans un message.
+    private static func frenchDay(_ xmlDate: String) -> String {
+        guard xmlDate.count == 8 else { return xmlDate }
+        let c = Array(xmlDate)
+        return String(c[6...7]) + "/" + String(c[4...5]) + "/" + String(c[0...3])
     }
 }
