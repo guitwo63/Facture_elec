@@ -186,16 +186,16 @@ struct SuperPDPValidationSheet: View {
                 if !report.errors.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Erreurs (\(report.errors.count))").font(.subheadline.bold()).foregroundStyle(.red)
-                        ForEach(Array(report.errors.enumerated()), id: \.offset) { _, e in
-                            Text("• \(e)").font(.caption).foregroundStyle(.red)
+                        ForEach(Array(report.errorEntries.enumerated()), id: \.offset) { _, e in
+                            Text("• \(e.displayText)").font(.caption).foregroundStyle(.red)
                         }
                     }
                 }
                 if !report.warnings.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Avertissements (\(report.warnings.count))").font(.subheadline.bold()).foregroundStyle(.orange)
-                        ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, w in
-                            Text("• \(w)").font(.caption).foregroundStyle(.orange)
+                        ForEach(Array(report.warningEntries.enumerated()), id: \.offset) { _, w in
+                            Text("• \(w.displayText)").font(.caption).foregroundStyle(.orange)
                         }
                     }
                 }

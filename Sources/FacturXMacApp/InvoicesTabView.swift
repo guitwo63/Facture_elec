@@ -2670,14 +2670,15 @@ struct InvoiceEditorView: View {
                 if !report.errors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
                     // Identité = position, pas le texte : un même message Schematron revient
-                    // pour chaque ligne fautive, et deux textes égaux auraient le même `id`.
+                    // pour chaque élément fautif (« Ligne n » ne départage que des lignes
+                    // différentes), et deux textes égaux auraient le même `id`.
                     // Le rapport est remplacé d'un bloc à chaque validation, sans état par ligne.
-                    ForEach(Array(report.errors.enumerated()), id: \.offset) { _, msg in
+                    ForEach(Array(report.errorEntries.enumerated()), id: \.offset) { _, entry in
                         HStack(alignment: .top, spacing: 4) {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.red)
-                            Text(msg)
+                            Text(entry.displayText)
                                 .font(.caption)
                                 .foregroundStyle(.red)
                         }
@@ -2686,12 +2687,12 @@ struct InvoiceEditorView: View {
                 if !report.warnings.isEmpty {
                     if !report.errors.isEmpty { Divider().padding(.vertical, 2) }
                     Text("Avertissements :").font(.caption.bold())
-                    ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, msg in
+                    ForEach(Array(report.warningEntries.enumerated()), id: \.offset) { _, entry in
                         HStack(alignment: .top, spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.orange)
-                            Text(msg)
+                            Text(entry.displayText)
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }

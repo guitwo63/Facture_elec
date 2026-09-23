@@ -193,15 +193,63 @@ public struct SuperPDPInvoiceSubmission: Identifiable, Codable, Hashable {
 
 public struct SuperPDPValidationReport: Hashable {
     public var isValid: Bool
-    public var errors: [String]
-    public var warnings: [String]
+    /// Un échec par entrée, dans l'ordre du rapport : le compteur « n erreur(s) » en dépend.
+    public var errorEntries: [SuperPDPValidationMessage]
+    public var warningEntries: [SuperPDPValidationMessage]
     public var raw: [String: String]
 
-    public init(isValid: Bool, errors: [String] = [], warnings: [String] = [], raw: [String: String] = [:]) {
+    /// Texte seul de chaque échec, sans sa `location`.
+    public var errors: [String] { errorEntries.map(\.message) }
+    public var warnings: [String] { warningEntries.map(\.message) }
+
+    public init(isValid: Bool, errorEntries: [SuperPDPValidationMessage] = [], warningEntries: [SuperPDPValidationMessage] = [], raw: [String: String] = [:]) {
         self.isValid = isValid
-        self.errors = errors
-        self.warnings = warnings
+        self.errorEntries = errorEntries
+        self.warningEntries = warningEntries
         self.raw = raw
+    }
+}
+
+/// Un échec d'un validateur SUPER PDP (schéma `message` de l'OpenAPI : `message`, `raw`,
+/// `location`). Une règle Schematron qui échoue sur plusieurs lignes renvoie le même `message`
+/// pour chacune : seule `location` dit laquelle.
+public struct SuperPDPValidationMessage: Hashable {
+    public var message: String
+    /// XPath de l'élément en cause, quand le validateur le donne. SUPER PDP renvoie tel quel le
+    /// chemin SVRL du Schematron officiel (vérifié sur un vrai rapport le 2026-09-23), ex.
+    /// `/*:CrossIndustryInvoice[namespace-uri()='…'][1]/*:SupplyChainTradeTransaction[namespace-uri()='…'][1]/*:IncludedSupplyChainTradeLineItem[namespace-uri()='…'][2]/…`.
+    public var location: String?
+
+    public init(message: String, location: String? = nil) {
+        self.message = message
+        self.location = location
+    }
+
+    /// Rang (à partir de 1) de la ligne de facture en cause, nil pour un échec d'en-tête ou sans
+    /// `location`. Le générateur émet les lignes dans l'ordre de l'éditeur, avec LineID (BT-126)
+    /// = rang : la ligne 2 du rapport est la 2e ligne de l'éditeur.
+    public var lineNumber: Int? {
+        location.flatMap(Self.invoiceLineNumber(in:))
+    }
+
+    /// Texte affiché dans les panneaux : « Ligne 2 — [BR-Z-05]-… » quand l'échec vise une ligne,
+    /// le message seul sinon.
+    public var displayText: String {
+        guard let n = lineNumber else { return message }
+        return "Ligne \(n) — \(message)"
+    }
+
+    /// Le rang est le dernier prédicat numérique de l'étape `IncludedSupplyChainTradeLineItem` :
+    /// le XSLT officiel met d'abord un filtre de namespace (`[namespace-uri()='…'][2]`), un chemin
+    /// préfixé n'a que le rang (`ram:IncludedSupplyChainTradeLineItem[2]`). Sans rang, rien.
+    static func invoiceLineNumber(in location: String) -> Int? {
+        let pattern = #"IncludedSupplyChainTradeLineItem(?:\[[^\]]*\])*\[(\d+)\]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(location.startIndex..<location.endIndex, in: location)
+        guard let match = regex.firstMatch(in: location, options: [], range: range),
+              let group = Range(match.range(at: 1), in: location),
+              let n = Int(location[group]), n > 0 else { return nil }
+        return n
     }
 }
 
@@ -589,6 +637,7 @@ public final class SuperPDPService {
     /// (schéma `validation_report` / `subreport` / `message`), le format precedent
     /// (`errors`/`warnings` au premier niveau) ne correspondait à aucun champ réel de l'API
     /// et affichait donc toujours "0 erreur(s)" malgré un is_valid=false.
+    /// `location` est gardée avec chaque message : c'est elle qui situe la ligne en cause.
     /// `internal` (pas `private`) pour être testable directement avec un JSON figé, sans
     /// mocker les deux appels réseau (token + validation) de `validateInvoice`.
     func parseValidationReport(data: Data) throws -> SuperPDPValidationReport {
@@ -604,18 +653,19 @@ public final class SuperPDPService {
         }
         let isValid = (first["is_valid"] as? Bool) ?? (s("is_valid")?.lowercased() == "true")
 
-        func failureMessages(_ entries: [Any]?) -> [String] {
-            (entries ?? []).compactMap { entry -> String? in
-                if let e = entry as? String { return e }
-                if let d = entry as? [String: Any] {
-                    return (d["message"] as? String) ?? (d["raw"] as? String)
+        func failureMessages(_ entries: [Any]?) -> [SuperPDPValidationMessage] {
+            (entries ?? []).compactMap { entry -> SuperPDPValidationMessage? in
+                if let e = entry as? String { return SuperPDPValidationMessage(message: e) }
+                if let d = entry as? [String: Any],
+                   let text = (d["message"] as? String) ?? (d["raw"] as? String) {
+                    return SuperPDPValidationMessage(message: text, location: d["location"] as? String)
                 }
                 return nil
             }
         }
 
-        var errors: [String] = []
-        var warnings: [String] = []
+        var errors: [SuperPDPValidationMessage] = []
+        var warnings: [SuperPDPValidationMessage] = []
         let subreports = (first["subreports"] as? [Any]) ?? []
         for case let subreport as [String: Any] in subreports {
             let validatorName = (subreport["validator"] as? String) ?? ""
@@ -635,7 +685,7 @@ public final class SuperPDPService {
         // Erreur générique éventuelle au niveau du rapport (ex. fichier illisible), en plus
         // des échecs par validateur.
         if let topLevelError = first["error"] as? String, !topLevelError.isEmpty {
-            errors.append(topLevelError)
+            errors.append(SuperPDPValidationMessage(message: topLevelError))
         }
 
         var raw: [String: String] = [:]
@@ -644,7 +694,7 @@ public final class SuperPDPService {
             else if let nv = v as? NSNumber { raw[k] = nv.stringValue }
             else if let bv = v as? Bool { raw[k] = bv ? "Oui" : "Non" }
         }
-        return SuperPDPValidationReport(isValid: isValid, errors: errors, warnings: warnings, raw: raw)
+        return SuperPDPValidationReport(isValid: isValid, errorEntries: errors, warningEntries: warnings, raw: raw)
     }
 
     public func submitInvoice(fileData: Data, credentials: SuperPDPCredentials) async throws -> SuperPDPInvoiceSubmission {
