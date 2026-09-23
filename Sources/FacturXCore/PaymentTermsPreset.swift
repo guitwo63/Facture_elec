@@ -2,12 +2,21 @@ import Foundation
 
 /// Règle de calcul de la date d'échéance (BT-9) associée à un préréglage de
 /// conditions de paiement. Purement une aide de saisie côté UI : BT-9 reste
-/// un champ structuré normal, `.none` laisse la date telle quelle (l'utilisateur
-/// la renseigne/modifie toujours manuellement ensuite, aucun champ n'est verrouillé).
+/// un champ structuré normal. Une règle à délai (jours nets, fin de mois + jours)
+/// calcule l'échéance depuis la date de facture, et l'éditeur grise alors le champ ;
+/// `.none` la met à la date de facture et le laisse modifiable. Pour saisir une
+/// autre échéance, l'utilisateur choisit « Personnalisé » (voir `PaymentTermsPresetSelection`).
 public enum PaymentTermsDueRule: Codable, Hashable {
     case none
     case days(Int)
     case endOfMonthPlusDays(Int)
+
+    /// Vrai si la règle fixe un délai (jours nets, fin de mois + jours) : l'échéance qu'elle
+    /// calcule grise le champ Échéance de l'éditeur de facture. Faux pour `.none`.
+    public var computesDueDate: Bool {
+        if case .none = self { return false }
+        return true
+    }
 
     public func dueDate(from issueDate: Date, calendar: Calendar = .current) -> Date {
         switch self {
@@ -193,5 +202,91 @@ public final class PaymentTermsPresetStore: ObservableObject {
     /// à cette société.
     public func preset(id: String, companyID: UUID?) -> PaymentTermsPreset? {
         list(for: companyID).first { $0.id == id }
+    }
+
+    /// Le préréglage que suit une facture : celui de sa société qui a son texte (BT-20), à
+    /// condition que l'échéance (BT-9) soit, au jour près, celle qu'il calcule depuis la date
+    /// de facture. Un préréglage sans règle ne fixe pas l'échéance : son texte suffit.
+    /// `nil` = conditions « Personnalisé », dont une échéance saisie à la main.
+    public func matchingPreset(for invoice: Invoice, calendar: Calendar = .current) -> PaymentTermsPreset? {
+        guard let preset = matchingPreset(for: invoice.paymentTerms, companyID: invoice.companyID) else { return nil }
+        guard preset.dueRule.computesDueDate else { return preset }
+        let computed = preset.dueRule.dueDate(from: invoice.issueDate, calendar: calendar)
+        return calendar.isDate(invoice.dueDate, inSameDayAs: computed) ? preset : nil
+    }
+}
+
+/// Ce qu'affiche un menu « Conditions de paiement » (éditeur de facture, fiche société) : un
+/// préréglage, ou « Personnalisé » (saisie libre du texte et, sur une facture, de l'échéance).
+///
+/// Seul le texte est enregistré (BT-20 est une mention libre) : le menu affiche le préréglage
+/// qui a ce texte (sur une facture, voir `PaymentTermsPresetStore.matchingPreset(for:)`).
+/// Choisir « Personnalisé » ne change ni le texte ni l'échéance, points de départ de la
+/// saisie. Le menu retomberait donc aussitôt sur le préréglage, texte en lecture seule et
+/// échéance grisée. Ce choix est retenu ici jusqu'à ce que l'utilisateur re-choisisse un
+/// préréglage. C'est un état d'édition local, jamais enregistré, propre à l'instance
+/// d'éditeur : une par document (`.id(id)` dans les onglets, une feuille par fiche dans
+/// l'annuaire). Une échéance modifiée, elle, reste en « Personnalisé » après changement de
+/// document ou redémarrage : la facture ne correspond plus au préréglage.
+///
+/// Une saisie en « Personnalisé » retient aussi ce mode : le menu ne doit pas basculer en
+/// pleine frappe quand le texte passe par celui d'un préréglage (« Paiement à 30 jours » est
+/// le début de « Paiement à 30 jours fin de mois »), ni griser l'échéance quand la date
+/// saisie passe par celle qu'il calcule.
+public struct PaymentTermsPresetSelection {
+    /// Vrai une fois « Personnalisé » choisi (ou une saisie faite dans ce mode), jusqu'au
+    /// choix d'un préréglage.
+    public private(set) var isCustom = false
+
+    public init() {}
+
+    /// Retient « Personnalisé » jusqu'au prochain choix d'un préréglage — à appeler avant
+    /// d'écrire le texte saisi dans ce mode.
+    public mutating func keepCustom() {
+        isCustom = true
+    }
+
+    /// Préréglage affiché pour ce texte (fiche société), résolu dans la liste de `companyID` ;
+    /// `nil` = « Personnalisé ».
+    public func activePreset(for text: String?, companyID: UUID?, in store: PaymentTermsPresetStore) -> PaymentTermsPreset? {
+        isCustom ? nil : store.matchingPreset(for: text, companyID: companyID)
+    }
+
+    /// Préréglage affiché pour cette facture ; `nil` = « Personnalisé ».
+    public func activePreset(for invoice: Invoice, in store: PaymentTermsPresetStore, calendar: Calendar = .current) -> PaymentTermsPreset? {
+        isCustom ? nil : store.matchingPreset(for: invoice, calendar: calendar)
+    }
+
+    /// Choix dans le menu. Un préréglage met fin à « Personnalisé » et est renvoyé : à
+    /// l'appelant d'en écrire le texte. « Personnalisé » (`nil`) est retenu et ne renvoie
+    /// rien : le document ne change pas. Un id absent de la liste de `companyID` ne change rien.
+    public mutating func select(_ presetID: String?, companyID: UUID?, in store: PaymentTermsPresetStore) -> PaymentTermsPreset? {
+        guard let presetID else {
+            isCustom = true
+            return nil
+        }
+        guard let preset = store.preset(id: presetID, companyID: companyID) else { return nil }
+        isCustom = false
+        return preset
+    }
+
+    /// Choix dans le menu d'une facture. Un préréglage réécrit le texte et recalcule
+    /// l'échéance depuis la date de facture : la facture modifiée est renvoyée, pour une seule
+    /// écriture. « Personnalisé » (`nil`) renvoie `nil` : la facture ne change pas.
+    public mutating func select(_ presetID: String?, for invoice: Invoice, in store: PaymentTermsPresetStore, calendar: Calendar = .current) -> Invoice? {
+        guard let preset = select(presetID, companyID: invoice.companyID, in: store) else { return nil }
+        var updated = invoice
+        updated.paymentTerms = preset.text
+        updated.dueDate = preset.dueRule.dueDate(from: invoice.issueDate, calendar: calendar)
+        return updated
+    }
+
+    /// À appeler avant d'écrire une échéance saisie par l'utilisateur : si le menu affiche
+    /// « Personnalisé », ce mode est retenu (voir le type). Un préréglage sans règle, dont
+    /// l'échéance reste modifiable, reste affiché.
+    public mutating func keepCustomIfShown(for invoice: Invoice, in store: PaymentTermsPresetStore, calendar: Calendar = .current) {
+        if activePreset(for: invoice, in: store, calendar: calendar) == nil {
+            isCustom = true
+        }
     }
 }

@@ -1582,10 +1582,10 @@ struct PaymentTermsPresetEditorSheet: View {
                         Text(ruleKind == .days ? "Nombre de jours" : "Jours après fin de mois").frame(width: 160, alignment: .leading)
                         Stepper(value: $days, in: 0...120) { Text("\(days) j") }
                     }
-                    Text("Échéance calculée automatiquement pour toute facture utilisant ce préréglage.")
+                    Text("Sur la facture, l'échéance est calculée à partir de la date de facture, et son champ est grisé. « Personnalisé » permet de la saisir à la main.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
-                    Text("L'échéance reste à saisir manuellement sur chaque facture.")
+                    Text("Sur la facture, l'échéance suit la date de facture et reste modifiable.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
