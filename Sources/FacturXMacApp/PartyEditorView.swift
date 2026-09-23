@@ -35,16 +35,33 @@ struct PartyEditorView: View {
     @State private var superPDPLookupLoading = false
     @State private var superPDPLookupNote: String?
     @State private var superPDPAddressChoices: [SuperPDPDirectoryEntry] = []
+    /// « Personnalisé » choisi dans le menu Conditions de paiement (voir `PaymentTermsPresetSelection`).
+    @State private var paymentTermsSelection = PaymentTermsPresetSelection()
     @EnvironmentObject var paymentTermsStore: PaymentTermsPresetStore
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
 
-    /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
+    /// `nil` = « Personnalisé » (saisie libre) ; sinon l'id du préréglage affiché. Choisir
+    /// « Personnalisé » garde le texte, qui devient modifiable.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
-            get: { paymentTermsStore.matchingPresetID(for: party.paymentTerms, companyID: companyID) },
+            get: { paymentTermsSelection.activePreset(for: party.paymentTerms, companyID: companyID, in: paymentTermsStore)?.id },
             set: { newID in
-                guard let id = newID, let preset = paymentTermsStore.preset(id: id, companyID: companyID) else { return }
-                party.paymentTerms = preset.text
+                if let preset = paymentTermsSelection.select(newID, companyID: companyID, in: paymentTermsStore) {
+                    party.paymentTerms = preset.text
+                }
+            }
+        )
+    }
+
+    /// Texte libre, en « Personnalisé ». Chaque frappe retient ce mode : sinon le menu
+    /// repasserait sur un préréglage dès que la saisie passe par son texte, et le champ
+    /// disparaîtrait en pleine frappe.
+    private var customPaymentTermsBinding: Binding<String> {
+        Binding(
+            get: { party.paymentTerms ?? "" },
+            set: { newText in
+                paymentTermsSelection.keepCustom()
+                party.paymentTerms = newText
             }
         )
     }
@@ -340,7 +357,7 @@ struct PartyEditorView: View {
                             Text("Personnalisé").tag(String?.none)
                         }
                         if paymentTermsPresetIDBinding.wrappedValue == nil {
-                            TextField("Texte libre", text: Binding($party.paymentTerms, replacingNilWith: ""))
+                            TextField("Texte libre", text: customPaymentTermsBinding)
                         }
                     }
                 }

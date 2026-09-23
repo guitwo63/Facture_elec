@@ -1139,6 +1139,8 @@ struct InvoiceEditorView: View {
     @State private var showPDPValidationPanel = false
     @State private var sendingReminder = false
     @State private var reminderMessage: String?
+    /// « Personnalisé » choisi dans le menu Conditions de paiement (voir `PaymentTermsPresetSelection`).
+    @State private var paymentTermsSelection = PaymentTermsPresetSelection()
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
     private var statusLocked: Bool { invoice.status.locksInvoice }
     private var isAdmin: Bool { auth.currentUser?.isAdmin ?? false }
@@ -1179,24 +1181,52 @@ struct InvoiceEditorView: View {
         return Set(v.businessRules.filter { $0.severity == .error }.map { $0.ruleId })
     }
 
-    /// Préréglage de conditions de paiement actif, résolu dans la liste de la société de la
-    /// facture (`invoice.companyID`) — celle personnalisée dans Réglages > Tables, pas le seul
-    /// réglage global. `nil` = "Personnalisé" (saisie libre).
+    /// Préréglage de conditions de paiement affiché dans le menu, résolu dans la liste de la
+    /// société de la facture (`invoice.companyID`) — celle personnalisée dans Réglages >
+    /// Tables, pas le seul réglage global. `nil` = « Personnalisé » : choisi dans le menu,
+    /// texte propre à la facture, ou échéance différente de celle que calcule le préréglage.
     private var activePaymentTermsPreset: PaymentTermsPreset? {
-        paymentTermsStore.matchingPreset(for: invoice.paymentTerms, companyID: invoice.companyID)
+        paymentTermsSelection.activePreset(for: invoice, in: paymentTermsStore)
     }
 
-    /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
-    /// Appliquer un préréglage recalcule aussi l'échéance (BT-9) à partir de la date de
-    /// facture. Le champ Échéance se grise alors (voir `dueDateIsComputedFromPreset`) :
-    /// en mode Personnalisé, il reste modifiable manuellement.
+    /// `nil` = « Personnalisé » ; sinon l'id du préréglage affiché. Choisir un préréglage
+    /// réécrit le texte et recalcule l'échéance (BT-9) à partir de la date de facture ; le
+    /// champ Échéance se grise alors (voir `dueDateIsComputedFromPreset`). Choisir
+    /// « Personnalisé » garde texte et échéance, qui deviennent modifiables.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
             get: { activePaymentTermsPreset?.id },
             set: { newID in
-                guard let id = newID, let preset = paymentTermsStore.preset(id: id, companyID: invoice.companyID) else { return }
-                invoice.paymentTerms = preset.text
-                invoice.dueDate = preset.dueRule.dueDate(from: invoice.issueDate)
+                if let updated = paymentTermsSelection.select(newID, for: invoice, in: paymentTermsStore) {
+                    invoice = updated
+                }
+            }
+        )
+    }
+
+    /// Texte libre des conditions (BT-20), affiché en « Personnalisé ». Chaque frappe retient
+    /// ce mode : sinon le menu repasserait sur un préréglage dès que la saisie passe par son
+    /// texte (« Paiement à 30 jours » avant « … fin de mois »), et le champ disparaîtrait.
+    private var customPaymentTermsBinding: Binding<String> {
+        Binding(
+            get: { invoice.paymentTerms ?? "" },
+            set: { newText in
+                paymentTermsSelection.keepCustom()
+                invoice.paymentTerms = newText
+            }
+        )
+    }
+
+    /// Échéance (BT-9), modifiable en « Personnalisé » ou avec un préréglage sans règle. Une
+    /// saisie en « Personnalisé » retient ce mode : sinon le champ se griserait en pleine
+    /// saisie quand la date passe par celle que calcule le préréglage.
+    private var dueDateBinding: Binding<Date> {
+        Binding(
+            get: { invoice.dueDate },
+            set: { newDate in
+                guard newDate != invoice.dueDate else { return }
+                paymentTermsSelection.keepCustomIfShown(for: invoice, in: paymentTermsStore)
+                invoice.dueDate = newDate
             }
         )
     }
@@ -1205,8 +1235,10 @@ struct InvoiceEditorView: View {
     /// préréglage de conditions de paiement actif, dans la même écriture. Le recalcul vit dans
     /// ce setter, appelé seulement par une saisie dans le DatePicker, et non dans un
     /// `onChange(of: invoice.issueDate)` qui se déclenchait aussi au changement de facture
-    /// sélectionnée. Pas de recalcul sur une facture verrouillée : `.lockable` bloque la
-    /// souris mais pas le clavier, le DatePicker reste modifiable aux flèches.
+    /// sélectionnée. Le préréglage actif est lu avant l'écriture : après, l'échéance ne
+    /// correspondrait plus à la nouvelle date et le menu afficherait « Personnalisé ». Pas de
+    /// recalcul sur une facture verrouillée : `.lockable` bloque la souris mais pas le
+    /// clavier, le DatePicker reste modifiable aux flèches.
     private var issueDateBinding: Binding<Date> {
         Binding(
             get: { invoice.issueDate },
@@ -1222,15 +1254,13 @@ struct InvoiceEditorView: View {
         )
     }
 
-    /// Vrai si le préréglage actif calcule réellement une échéance (jours nets /
+    /// Vrai si l'échéance est celle que calcule le préréglage affiché (jours nets /
     /// fin de mois + jours) — le champ Échéance se grise alors, pour éviter une
-    /// saisie manuelle immédiatement écrasée par le prochain recalcul. Un
+    /// saisie manuelle écrasée au prochain changement de date de facture. Un
     /// préréglage sans règle (ex. "Comptant") ou le mode Personnalisé laissent
     /// le champ modifiable.
     private var dueDateIsComputedFromPreset: Bool {
-        guard let preset = activePaymentTermsPreset else { return false }
-        if case .none = preset.dueRule { return false }
-        return true
+        activePaymentTermsPreset?.dueRule.computesDueDate ?? false
     }
 
     private func fieldHighlight<V: View>(_ view: V, forRuleIDs ids: [String]) -> some View {
@@ -1687,9 +1717,9 @@ struct InvoiceEditorView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
                                             Text("Échéance").font(.caption)
-                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Calculée automatiquement par le préréglage de conditions de paiement sélectionné ; modifiable uniquement en mode « Personnalisé ».")
+                                            InfoBadge(text: "BT-9 — Date d'échéance du paiement. Un préréglage de conditions de paiement à délai (jours nets, fin de mois) la calcule à partir de la date de facture et grise le champ. Pour la saisir à la main, choisissez « Personnalisé » dans Conditions de paiement.")
                                         }
-                                        fieldHighlight(DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
+                                        fieldHighlight(DatePicker("", selection: dueDateBinding, displayedComponents: .date).labelsHidden()
                                             .disabled(fieldLocked || dueDateIsComputedFromPreset), forRuleIDs: ["BR-FR-CO-07"])
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
@@ -1728,9 +1758,9 @@ struct InvoiceEditorView: View {
                                     .labelsHidden()
                                     .frame(width: 180)
                                     .disabled(fieldLocked)
-                                    .help("Applique le texte du préréglage et recalcule l'échéance ci-dessus — celle-ci reste modifiable manuellement ensuite.")
+                                    .help("Un préréglage écrit son texte et recalcule l'échéance ci-dessus à partir de la date de facture. « Personnalisé » garde le texte actuel et rend le texte et l'échéance modifiables.")
                                     if paymentTermsPresetIDBinding.wrappedValue == nil {
-                                        TextField("Ex. Paiement à 30 jours", text: Binding($invoice.paymentTerms, replacingNilWith: ""))
+                                        TextField("Ex. Paiement à 30 jours", text: customPaymentTermsBinding)
                                             .textFieldStyle(.roundedBorder)
                                             .font(.callout)
                                             .frame(maxWidth: 260)
