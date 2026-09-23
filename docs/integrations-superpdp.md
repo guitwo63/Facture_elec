@@ -372,3 +372,20 @@ désignations des lignes (BT-153) avec le fichier envoyé et les range dans le r
 pas de `location`). Relever les désignations à la validation garde le libellé juste même si
 une ligne est ensuite supprimée ou déplacée dans l'éditeur. `errors`/`warnings` restent le
 texte seul, un par échec : le compteur « n erreur(s) » ne change pas.
+
+## 13. Rapport non conforme : tout ce qu'il liste compte comme erreur (2026-09-23)
+
+Vérifié sur `POST /v1.beta/validation_reports` avec des factures fictives générées par l'app :
+
+- `failures[]` reçoit les assertions SVRL sans `flag`, par exemple BR-Z-05 et BR-Z-09 pour une ligne en catégorie Z à 20 %. `messages[]` reçoit celles en `flag="warning"` (lisible dans `raw`), quel que soit le validateur :
+  - `PEPPOL-EN16931-R008` (élément vide) vient du validateur EN16931 ;
+  - BR-FR-05 vient du validateur `…/BR-FR-Flux2-Schematron-CII_WARNING.xslt`.
+- Un seul élément, dans l'un ou l'autre tableau, suffit à `is_valid=false`.
+  - Une mention PMT, PMD ou AAB manquante (BR-FR-05) rend ainsi le fichier non conforme, sur un 380, un 381 ou un 386. SUPER PDP la marque `flag="warning"`, alors que le Schematron France CTC officiel la classe fatale.
+  - Aucun rapport conforme n'a jamais contenu de message.
+
+**Avant** : le panneau classait les entrées par nom de validateur. Un rapport dont la seule cause était BR-FR-05 s'affichait « Validation SUPER PDP non conforme — 0 erreur(s) », avec BR-FR-05 sous « Avertissements ».
+
+**Désormais** : `parseValidationReport` compte comme erreur tout ce que liste un rapport non conforme, dans l'ordre du rapport. Le nom « WARNING » ne sépare plus des avertissements que sur un rapport conforme. Le même rapport s'affiche « non conforme — 1 erreur(s) », BR-FR-05 sous « Erreurs ».
+
+Un rapport `is_valid=false` ne dit pas si SUPER PDP refuse le dépôt : il faudrait un dépôt réel pour le vérifier. FA-2026-0011 a été déposée malgré un rapport `is_valid=false` à 3 `messages`. La PR #148 rend aussi BR-FR-05 bloquante dans l'app : ce cas ne peut alors plus partir de l'éditeur.
