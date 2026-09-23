@@ -205,6 +205,31 @@ public enum EN16931BusinessRules {
                 message: "BR-AC-01 : Une facture de solde devrait indiquer le montant des acomptes déjà payés (PrepaidAmount)."))
         }
 
+        // Cadre de facturation (BT-23) : contrôles du Schematron France CTC, bloquants à la
+        // PDP — signalés ici pour ne jamais générer un XML qu'elle rejetterait.
+        let mode = invoice.billingMode
+        if mode.isFinalAfterDeposit && invoice.type.isDeposit {
+            results.append(BusinessRuleResult(ruleId: "BR-FR-CO-08", severity: .error,
+                message: "BR-FR-CO-08 : Le cadre de facturation \(mode.rawValue) (facture définitive après acompte) est interdit sur une facture d'acompte (BT-3 = 386) ; utilisez \(mode.forDeposit.rawValue)."))
+        }
+        if mode.isAlreadyPaid {
+            if (invoice.prepaidAmount - invoice.grandTotal).rounded(toPlaces: 2) != 0 {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-CO-09", severity: .error,
+                    message: "BR-FR-CO-09 : Cadre \(mode.rawValue) (facture déjà payée) : le montant déjà payé (BT-113) doit être égal au total TTC (BT-112 = \(String(format: "%.2f", invoice.grandTotal)) \(invoice.currency)) pour un net à payer (BT-115) nul, et l'échéance (BT-9) doit être la date du paiement."))
+            } else if context == .issued {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-CO-09", severity: .warning,
+                    message: "BR-FR-CO-09 : Cadre \(mode.rawValue) (facture déjà payée) : vérifiez que la date d'échéance (BT-9) est bien la date du paiement."))
+            }
+        }
+        // Propre à ce que notre générateur sait produire : sans objet sur un document reçu,
+        // que son émetteur a pu construire avec les lignes de regroupement requises.
+        if context == .issued && mode.requiresGroupLines {
+            let isMultiVendor = mode.rawValue.hasSuffix("8")
+            let ruleId = isMultiVendor ? "BR-FR-MV-02" : "BR-FR-BD-02"
+            results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
+                message: "\(ruleId) : Le cadre de facturation \(mode.rawValue) (facture \(isMultiVendor ? "multi-vendeurs" : "bidirectionnelle")) exige des lignes de regroupement par vendeur (sous-type GROUP) que l'application ne produit pas ; choisissez un autre cadre."))
+        }
+
         // Mentions légales françaises : obligatoires sur une facture qu'on émet (BR-FR-05),
         // mais sans objet sur un document reçu — on ne les a pas rédigées, rien à corriger.
         if context == .issued {
@@ -264,6 +289,17 @@ public enum EN16931BusinessRules {
                (line.vatExemptionReason ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
                 results.append(BusinessRuleResult(ruleId: "BR-\(line.vatCategory.rawValue)-05", severity: .error,
                     message: "BR-\(line.vatCategory.rawValue)-05 : \(label) — catégorie de TVA « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) : un motif d'exonération (BT-120) est obligatoire."))
+            }
+            // Contrôle interne (aucun Schematron officiel ne vérifie la clé) : le BT-157 est
+            // émis avec le schéma 0160 (GTIN), une référence interne y serait mal qualifiée —
+            // cas probable des valeurs saisies avant que le champ ne soit libellé « GTIN ».
+            if let gtin = line.optionalFields.lazy
+                .filter({ $0.tagName == "ram:GlobalID" })
+                .map({ $0.value.trimmingCharacters(in: .whitespaces) })
+                .first(where: { !$0.isEmpty }),
+               !GTINValidator.isValid(gtin) {
+                results.append(BusinessRuleResult(ruleId: "BT-157-GTIN", severity: .warning,
+                    message: "BT-157 : \(label) — « \(gtin) » n'est pas un code GTIN/EAN valide (8, 12, 13 ou 14 chiffres avec clé de contrôle), alors qu'il est émis comme tel (schéma 0160) ; pour une référence interne, utilisez le BT-155 (Réf. article vendeur)."))
             }
         }
 

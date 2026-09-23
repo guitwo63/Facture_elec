@@ -175,7 +175,7 @@ public final class InvoicePDFRenderer {
         drawText(context: context, text: "\(invoice.currency) \(fmt(invoice.grandTotal))", x: pageWidth - margin - 90, y: cy, font: boldFont(size: 13), color: .black)
         if invoice.prepaidAmount > 0 {
             cy -= 16
-            drawText(context: context, text: "Acompte déjà payé:", x: x, y: cy, font: font(size: 11), color: .darkGray)
+            drawText(context: context, text: "\(invoice.prepaidAmountLabel):", x: x, y: cy, font: font(size: 11), color: .darkGray)
             drawText(context: context, text: "\(invoice.currency) \(fmt(invoice.prepaidAmount))", x: pageWidth - margin - 90, y: cy, font: font(size: 11), color: .darkGray)
             cy -= 16
             drawText(context: context, text: "Net à payer:", x: x, y: cy, font: boldFont(size: 13), color: .black)

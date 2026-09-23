@@ -89,6 +89,11 @@ private struct LineBuilder {
     var vatRate: Double = 20
     var vatCategory: VATCategory = .standard
     var globalID: String?
+    var sellerAssignedID: String?
+    var buyerAssignedID: String?
+    var orderLineID: String?
+    // Hors profil EN16931 (émis par d'anciennes versions de l'app, ou par un fournisseur en
+    // profil EXTENDED) : conservés, sous leur balise, comme champs non émis.
     var orderRef: String?
     var contractRef: String?
 
@@ -96,6 +101,15 @@ private struct LineBuilder {
         var fields: [OptionalField] = []
         if let g = globalID, !g.isEmpty {
             fields.append(OptionalField(tagName: "ram:GlobalID", value: g))
+        }
+        if let s = sellerAssignedID, !s.isEmpty {
+            fields.append(OptionalField(tagName: "ram:SellerAssignedID", value: s))
+        }
+        if let b = buyerAssignedID, !b.isEmpty {
+            fields.append(OptionalField(tagName: "ram:BuyerAssignedID", value: b))
+        }
+        if let l = orderLineID, !l.isEmpty {
+            fields.append(OptionalField(tagName: "ram:BuyerOrderReferencedDocument/ram:LineID", value: l))
         }
         if let o = orderRef, !o.isEmpty {
             fields.append(OptionalField(tagName: "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID", value: o))
@@ -140,7 +154,7 @@ private final class Delegate: NSObject, XMLParserDelegate {
     }
 
     private enum PartyContext { case none, seller, buyer }
-    private enum AgreementRef { case none, purchaseOrder, contract, tender, project }
+    private enum AgreementRef { case none, purchaseOrder, contract, tender, additional, project }
     private enum DeliveryRef { case none, receivingAdvice, despatchAdvice }
     private enum LineRef { case none, order, contract }
 
@@ -173,6 +187,10 @@ private final class Delegate: NSObject, XMLParserDelegate {
     private var purchaseOrderRef: String?
     private var contractRef: String?
     private var tenderRef: String?
+    // AdditionalReferencedDocument : son code type (50 = appel d'offres ou lot, BT-17) suit
+    // l'identifiant dans le XML — l'identifiant est donc gardé jusqu'à la fermeture du bloc.
+    private var additionalRefID: String?
+    private var additionalRefTypeCode: String?
     private var procuringProjectID: String?
     private var receivingAdviceRef: String?
     private var despatchAdviceRef: String?
@@ -245,12 +263,18 @@ private final class Delegate: NSObject, XMLParserDelegate {
         case "ram:SpecifiedTradeSettlementHeaderMonetarySummation" where container == .settlement: container = .monetarySummation
         case "ram:InvoiceReferencedDocument" where container == .settlement: container = .invoiceReferenced
 
-        // Les trois références d'en-tête (commande/contrat/appel d'offres) et le projet
-        // partagent tous la même balise fille `ram:IssuerAssignedID`/`ram:ID` — on pose le
-        // drapeau au conteneur (balise ouvrante), lu à la fermeture de la balise fille.
+        // Les références d'en-tête (commande/contrat/appel d'offres) et le projet partagent
+        // tous la même balise fille `ram:IssuerAssignedID`/`ram:ID` — on pose le drapeau au
+        // conteneur (balise ouvrante), lu à la fermeture de la balise fille. L'appel d'offres
+        // se lit sous sa forme EN16931 (AdditionalReferencedDocument, code type 50) comme
+        // sous l'ancienne balise TendererReferencedDocument des XML déjà émis par l'app.
         case "ram:BuyerOrderReferencedDocument" where container == .agreement: pendingAgreementRef = .purchaseOrder
         case "ram:ContractReferencedDocument" where container == .agreement: pendingAgreementRef = .contract
         case "ram:TendererReferencedDocument" where container == .agreement: pendingAgreementRef = .tender
+        case "ram:AdditionalReferencedDocument" where container == .agreement:
+            pendingAgreementRef = .additional
+            additionalRefID = nil
+            additionalRefTypeCode = nil
         case "ram:SpecifiedProcuringProject" where container == .agreement: pendingAgreementRef = .project
         case "ram:ReceivingAdviceReferencedDocument" where container == .delivery: pendingDeliveryRef = .receivingAdvice
         case "ram:DespatchAdviceReferencedDocument" where container == .delivery: pendingDeliveryRef = .despatchAdvice
@@ -283,6 +307,8 @@ private final class Delegate: NSObject, XMLParserDelegate {
         case "ram:Name" where container == .lineProduct: currentLine.name = value
         case "ram:Description" where container == .lineProduct: currentLine.description = value.isEmpty ? nil : value
         case "ram:GlobalID" where container == .lineProduct: currentLine.globalID = value
+        case "ram:SellerAssignedID" where container == .lineProduct: currentLine.sellerAssignedID = value
+        case "ram:BuyerAssignedID" where container == .lineProduct: currentLine.buyerAssignedID = value
         case "ram:SpecifiedTradeProduct": container = .lineItem
         case "ram:IssuerAssignedID" where container == .lineAgreement:
             switch pendingLineRef {
@@ -290,6 +316,7 @@ private final class Delegate: NSObject, XMLParserDelegate {
             case .contract: currentLine.contractRef = value
             case .none: break
             }
+        case "ram:LineID" where container == .lineAgreement && pendingLineRef == .order: currentLine.orderLineID = value
         case "ram:ChargeAmount" where container == .lineAgreement: currentLine.unitPrice = Double(value) ?? 0
         case "ram:SpecifiedLineTradeAgreement": container = .lineItem
         case "ram:BilledQuantity" where container == .lineDelivery: currentLine.quantity = Double(value) ?? 1
@@ -345,12 +372,17 @@ private final class Delegate: NSObject, XMLParserDelegate {
             case .purchaseOrder: purchaseOrderRef = value
             case .contract: contractRef = value
             case .tender: tenderRef = value
+            case .additional: additionalRefID = value
             case .project, .none: break
             }
+        case "ram:TypeCode" where container == .agreement && pendingAgreementRef == .additional: additionalRefTypeCode = value
         case "ram:ID" where container == .agreement && pendingAgreementRef == .project: procuringProjectID = value
         case "ram:BuyerOrderReferencedDocument", "ram:ContractReferencedDocument":
             if container == .agreement { pendingAgreementRef = .none }
             else if container == .lineAgreement { pendingLineRef = .none }
+        case "ram:AdditionalReferencedDocument" where container == .agreement:
+            if additionalRefTypeCode == "50", let id = additionalRefID, !id.isEmpty { tenderRef = id }
+            pendingAgreementRef = .none
         case "ram:TendererReferencedDocument", "ram:SpecifiedProcuringProject":
             if container == .agreement { pendingAgreementRef = .none }
 
