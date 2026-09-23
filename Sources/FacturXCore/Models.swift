@@ -424,12 +424,41 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
     }
 }
 
+/// Profil Factur-X (BT-24). `CIIXMLGenerator` produit toujours la structure du profil
+/// EN 16931 et ne change que l'URN : ce XML est conforme en EN 16931 et en EXTENDED, qui
+/// l'englobe, mais pas dans les profils plus restreints. Mesuré le 2026-09-23 sur 36 cas
+/// de facture, contre le XSD et le Schematron Factur-X 1.09 de chaque profil et le
+/// Schematron France CTC : MINIMUM et BASIC WL rejettent les lignes dans tous les cas (et
+/// MINIMUM les mentions légales et les adresses électroniques, exigées en France) ; BASIC
+/// rejette notamment les contacts, le moyen de paiement « SEPA » émis avec tout IBAN, le BIC
+/// et la description des lignes. Ces trois profils ne sont donc plus proposés à l'émission
+/// (`selectableCases`) ; ils restent décodables pour les factures existantes et reçues.
 public enum FacturXProfile: String, Codable, CaseIterable {
     case minimum = "MINIMUM"
     case basicWL = "BASIC WL"
     case basic = "BASIC"
     case en16931 = "EN 16931"
     case extended = "EXTENDED"
+
+    /// Vrai si le XML de `CIIXMLGenerator` est conforme à ce profil. Une facture émise dans
+    /// un autre profil est bloquée à l'export (BR-PROFIL).
+    public var isIssuable: Bool {
+        self == .en16931 || self == .extended
+    }
+
+    /// Profils proposés à la saisie : EN 16931 et EXTENDED. `current` y est ajouté s'il en
+    /// fait partie (société ou facture plus ancienne), pour que le sélecteur affiche toujours
+    /// la valeur réellement enregistrée.
+    public static func selectableCases(current: FacturXProfile? = nil) -> [FacturXProfile] {
+        allCases.filter { $0.isIssuable || $0 == current }
+    }
+
+    /// Profil d'une nouvelle facture créée à partir de ce profil (celui de la société, ou
+    /// celui de la facture d'origine d'un doublon, avoir, acompte ou solde) : jamais un
+    /// profil que le générateur ne respecte pas, EN 16931 à la place.
+    public var forNewInvoice: FacturXProfile {
+        isIssuable ? self : .en16931
+    }
 
     public var urn: String {
         switch self {

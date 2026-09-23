@@ -121,13 +121,6 @@ public struct FacturXValidator {
             }
         }
 
-        switch invoice.profile {
-        case .minimum, .basicWL, .basic:
-            warnings.append("Le profil \(invoice.profile.rawValue) est limité ; le profil EN 16931 est recommandé pour la réforme française.")
-        case .en16931, .extended:
-            break
-        }
-
         let hasRuleErrors = rules.contains { $0.severity == .error }
         return FacturXValidationResult(
             isValid: errors.isEmpty && !hasRuleErrors,

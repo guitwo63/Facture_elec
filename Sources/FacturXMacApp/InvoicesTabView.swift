@@ -1667,6 +1667,20 @@ struct InvoiceEditorView: View {
                                             ForEach(BillingMode.selectableCases(current: invoice.billingMode), id: \.self) { Text($0.label).tag($0) }
                                         }.labelsHidden().frame(width: 320), forRuleIDs: ["BR-FR-CO-08", "BR-FR-CO-09", "BR-FR-MV-02", "BR-FR-BD-02"])
                                     }
+                                    // Affiché seulement pour corriger une facture restée dans un profil
+                                    // plus proposé (bloquée à l'export) : il disparaît une fois la
+                                    // facture repassée en EN 16931 ou EXTENDED.
+                                    if !invoice.profile.isIssuable {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            HStack(spacing: 3) {
+                                                Text("Profil Factur-X (BT-24)").font(.caption)
+                                                InfoBadge(text: "BT-24 — Profil Factur-X. Le profil \(invoice.profile.rawValue) n'est plus proposé : le XML produit par l'application a la structure du profil EN 16931, que le XSD des profils MINIMUM, BASIC WL et BASIC rejette. L'export reste bloqué (BR-PROFIL) tant que la facture n'est pas repassée en EN 16931 ou EXTENDED.")
+                                            }
+                                            fieldHighlight(Picker("", selection: $invoice.profile) {
+                                                ForEach(FacturXProfile.selectableCases(current: invoice.profile), id: \.self) { Text($0.rawValue).tag($0) }
+                                            }.labelsHidden().frame(width: 140), forRuleIDs: ["BR-PROFIL"])
+                                        }
+                                    }
                                 }
                                 HStack(spacing: 6) {
                                     Image(systemName: "banknote").foregroundStyle(.secondary)

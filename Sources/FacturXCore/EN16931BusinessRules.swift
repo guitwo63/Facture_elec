@@ -303,18 +303,29 @@ public enum EN16931BusinessRules {
             }
         }
 
-        // Recommandation de profil : pertinente pour un choix qu'on fait nous-mêmes en
-        // émettant, pas pour un profil déjà choisi par le fournisseur sur un document reçu.
-        if context == .issued {
-            switch invoice.profile {
-            case .minimum, .basicWL, .basic:
-                results.append(BusinessRuleResult(ruleId: "BR-PROFIL", severity: .warning,
-                    message: "Le profil \(invoice.profile.rawValue) est limité ; EN 16931 est recommandé pour la réforme française."))
-            case .en16931, .extended:
-                break
-            }
+        // Profil (BT-24) : le générateur produit la structure EN 16931, que le XSD des profils
+        // plus restreints rejette (voir `FacturXProfile`) — bloquant sur une facture qu'on émet.
+        // Sans objet sur un document reçu : son émetteur a choisi le profil et produit le XML.
+        if context == .issued, let rejection = xsdRejection(of: invoice.profile) {
+            results.append(BusinessRuleResult(ruleId: "BR-PROFIL", severity: .error,
+                message: "BR-PROFIL : Le profil \(invoice.profile.rawValue) (BT-24) n'est plus proposé à l'émission : l'application produit un XML de structure EN 16931, que le XSD du profil \(invoice.profile.rawValue) \(rejection). Repassez la facture en EN 16931 (ou EXTENDED)."))
         }
 
         return results
+    }
+
+    /// Ce que le XSD du profil rejette dans le XML de `CIIXMLGenerator` (mesure du
+    /// 2026-09-23), `nil` pour les profils où ce XML est conforme (`FacturXProfile.isIssuable`).
+    private static func xsdRejection(of profile: FacturXProfile) -> String? {
+        switch profile {
+        case .minimum:
+            return "le rejette toujours : ce profil ne comporte ni lignes, ni mentions légales, ni adresses électroniques (BT-34/BT-49), pourtant exigées en France"
+        case .basicWL:
+            return "le rejette toujours : ce profil ne comporte pas de lignes de facture"
+        case .basic:
+            return "le rejette dès qu'il contient notamment un contact, un IBAN (moyen de paiement « SEPA »), un BIC ou une description de ligne"
+        case .en16931, .extended:
+            return nil
+        }
     }
 }
