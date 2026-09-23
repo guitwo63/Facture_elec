@@ -343,8 +343,15 @@ struct QuotesTabView: View {
                 }
 
                 if let id = selectedID, quoteStore.quotes.contains(where: { $0.id == id }) {
-                    QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID, orderSelectedID: $orderSelectedID)
-                        .frame(minWidth: 380)
+                    // Une instance d'éditeur par devis, dans un conteneur stable pour le HSplitView
+                    // (voir InvoicesTabView). Sans cela, entre un devis et son duplicata (qui garde
+                    // les ids de ligne), `onChange(of: line.vatRate)` réécrivait la catégorie de TVA
+                    // d'une ligne du devis qu'on quitte.
+                    VStack(spacing: 0) {
+                        QuoteEditorView(quote: binding(for: id), rootTab: $rootTab, invoiceSelectedID: $invoiceSelectedID, orderSelectedID: $orderSelectedID)
+                            .id(id)
+                    }
+                    .frame(minWidth: 380)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "doc.text.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)

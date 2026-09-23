@@ -507,8 +507,15 @@ struct OrdersTabView: View {
 
                 if let id = selectedID,
                    orderStore.orders.contains(where: { $0.id == id }) {
-                    OrderEditorView(order: binding(for: id))
-                        .frame(minWidth: 380)
+                    // Une instance d'éditeur par commande, dans un conteneur stable pour le
+                    // HSplitView (voir InvoicesTabView) : aucun `onChange` de l'éditeur ne se
+                    // déclenche au changement de sélection, et ses `@State` (verrouillage manuel,
+                    // messages) ne passent plus d'une commande à l'autre.
+                    VStack(spacing: 0) {
+                        OrderEditorView(order: binding(for: id))
+                            .id(id)
+                    }
+                    .frame(minWidth: 380)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "cart.magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
