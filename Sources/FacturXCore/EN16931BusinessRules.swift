@@ -138,7 +138,8 @@ public enum EN16931BusinessRules {
                 message: "BR-FR-09 : Le SIRET de l'émetteur doit comporter 14 chiffres et être valide (clé Luhn)."))
         }
         let sellerVAT = (invoice.seller.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
-        let hasStandardRatedLine = invoice.lines.contains { $0.vatRate > 0 }
+        // Sur la catégorie, comme le Schematron : une ligne S à 0 % (BR-S-05) compte aussi.
+        let hasStandardRatedLine = invoice.lines.contains { $0.vatCategory == .standard }
         if hasStandardRatedLine && sellerVAT.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-S-02", severity: .error,
                 message: "BR-S-02 : Une ligne à TVA standard (BT-151 = S) oblige l'émetteur à avoir un n° TVA (BT-31)."))
@@ -151,6 +152,12 @@ public enum EN16931BusinessRules {
         if hasExemptLine && sellerVAT.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-E-02", severity: .error,
                 message: "BR-E-02 : Une ligne exonérée de TVA (BT-151 = E) oblige l'émetteur à avoir un n° TVA (BT-31)."))
+        }
+        // Idem pour la catégorie Taux zéro : rejet BR-Z-02 de la PDP que l'app ne signalait pas
+        // (confirmé sur l'API SUPER PDP le 2026-09-23).
+        if invoice.lines.contains(where: { $0.vatCategory == .zeroRated }) && sellerVAT.isEmpty {
+            results.append(BusinessRuleResult(ruleId: "BR-Z-02", severity: .error,
+                message: "BR-Z-02 : Une ligne à taux zéro (BT-151 = Z) oblige l'émetteur à avoir un n° TVA (BT-31)."))
         }
         // Catégorie « Hors champ de TVA » (BT-151 = O) : règles du Schematron EN16931, absentes
         // du Schematron EXTENDED. Une telle facture ne porte aucun n° TVA (BR-O-02) ni aucune

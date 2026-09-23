@@ -99,4 +99,29 @@ final class ZeroRateConformanceTests: XCTestCase {
         }
         XCTAssertEqual(VATCategory.zeroRateChoices(current: .standard), VATCategory.allCases)
     }
+
+    // MARK: - BR-Z-02 (et BR-S-02) : n° TVA du vendeur, d'après la catégorie
+
+    /// Vendeur sans n° TVA, lignes en Z : la PDP rejette (BR-Z-02, confirmé sur l'API SUPER
+    /// PDP), l'app l'exportait, puisque seules S et E exigeaient le n° TVA.
+    func testZeroRatedLineRequiresTheSellerVATNumber() {
+        let zero = InvoiceLine(name: "Formation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .zeroRated)
+        let withoutVAT = EN16931BusinessRules.evaluate(invoice: invoice([zero, zero], sellerVAT: nil))
+        XCTAssertEqual(withoutVAT.filter { $0.ruleId == "BR-Z-02" }.map(\.severity), [.error], "une seule erreur par facture")
+        XCTAssertFalse(FacturXValidator().validate(invoice: invoice([zero], sellerVAT: " ")).isValid, "n° TVA blanc = absent")
+
+        XCTAssertFalse(EN16931BusinessRules.evaluate(invoice: invoice([zero])).contains { $0.ruleId == "BR-Z-02" })
+        let exempt = InvoiceLine(name: "Formation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .exempt,
+                                 vatExemptionReason: motif)
+        XCTAssertFalse(EN16931BusinessRules.evaluate(invoice: invoice([exempt], sellerVAT: nil)).contains { $0.ruleId == "BR-Z-02" })
+    }
+
+    /// BR-S-02 suit la catégorie, comme le Schematron : une ligne S à 0 % l'exige aussi.
+    func testStandardLineRequiresTheSellerVATNumberWhateverItsRate() {
+        let line = InvoiceLine(name: "Formation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .standard)
+        XCTAssertTrue(EN16931BusinessRules.evaluate(invoice: invoice([line], sellerVAT: nil)).contains { $0.ruleId == "BR-S-02" })
+        let standard = InvoiceLine(name: "Conseil", quantity: 1, unitPrice: 100, vatRate: 20)
+        XCTAssertTrue(EN16931BusinessRules.evaluate(invoice: invoice([standard], sellerVAT: nil)).contains { $0.ruleId == "BR-S-02" })
+        XCTAssertFalse(EN16931BusinessRules.evaluate(invoice: invoice([standard])).contains { $0.ruleId == "BR-S-02" })
+    }
 }

@@ -40,7 +40,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `seller.siren` | `ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` (schéma 0002) | BT-30 | BR-FR-10 (9 chiffres, clé Luhn), BR-FR-13 (SIREN ou identifiant électronique) | avertissement (format) / erreur (ni l'un ni l'autre) |
 | `seller.siret` | — (non émis ; serait le BT-29, schéma 0009) | — | BR-FR-09 (14 chiffres, clé Luhn) | avertissement |
 | `seller.endpointID` | `ram:SellerTradeParty/ram:URIUniversalCommunication/ram:URIID` (schéma 0225 ; déduit du SIREN si vide) | BT-34 | BR-FR-13 | erreur |
-| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | BR-CO-09 (préfixe pays), BR-S-02 / BR-E-02 / BR-IC-02 (obligatoire avec une ligne S / E / K), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
+| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | BR-CO-09 (préfixe pays), BR-S-02 / BR-E-02 / BR-Z-02 / BR-IC-02 (obligatoire avec une ligne S / E / Z / K), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
 | `seller.street` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:LineOne` | BT-35 | — | — |
 | `seller.postcode` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode` | BT-38 | — | — |
 | `seller.city` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:CityName` | BT-37 | — | — |
@@ -116,7 +116,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-CO-10 | total HT (BT-106) | erreur | Total HT ≠ somme des montants nets de ligne (BT-131) |
 | BR-CO-14 | total TVA (BT-110) | erreur | Total TVA ≠ somme des montants de TVA par taux (BT-117) |
 | BR-CO-15 | total TTC (BT-112) | erreur | Total TTC ≠ total HT (BT-109) + total TVA (BT-110) |
-| BR-S-02 / BR-E-02 | n° TVA émetteur (BT-31) | erreur | Obligatoire avec une ligne à TVA normale (S) / exonérée (E) |
+| BR-S-02 / BR-E-02 / BR-Z-02 | n° TVA émetteur (BT-31) | erreur | Obligatoire avec une ligne à TVA normale (S) / exonérée (E) / à taux zéro (Z), d'après la catégorie de la ligne |
 | BR-IC-02 | n° TVA émetteur et acheteur (BT-31, BT-48) | erreur | Tous deux obligatoires avec une ligne en livraison intracommunautaire (K) |
 | BR-O-02 / BR-O-12 | n° TVA (BT-31, BT-48) / catégorie de TVA (BT-151) | erreur | Facture avec une ligne hors champ de TVA (O), hors EXTENDED : aucun n° TVA ; aucune ligne d'une autre catégorie (BR-O-11 : une seule ventilation) |
 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 | taux de TVA (BT-152) | erreur | Taux non nul avec une catégorie autre que S (catégorie K : règles BR-IC-*) |
