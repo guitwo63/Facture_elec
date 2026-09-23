@@ -8,13 +8,21 @@ public enum BusinessRuleSeverity: String, Codable {
 }
 
 public struct BusinessRuleResult: Identifiable, Hashable {
+    /// Identité pour `ForEach`, propre à chaque résultat. Le `ruleId` seul ne suffit pas :
+    /// une même règle sort souvent plusieurs fois (les trois mentions BR-FR-05, une fois par
+    /// ligne fautive, émetteur et destinataire…), et des identités en double font afficher
+    /// à SwiftUI des lignes dupliquées ou manquantes. Dérivée du contenu plutôt que d'un
+    /// UUID, elle reste stable d'une validation à l'autre. Elle suppose que les résultats
+    /// d'une même règle ont des messages différents : une règle par ligne cite la ligne.
     public let id: String
+    /// Partagé par plusieurs résultats : c'est lui, pas `id`, que le surlignage des champs
+    /// en erreur utilise.
     public let ruleId: String
     public let severity: BusinessRuleSeverity
     public let message: String
 
     public init(ruleId: String, severity: BusinessRuleSeverity, message: String) {
-        self.id = ruleId
+        self.id = "\(ruleId)|\(severity.rawValue)|\(message)"
         self.ruleId = ruleId
         self.severity = severity
         self.message = message
