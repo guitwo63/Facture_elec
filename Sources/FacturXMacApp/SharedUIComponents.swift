@@ -233,26 +233,16 @@ enum QuickExport {
     }
 }
 
-enum SocietyOverrideState {
-    /// Pas de surcharge propre, et soit pas de société principale désignée, soit la société
-    /// sélectionnée EST la société principale (elle ne peut pas "hériter d'elle-même").
-    case none
-    /// Cette société a sa propre surcharge pour cette ligne.
-    case customized
-    /// Pas de surcharge propre, mais une société principale est désignée et possède, elle,
-    /// une surcharge pour cette ligne — c'est cette valeur qui est effectivement affichée.
-    case inheritedFromPrincipale
-}
-
+/// Badge d'une ligne de réglage quand la société sélectionnée a sa propre personnalisation
+/// pour cette ligne — clic pour revenir au réglage par défaut. Sans personnalisation propre,
+/// rien n'est affiché : la société suit le réglage par défaut, jamais celui de la société
+/// principale (voir `PartyDirectory.principaleSocieteID`).
 struct SocietyOverrideBadge: View {
-    let state: SocietyOverrideState
+    let isCustomized: Bool
     let onRevert: () -> Void
 
     var body: some View {
-        switch state {
-        case .none:
-            EmptyView()
-        case .customized:
+        if isCustomized {
             Button(action: onRevert) {
                 HStack(spacing: 3) {
                     Image(systemName: "building.2.fill").font(.caption2)
@@ -265,15 +255,6 @@ struct SocietyOverrideBadge: View {
             }
             .buttonStyle(.plain)
             .help("Personnalisé pour cette société — cliquer pour revenir au réglage par défaut")
-        case .inheritedFromPrincipale:
-            HStack(spacing: 3) {
-                Image(systemName: "star.fill").font(.caption2)
-                Text("Hérité de la société principale").font(.caption2)
-            }
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.12)))
-            .foregroundStyle(.secondary)
-            .help("Cette société n'a pas de personnalisation propre — valeur héritée de la société principale")
         }
     }
 }

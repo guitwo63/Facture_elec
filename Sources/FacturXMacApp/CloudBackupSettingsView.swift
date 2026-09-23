@@ -24,9 +24,11 @@ struct CloudBackupSettingsView: View {
     /// Société dont on édite le compte pCloud ET dont on filtre la sauvegarde manuelle —
     /// une seule sélection pour les deux, cohérent avec "sauvegarder la société A" voulant
     /// naturellement dire "avec son propre compte pCloud si elle en a un, et seulement ses
-    /// documents". `nil` = réglage par défaut (comportement historique, inchangé). La
-    /// sauvegarde automatique au lancement reste toujours sur le réglage par défaut, non
-    /// filtrée (voir `RootView.runAutoBackupIfNeeded()`), décision actée dans le plan.
+    /// documents". `nil` = réglage par défaut, pour l'affichage comme pour les boutons
+    /// (`activePCloudCredentialsBinding`) — jamais `credentials(for: nil)`, qui résout sur la
+    /// société principale. La sauvegarde automatique au lancement reste toujours sur le
+    /// réglage par défaut, non filtrée (voir `RootView.runAutoBackupIfNeeded()`), décision
+    /// actée dans le plan.
     @State private var backupSocietyID: UUID?
 
     /// Pré-sélectionne la société — voir `ValueTablesView.init(initialSocietyID:)`, même
@@ -75,13 +77,13 @@ struct CloudBackupSettingsView: View {
                 if let cid = backupSocietyID {
                     if pcloudSettings.credentialsBySociety[cid] == nil {
                         HStack(spacing: 6) {
-                            Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                            Text("Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
                             Button("Personnaliser pour cette société") {
                                 pcloudSettings.setOverride(pcloudSettings.credentials(for: cid), companyID: cid)
                             }.buttonStyle(.link).font(.caption2)
                         }
                     } else {
-                        Button("Revenir au réglage hérité", role: .destructive) {
+                        Button("Revenir au réglage par défaut", role: .destructive) {
                             pcloudSettings.removeOverride(companyID: cid)
                         }.buttonStyle(.link).font(.caption2)
                     }
@@ -121,7 +123,7 @@ struct CloudBackupSettingsView: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                .disabled(testing || !pcloudSettings.credentials(for: backupSocietyID).isConfigured)
+                .disabled(testing || !activePCloudCredentialsBinding.wrappedValue.isConfigured)
 
                 Button {
                     backupNow()
@@ -133,13 +135,13 @@ struct CloudBackupSettingsView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(backingUp || !pcloudSettings.credentials(for: backupSocietyID).isConfigured)
+                .disabled(backingUp || !activePCloudCredentialsBinding.wrappedValue.isConfigured)
 
                 Button {
                     openRestoreSheet()
                 } label: { Label("Restaurer…", systemImage: "icloud.and.arrow.down") }
                     .buttonStyle(.bordered)
-                    .disabled(!pcloudSettings.credentials(for: backupSocietyID).isConfigured)
+                    .disabled(!activePCloudCredentialsBinding.wrappedValue.isConfigured)
             }
 
             if let m = testMessage {
@@ -190,7 +192,7 @@ struct CloudBackupSettingsView: View {
     private func testConnection() {
         testing = true
         testMessage = nil
-        let credentials = pcloudSettings.credentials(for: backupSocietyID)
+        let credentials = activePCloudCredentialsBinding.wrappedValue
         Task {
             do {
                 _ = try await PCloudService().login(credentials: credentials)
@@ -205,7 +207,7 @@ struct CloudBackupSettingsView: View {
     private func backupNow() {
         backingUp = true
         backupMessage = nil
-        let credentials = pcloudSettings.credentials(for: backupSocietyID)
+        let credentials = activePCloudCredentialsBinding.wrappedValue
         let strategy = backupStrategyStore.settings
         let bundle = BackupService.capture(invoiceStore: store, orderStore: orderStore, quoteStore: quoteStore, directory: directory, purchaseInvoiceStore: purchaseInvoiceStore, companyID: backupSocietyID)
         Task {
@@ -233,7 +235,7 @@ struct CloudBackupSettingsView: View {
         listingBackups = true
         restoreMessage = nil
         restoreCandidates = []
-        let credentials = pcloudSettings.credentials(for: backupSocietyID)
+        let credentials = activePCloudCredentialsBinding.wrappedValue
         Task {
             do {
                 let service = PCloudService()
@@ -252,7 +254,7 @@ struct CloudBackupSettingsView: View {
     private func restoreBackup(_ file: PCloudBackupFile) {
         restoring = true
         restoreMessage = nil
-        let credentials = pcloudSettings.credentials(for: backupSocietyID)
+        let credentials = activePCloudCredentialsBinding.wrappedValue
         Task {
             do {
                 let service = PCloudService()
