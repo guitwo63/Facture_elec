@@ -15,7 +15,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `invoice.issueDate` | `rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString` | BT-2 | BT-2-FUTURE (contrôle interne) | avertissement (date future) |
 | `invoice.dueDate` | `ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime` | BT-9 | BR-FR-CO-07 | erreur (sauf acompte 386 et cadres B2/S2/M2) |
 | `invoice.currency` | `ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode` | BT-5 | BR-05 (présence), BR-CL-04 (code ISO 4217) | erreur (code absent de la liste de référence : avertissement) |
-| `invoice.profile` | `ram:GuidelineSpecifiedDocumentContextParameter/ram:ID` | BT-24 | BR-PROFIL | avertissement |
+| `invoice.profile` | `ram:GuidelineSpecifiedDocumentContextParameter/ram:ID` | BT-24 | BR-PROFIL | erreur (MINIMUM, BASIC WL, BASIC) |
 | `invoice.billingMode` | `ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID` | BT-23 | BR-FR-CO-08, BR-FR-CO-09, BR-FR-MV-02, BR-FR-BD-02 | erreur |
 | `invoice.buyerReference` | `ram:BuyerReference` | BT-10 | — | — |
 | `invoice.purchaseOrderRef` | `ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID` | BT-13 | — | — |
@@ -139,7 +139,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BT-131-CALCUL | montant net de ligne (BT-131) | erreur | Montant net ≠ quantité × prix unitaire — contrôle interne |
 | BT-152-ZERO | taux de TVA (BT-152) | avertissement | Taux nul en catégorie Z : vérifier l'exonération — contrôle interne |
 | BT-157-GTIN | identifiant normalisé de l'article (BT-157) | avertissement | Valeur qui n'est pas un GTIN (émise avec le schéma 0160) — contrôle interne |
-| BR-PROFIL | profil (BT-24) | avertissement | Profil limité ; EN 16931 recommandé |
+| BR-PROFIL | profil (BT-24) | erreur | Profil MINIMUM, BASIC WL ou BASIC : XML non conforme au XSD du profil, export bloqué — contrôle interne |
 
 ## Notes d'implémentation
 
@@ -159,6 +159,26 @@ Contraintes du Schematron France CTC, reprises dans `EN16931BusinessRules` (bloq
 - **Cadre 2** (B2/S2/M2) — BR-FR-CO-09 : montant déjà payé (BT-113) = total TTC (BT-112), net à payer (BT-115) = 0, échéance (BT-9) = date du paiement (seule sa présence est vérifiable : rappel en avertissement), qui peut donc précéder la date de facture (exception à BR-FR-CO-07, comme les acomptes). Le champ « Montant déjà payé » s'affiche dans l'éditeur dès qu'un cadre 2 est choisi, et `TotalPrepaidAmount` est toujours émis dans ce cadre (même à 0).
 - **Cadre 4** (B4/S4/M4) — BR-FR-CO-08 : interdit sur une facture d'acompte (386). `InvoiceStore.newDeposit` ramène un cadre 4 au cadre 1 de même nature ; `newFinalSettlement` passe un cadre 1 au cadre 4 (la facture de solde est la facture définitive après acompte).
 - **Cadres 8 et 9** — BR-FR-MV-* / BR-FR-BD-* : exigent des lignes de regroupement par vendeur (sous-type `GROUP`) que le générateur ne produit pas. Plus proposés à la saisie (`BillingMode.selectableCases`) ; une facture existante qui les porte reste affichée, mais son export est bloqué.
+
+## Profil Factur-X (BT-24)
+
+`CIIXMLGenerator` produit toujours la structure du profil EN 16931 et ne change que l'URN du profil (`FacturXProfile.urn`). Ce XML est conforme en EN 16931 et en EXTENDED, qui englobe EN 16931, mais pas dans les profils plus restreints.
+
+**Mesure du 2026-09-23** : 36 cas de facture (exemple des tests, socle sans champ facultatif, chaque champ optionnel seul, contacts, IBAN/BIC, avoir, rectificative, acompte, solde, cadre 2, catégories de TVA, tout ensemble) × 5 profils, validés contre le XSD et le Schematron Factur-X 1.09 **du profil déclaré** et contre le Schematron France CTC (paquet `factur-x` 6.8, Schematron exécutés avec `saxonche`). Pour chaque XML rejeté, les éléments refusés ont été retirés un à un jusqu'à validation, pour obtenir la liste complète de ce que le profil ne peut pas porter.
+
+| Profil | XSD valide | Données de l'app que le profil ne peut pas porter |
+|---|---|---|
+| MINIMUM | 0/36 | Lignes, notes (dont les mentions légales PMT/PMD/AAB), adresses postales hors pays, adresses électroniques BT-34/BT-49, date de livraison, ventilation de TVA, échéance et conditions de paiement, total des lignes, IBAN/BIC, contacts, BT-11/12/15/16/17, n° de TVA de l'acheteur. Même réduit à ce qu'il admet, le XML reste rejeté par le Schematron France CTC (BR-FR-05, BR-FR-12, BR-FR-13). |
+| BASIC WL | 0/36 | Lignes (BG-25) dans tous les cas ; en outre contacts vendeur/acheteur, `ram:Information` « SEPA » (BT-82, émis avec tout IBAN), BIC (BT-86), BT-11, BT-15, BT-17. |
+| BASIC | 22/36 | Contacts vendeur/acheteur, `ram:Information` « SEPA » (toute facture avec IBAN est donc rejetée), BIC, BT-11, BT-15, BT-17 ; sur les lignes : BT-132, BT-154 (description), BT-155, BT-156. |
+| EN 16931 | 36/36 | — |
+| EXTENDED | 36/36 | — |
+
+**Règle retenue** (option « EN 16931 + EXTENDED ») :
+- Seuls EN 16931 et EXTENDED sont proposés à la saisie (`FacturXProfile.selectableCases`) ; un ancien profil déjà enregistré sur une société reste affiché dans son sélecteur (réglages), avec un avertissement.
+- Une nouvelle facture n'hérite jamais d'un ancien profil (`FacturXProfile.forNewInvoice`) : création depuis la société, doublon, avoir, acompte et solde passent en EN 16931.
+- Une facture émise encore en MINIMUM, BASIC WL ou BASIC est bloquée à l'export et au dépôt (BR-PROFIL, erreur). L'éditeur affiche alors un sélecteur « Profil Factur-X (BT-24) », et seulement dans ce cas, pour la repasser en EN 16931 ou EXTENDED.
+- Tous les profils restent décodables : factures existantes, et factures reçues dont le profil est lu dans le XML (`CIIXMLParser`). BR-PROFIL ne s'applique pas à une facture reçue (`EN16931RuleContext.received`).
 
 ## Champs optionnels EN 16931 (catalogue + champs libres)
 

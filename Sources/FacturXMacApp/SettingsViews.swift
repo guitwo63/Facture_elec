@@ -226,11 +226,16 @@ struct SocietiesAdminView: View {
                                 directory.upsert(e)
                             }
                         )) {
-                            ForEach(FacturXProfile.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                            ForEach(FacturXProfile.selectableCases(current: entry.profile), id: \.self) { Text($0.rawValue).tag($0) }
                         }
                         .labelsHidden()
                         .frame(width: 140)
-                        .help("Profil Factur-X par défaut des factures émises par cette société (hérité à la création).")
+                        .help("Profil Factur-X par défaut des factures émises par cette société (hérité à la création). Seuls EN 16931 et EXTENDED sont proposés : le XML produit par l'application n'est pas conforme aux profils MINIMUM, BASIC WL et BASIC.")
+                        if !entry.profile.isIssuable {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .help("Profil \(entry.profile.rawValue) plus proposé : les nouvelles factures de cette société sont créées en EN 16931. Choisissez EN 16931 ou EXTENDED.")
+                        }
                     }.padding(.top, 4)
                 }
             }

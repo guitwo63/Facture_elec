@@ -217,7 +217,7 @@ public final class InvoiceStore: ObservableObject {
         let defaultPaymentTerms = PaymentTermsPresetStore.defaults.first(where: { $0.id == "net30" })?.text ?? "Paiement à 30 jours"
         return Invoice(
             number: nextNumber(companyID: companyID),
-            profile: sellerEntry?.profile ?? .en16931,
+            profile: (sellerEntry?.profile ?? .en16931).forNewInvoice,
             seller: seller,
             buyer: InvoiceParty(name: "", street: "", postcode: "", city: ""),
             companyID: companyID,
@@ -233,6 +233,7 @@ public final class InvoiceStore: ObservableObject {
         copy.id = UUID()
         copy.number = nextNumber(companyID: invoice.companyID)
         copy.status = .draft
+        copy.profile = invoice.profile.forNewInvoice
         copy.issueDate = Date()
         copy.dueDate = copy.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
         copy.precedingInvoiceRef = nil
@@ -252,6 +253,7 @@ public final class InvoiceStore: ObservableObject {
         credit.number = nextNumber(companyID: invoice.companyID)
         credit.type = .creditNote
         credit.status = .draft
+        credit.profile = invoice.profile.forNewInvoice
         credit.issueDate = Date()
         credit.dueDate = Date()
         credit.purchaseOrderRef = nil
@@ -273,6 +275,7 @@ public final class InvoiceStore: ObservableObject {
         deposit.number = nextNumber(companyID: invoice.companyID)
         deposit.type = .deposit
         deposit.status = .draft
+        deposit.profile = invoice.profile.forNewInvoice
         deposit.issueDate = Date()
         deposit.dueDate = deposit.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
         deposit.precedingInvoiceRef = nil
@@ -290,6 +293,7 @@ public final class InvoiceStore: ObservableObject {
         final.number = nextNumber(companyID: invoice.companyID)
         final.type = .finalSettlement
         final.status = .draft
+        final.profile = invoice.profile.forNewInvoice
         final.issueDate = Date()
         final.dueDate = final.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
         final.precedingInvoiceRef = deposits.first?.number
