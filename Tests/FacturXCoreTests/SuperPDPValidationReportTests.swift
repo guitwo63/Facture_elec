@@ -11,7 +11,7 @@ final class SuperPDPValidationReportTests: XCTestCase {
 
     /// Extrait (simplifié) d'une vraie réponse /v1.beta/validation_reports pour une facture
     /// rejetée par le validateur EN16931 officiel, avec le 3e validateur (schematron français
-    /// non bloquant) dont le nom contient "WARNING".
+    /// d'avertissements) dont le nom contient "WARNING".
     private let realisticJSON = """
     {
       "data": [
@@ -67,17 +67,94 @@ final class SuperPDPValidationReportTests: XCTestCase {
     func testParsesFailuresFromSubreportsAsErrors() throws {
         let report = try SuperPDPService().parseValidationReport(data: Data(realisticJSON.utf8))
         XCTAssertFalse(report.isValid)
-        XCTAssertEqual(report.errors.count, 2, "les deux échecs du validateur EN16931 (BR-Z-09, BR-Z-05) doivent être récupérés")
-        XCTAssertTrue(report.errors.contains { $0.contains("BR-Z-09") })
-        XCTAssertTrue(report.errors.contains { $0.contains("BR-Z-05") })
+        XCTAssertEqual(Array(report.errors.prefix(2)).map { String($0.prefix(9)) }, ["[BR-Z-09]", "[BR-Z-05]"],
+                       "les deux échecs du validateur EN16931 doivent être récupérés, dans l'ordre du rapport")
     }
 
-    func testWarningValidatorFailuresGoToWarningsNotErrors() throws {
+    /// Rapport non conforme : ce que liste le validateur WARNING en est aussi une cause (un seul
+    /// avertissement suffit à is_valid=false, vérifié le 2026-09-23). Il compte donc comme erreur,
+    /// après ceux des validateurs précédents : le panneau ne peut plus annoncer « non conforme —
+    /// 0 erreur(s) ».
+    func testWarningValidatorEntriesCountAsErrorsWhenReportIsInvalid() throws {
         let report = try SuperPDPService().parseValidationReport(data: Data(realisticJSON.utf8))
-        XCTAssertEqual(report.warnings.count, 1)
-        XCTAssertTrue(report.warnings.contains { $0.contains("BR-FR-WARN-1") })
-        XCTAssertFalse(report.errors.contains { $0.contains("BR-FR-WARN-1") },
-                      "un validateur \"WARNING\" ne doit pas gonfler le compte d'erreurs bloquantes")
+        XCTAssertEqual(report.errors.count, 3)
+        XCTAssertEqual(report.errors.last, "[BR-FR-WARN-1]-Some non-blocking recommendation.")
+        XCTAssertTrue(report.warnings.isEmpty)
+    }
+
+    /// Sur un rapport conforme (jamais vu avec un message : un seul suffit à is_valid=false), ce
+    /// que liste le validateur WARNING reste un avertissement, avec son libellé de ligne.
+    func testValidReportKeepsWarningValidatorEntriesAsWarnings() throws {
+        let json = """
+        {"data": [{"is_valid": true, "subreports": [
+          {"validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/FACTUR-X_EN16931.xslt", "checks_count": 103,
+           "failures": [], "messages": []},
+          {"validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/BR-FR-Flux2-Schematron-CII_WARNING.xslt", "checks_count": 69,
+           "failures": [],
+           "messages": [{"message": "[BR-FR-WARN-1]-Some non-blocking recommendation.", "raw": "svrl:failed-assert BR-FR-WARN-1",
+                         "location": "/*:CrossIndustryInvoice[1]/*:SupplyChainTradeTransaction[1]/*:IncludedSupplyChainTradeLineItem[3]/*:SpecifiedTradeProduct[1]"}]}
+        ]}]}
+        """
+        var report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
+        report.lineNames = ["Prestation A", "Prestation B", "Prestation C"]
+        XCTAssertTrue(report.isValid)
+        XCTAssertTrue(report.errors.isEmpty)
+        XCTAssertEqual(report.warningEntries.map(report.displayText(for:)), ["Ligne 3 (Prestation C) — [BR-FR-WARN-1]-Some non-blocking recommendation."])
+    }
+
+    /// Vraie réponse (2026-09-23) pour une facture fictive générée par l'app, mention PMT vidée,
+    /// recopiée telle quelle. BR-FR-05 y est un `flag="warning"` du validateur « …_WARNING.xslt »,
+    /// sous `messages`, et suffit à is_valid=false. Le panneau affichait « non conforme —
+    /// 0 erreur(s) » avec BR-FR-05 sous « Avertissements » ; il compte maintenant une erreur.
+    private let realBRFR05ReportJSON = #"""
+    {
+      "data": [
+        {
+          "file_name": "invoice.xml",
+          "file_size": 43125,
+          "is_valid": false,
+          "duration": 90,
+          "format": "factur-x",
+          "conformance_level": "urn:cen.eu:en16931:2017",
+          "subreports": [
+            {
+              "validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/1xsd/Factur-X_EN16931.xsd",
+              "checks_count": 1,
+              "messages": [],
+              "failures": []
+            },
+            {
+              "validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/FACTUR-X_EN16931.xslt",
+              "checks_count": 101,
+              "messages": [],
+              "failures": []
+            },
+            {
+              "validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/BR-FR-Flux2-Schematron-CII_WARNING.xslt",
+              "checks_count": 69,
+              "messages": [
+                {
+                  "message": "BR-FR-05/BT-22 : La mention relative aux frais de recouvrement (code PMT) est absente. Elle est obligatoire dans les notes (BG-1).",
+                  "raw": "<svrl:failed-assert test=\"exists($notes[ram:SubjectCode = &apos;PMT&apos;])\" id=\"BR-FR-05_BT-22_PMT\" flag=\"warning\" location=\"/*:CrossIndustryInvoice[namespace-uri()=&apos;urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100&apos;][1]/*:ExchangedDocument[namespace-uri()=&apos;urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100&apos;][1]\">\n    <svrl:text>\n        BR-FR-05/BT-22 : La mention relative aux frais de recouvrement (code PMT) est absente. Elle est obligatoire dans les notes (BG-1).\n      </svrl:text>\n</svrl:failed-assert>",
+                  "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:ExchangedDocument[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]",
+                  "rule": "BR-FR-05_BT-22_PMT"
+                }
+              ],
+              "failures": []
+            }
+          ]
+        }
+      ]
+    }
+    """#
+
+    func testRealBRFR05ReportCountsAsOneError() throws {
+        let report = try SuperPDPService().parseValidationReport(data: Data(realBRFR05ReportJSON.utf8))
+        XCTAssertFalse(report.isValid)
+        XCTAssertEqual(report.errors, ["BR-FR-05/BT-22 : La mention relative aux frais de recouvrement (code PMT) est absente. Elle est obligatoire dans les notes (BG-1)."],
+                       "« non conforme — 1 erreur(s) », plus « 0 erreur(s) »")
+        XCTAssertTrue(report.warnings.isEmpty)
+        XCTAssertEqual(report.errorEntries.map(report.displayText(for:)), report.errors, "échec d'en-tête (ExchangedDocument) : pas de « Ligne n »")
     }
 
     func testValidReportHasNoErrors() throws {
@@ -175,10 +252,9 @@ final class SuperPDPValidationReportTests: XCTestCase {
         ]}]}
         """
         let report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
-        XCTAssertEqual(report.errors.count, 2, "un message par ligne fautive, même si le texte est identique")
-        XCTAssertEqual(Set(report.errors).count, 1, "les deux erreurs ont le même texte : il ne peut pas servir d'identité")
-        XCTAssertEqual(report.warnings.count, 2)
-        XCTAssertEqual(Set(report.warnings).count, 1)
+        XCTAssertEqual(report.errors.count, 4, "un message par ligne fautive, même si le texte est identique (rapport non conforme : ceux du validateur WARNING compris)")
+        XCTAssertEqual(Set(report.errors).count, 2, "quatre erreurs pour deux textes : le texte ne peut pas servir d'identité")
+        XCTAssertTrue(report.warnings.isEmpty)
     }
 
     // MARK: - Ligne en cause (`location`)
@@ -294,9 +370,10 @@ final class SuperPDPValidationReportTests: XCTestCase {
         XCTAssertNil(line(""))
     }
 
-    /// Les avertissements (schematron français) reçoivent aussi le libellé de ligne. Une entrée
-    /// sans `location` (texte simple, clé absente, erreur générique du rapport) reste telle quelle.
-    func testWarningsGetLineLabelAndEntriesWithoutLocationStayPlain() throws {
+    /// Les entrées du schematron français (validateur WARNING) reçoivent aussi le libellé de ligne.
+    /// Une entrée sans `location` (texte simple, clé absente, erreur générique du rapport) reste
+    /// telle quelle.
+    func testWarningValidatorEntriesGetLineLabelAndEntriesWithoutLocationStayPlain() throws {
         let json = """
         {"data": [{"is_valid": false, "error": "Fichier illisible", "subreports": [
           {"validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/FACTUR-X_EN16931.xslt", "checks_count": 2,
@@ -310,8 +387,12 @@ final class SuperPDPValidationReportTests: XCTestCase {
         """
         var report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
         report.lineNames = ["Prestation A", "Prestation B", "Prestation C"]
-        XCTAssertEqual(report.errorEntries.map(report.displayText(for:)), ["[BR-1]-Texte seul", "[BR-2]-Sans location", "Fichier illisible"])
-        XCTAssertEqual(report.warningEntries.map(report.displayText(for:)), ["Ligne 3 (Prestation C) — [BR-FR-WARN-1]-Some non-blocking recommendation."])
-        XCTAssertEqual(report.warnings, ["[BR-FR-WARN-1]-Some non-blocking recommendation."])
+        XCTAssertEqual(report.errorEntries.map(report.displayText(for:)), [
+            "[BR-1]-Texte seul",
+            "[BR-2]-Sans location",
+            "Ligne 3 (Prestation C) — [BR-FR-WARN-1]-Some non-blocking recommendation.",
+            "Fichier illisible",
+        ], "rapport non conforme : l'entrée du validateur WARNING compte comme erreur")
+        XCTAssertTrue(report.warnings.isEmpty)
     }
 }

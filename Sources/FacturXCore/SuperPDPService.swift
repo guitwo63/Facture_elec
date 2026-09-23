@@ -194,6 +194,8 @@ public struct SuperPDPInvoiceSubmission: Identifiable, Codable, Hashable {
 public struct SuperPDPValidationReport: Hashable {
     public var isValid: Bool
     /// Un échec par entrée, dans l'ordre du rapport : le compteur « n erreur(s) » en dépend.
+    /// Sur un rapport non conforme, tout ce que SUPER PDP liste, avertissements compris : voir
+    /// `SuperPDPService.parseValidationReport`.
     public var errorEntries: [SuperPDPValidationMessage]
     public var warningEntries: [SuperPDPValidationMessage]
     public var raw: [String: String]
@@ -637,10 +639,15 @@ public final class SuperPDPService {
 
     /// Le rapport n'a pas de champs errors/warnings au premier niveau : chaque validateur
     /// (schéma XSD, schematron EN16931, schematron d'avertissements français) est un
-    /// "subreport" avec ses propres `failures` (échecs, chacun {message, raw, location})
-    /// — c'est là que vivent les vrais messages d'erreur (ex. "[BR-Z-05]-..."). Un validateur
-    /// dont le nom contient "WARNING" est traité comme non bloquant même si l'API les range
-    /// aussi sous `failures`. Confirmé sur la référence OpenAPI publique de SUPER PDP
+    /// "subreport" avec ses propres `failures` et `messages` (chacun {message, raw, location}).
+    /// Vérifié le 2026-09-23 sur des factures fictives : `failures` reçoit les assertions SVRL
+    /// sans `flag` (ex. "[BR-Z-05]-..."), `messages` celles en `flag="warning"`, et un seul
+    /// élément dans l'un ou l'autre suffit à is_valid=false. Une mention légale manquante
+    /// (BR-FR-05, avertissement du validateur « …_WARNING.xslt ») rend ainsi le fichier non
+    /// conforme. D'où la règle : sur un rapport non conforme, tout ce qu'il liste compte comme
+    /// erreur, sinon le panneau annonçait « non conforme — 0 erreur(s) » ; sur un rapport
+    /// conforme, ce que liste un validateur dont le nom contient "WARNING" reste un
+    /// avertissement. Confirmé sur la référence OpenAPI publique de SUPER PDP
     /// (schéma `validation_report` / `subreport` / `message`), le format precedent
     /// (`errors`/`warnings` au premier niveau) ne correspondait à aucun champ réel de l'API
     /// et affichait donc toujours "0 erreur(s)" malgré un is_valid=false.
@@ -677,13 +684,11 @@ public final class SuperPDPService {
         for case let subreport as [String: Any] in subreports {
             let validatorName = (subreport["validator"] as? String) ?? ""
             // Vu en conditions réelles (tableau de bord SUPER PDP, dépôt facture-FA-2026-0011) :
-            // un rapport is_valid=false dont les 3 échecs visibles au tableau de bord
-            // n'apparaissaient dans aucun des deux tableaux, `failures` ET `messages`, restant
-            // vides selon le validateur — le tableau de bord les affiche sous "Message (n/3)",
-            // laissant penser que le champ réellement peuplé dépend du validateur. On lit donc
-            // les deux et on les fusionne plutôt que de parier sur un seul nom de champ.
+            // un rapport is_valid=false dont les 3 échecs, affichés « Message (n/3) », n'étaient
+            // que sous `messages`. Le tableau peuplé dépend du flag SVRL (voir plus haut) : on
+            // lit les deux et on les fusionne.
             let failures = failureMessages(subreport["failures"] as? [Any]) + failureMessages(subreport["messages"] as? [Any])
-            if validatorName.uppercased().contains("WARNING") {
+            if isValid && validatorName.uppercased().contains("WARNING") {
                 warnings.append(contentsOf: failures)
             } else {
                 errors.append(contentsOf: failures)
