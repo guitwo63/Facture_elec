@@ -18,17 +18,17 @@ final class DirectoryEntryKindTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        directoryKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        directoryKeys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
     }
 
     override func tearDown() {
-        directoryKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        directoryKeys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
         super.tearDown()
     }
 
     private func persistDirectoryEntries(_ entries: [DirectoryEntry]) throws {
         let data = try JSONEncoder().encode(entries)
-        UserDefaults.standard.set(data, forKey: "facturx.directory.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.directory.v1")
     }
 
     func testLoadAddsIntercoToExistingSocietesMissingIt() throws {

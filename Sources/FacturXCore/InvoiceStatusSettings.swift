@@ -28,7 +28,7 @@ public final class InvoiceStatusStore: ObservableObject {
     /// statuts qu'elle personnalise réellement — voir `SocietyScopedCatalog`.
     @Published public var overridesBySociety: [UUID: [InvoiceStatusOverride]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.invoiceStatuses.v1") }
     private var overridesBySocietyKey: String { env.key("facturx.invoiceStatuses.bysociety.v1") }

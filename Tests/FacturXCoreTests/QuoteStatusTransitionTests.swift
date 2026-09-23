@@ -4,7 +4,7 @@ import XCTest
 final class QuoteStatusTransitionTests: XCTestCase {
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "facturx.quotestatuses.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.quotestatuses.v1")
         super.tearDown()
     }
 
@@ -55,7 +55,7 @@ final class QuoteStatusTransitionTests: XCTestCase {
             LegacyOverride(id: $0.rawValue, label: "Ancien " + $0.label, systemImage: $0.systemImage, hexColor: $0.hexColor)
         }
         let data = try JSONEncoder().encode(legacy)
-        UserDefaults.standard.set(data, forKey: "facturx.quotestatuses.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.quotestatuses.v1")
 
         let store = QuoteStatusStore()
         XCTAssertEqual(store.override(for: .draft).label, "Ancien Brouillon")

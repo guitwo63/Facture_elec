@@ -14,7 +14,7 @@ public final class QuoteStore: ObservableObject {
     public weak var audit: AuditStore?
     public var actorName: String = "system"
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.quotes.v1") }
     private var numPrefixKey: String { env.key("facturx.quotes.number.prefix.v1") }

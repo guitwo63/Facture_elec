@@ -40,7 +40,7 @@ public final class SuperPDPStatusCodeStore: ObservableObject {
     /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
     @Published public var overridesBySociety: [UUID: [PDPEventCodeOverride]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.superpdp.statusCodes.v1") }
     private var overridesBySocietyKey: String { env.key("facturx.superpdp.statusCodes.bysociety.v1") }

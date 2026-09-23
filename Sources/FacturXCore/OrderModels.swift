@@ -375,7 +375,7 @@ public final class OrderStatusStore: ObservableObject {
     /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
     @Published public var overridesBySociety: [UUID: [OrderStatusOverride]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("orderx.statuses.v1") }
     private var overridesBySocietyKey: String { env.key("orderx.statuses.bysociety.v1") }

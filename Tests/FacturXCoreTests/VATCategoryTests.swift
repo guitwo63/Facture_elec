@@ -259,8 +259,8 @@ final class VATCategoryTests: XCTestCase {
     /// automatique au chargement, plutôt qu'une correction manuelle ligne par ligne.
     func testInvoiceStoreAutoCorrectsInconsistentCategoryOnLoad() {
         let key = "facturx.invoices.v1"
-        UserDefaults.standard.removeObject(forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        AppPersistence.defaults.removeObject(forKey: key)
+        defer { AppPersistence.defaults.removeObject(forKey: key) }
 
         let seedStore = InvoiceStore()
         var invoice = seedStore.newDraft()
@@ -276,8 +276,8 @@ final class VATCategoryTests: XCTestCase {
 
     func testOrderStoreAutoCorrectsInconsistentCategoryOnLoad() {
         let key = "orderx.orders.v1"
-        UserDefaults.standard.removeObject(forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        AppPersistence.defaults.removeObject(forKey: key)
+        defer { AppPersistence.defaults.removeObject(forKey: key) }
 
         let seedStore = OrderStore()
         var order = seedStore.newDraft()
@@ -293,8 +293,8 @@ final class VATCategoryTests: XCTestCase {
 
     func testQuoteStoreAutoCorrectsInconsistentCategoryOnLoad() {
         let key = "facturx.quotes.v1"
-        UserDefaults.standard.removeObject(forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        AppPersistence.defaults.removeObject(forKey: key)
+        defer { AppPersistence.defaults.removeObject(forKey: key) }
 
         let seedStore = QuoteStore()
         var quote = seedStore.newDraft(seller: party("Vendeur"))

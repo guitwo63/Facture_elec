@@ -28,7 +28,7 @@ public final class BackupStrategyStore: ObservableObject {
 
     @Published public var settings: BackupStrategySettings
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.backupstrategy.v1") }
 

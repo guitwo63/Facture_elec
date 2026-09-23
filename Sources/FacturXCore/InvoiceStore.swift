@@ -50,7 +50,7 @@ public final class InvoiceStore: ObservableObject {
     /// `duplicate`, `newDeposit`, `newFinalSettlement`) suit celui de leurs conditions.
     public var paymentTermsPresets: PaymentTermsPresetStore = .shared
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.invoices.v1") }
     private var companyKey: String { env.key("facturx.mycompany.v1") }

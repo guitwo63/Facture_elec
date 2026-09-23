@@ -24,11 +24,11 @@ final class EndToEndSalesWorkflowTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        persistedKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        persistedKeys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
     }
 
     override func tearDown() {
-        persistedKeys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        persistedKeys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
         super.tearDown()
     }
 

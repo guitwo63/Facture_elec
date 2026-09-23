@@ -108,7 +108,7 @@ public final class TwoFactorSettings: ObservableObject {
 
     @Published public var enabledSolutionWide: Bool
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.2fa.enabled.v1") }
 

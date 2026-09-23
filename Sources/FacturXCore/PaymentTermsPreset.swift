@@ -82,7 +82,7 @@ public final class PaymentTermsPresetStore: ObservableObject {
     /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
     @Published public var presetsBySociety: [UUID: [PaymentTermsPreset]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.paymentTermsPresets.v1") }
     private var presetsBySocietyKey: String { env.key("facturx.paymentTermsPresets.bysociety.v1") }

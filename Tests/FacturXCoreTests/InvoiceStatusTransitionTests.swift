@@ -4,7 +4,7 @@ import XCTest
 final class InvoiceStatusTransitionTests: XCTestCase {
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "facturx.invoiceStatuses.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.invoiceStatuses.v1")
         super.tearDown()
     }
 
@@ -54,7 +54,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
             stale[idx].reformCode = "fr:310"
         }
         let data = try JSONEncoder().encode(stale)
-        UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.invoiceStatuses.v1")
 
         let store = InvoiceStatusStore()
         XCTAssertEqual(store.override(for: .accepted).reformCode, "fr:205")
@@ -81,7 +81,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         stale.append(InvoiceStatusOverride(id: "sentToPDP", label: "Transmise au PDP", systemImage: "paperplane.fill", hexColor: "B07A2A", reformCode: "200"))
         stale.append(InvoiceStatusOverride(id: "custom-abc123", label: "Archivée", systemImage: "doc", hexColor: "6E6E73"))
         let data = try JSONEncoder().encode(stale)
-        UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.invoiceStatuses.v1")
 
         let store = InvoiceStatusStore()
         XCTAssertEqual(store.overrides.count, InvoiceStatus.allCases.count, "seuls les statuts actuels doivent rester")
@@ -148,7 +148,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
     func testLoadAddsANewlyIntroducedStatusWithItsDefaults() throws {
         let withoutPartiallyPaid = InvoiceStatusStore.defaults.filter { $0.id != InvoiceStatus.partiallyPaid.rawValue }
         let data = try JSONEncoder().encode(withoutPartiallyPaid)
-        UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.invoiceStatuses.v1")
 
         let store = InvoiceStatusStore()
         let added = store.override(for: .partiallyPaid)
@@ -169,7 +169,7 @@ final class InvoiceStatusTransitionTests: XCTestCase {
         }
         customized[idx].transitionCodes = [InvoiceStatus.paid.rawValue]
         let data = try JSONEncoder().encode(customized)
-        UserDefaults.standard.set(data, forKey: "facturx.invoiceStatuses.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.invoiceStatuses.v1")
 
         let store = InvoiceStatusStore()
         XCTAssertEqual(store.override(for: .accepted).transitionCodes, [InvoiceStatus.paid.rawValue])

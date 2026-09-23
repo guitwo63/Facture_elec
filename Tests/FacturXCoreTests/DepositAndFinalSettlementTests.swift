@@ -18,11 +18,11 @@ final class DepositAndFinalSettlementTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        keys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
     }
 
     override func tearDown() {
-        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        keys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
         super.tearDown()
     }
 

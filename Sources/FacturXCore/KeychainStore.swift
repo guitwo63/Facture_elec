@@ -17,7 +17,9 @@ import Security
 /// mécanisme de secret côté serveur) : `*Settings.init()` migre encore, une
 /// seule fois, un secret resté dans le Keychain d'une build précédente.
 public enum KeychainStore {
-    private static let service = "fr.arverneo.facturxmacapp"
+    /// "fr.arverneo.facturxmacapp" dans l'app, un service propre au processus sous XCTest
+    /// (voir `AppPersistence`).
+    static var service: String { AppPersistence.keychainService }
 
     public static func set(_ value: String, forKey key: String) {
         guard !value.isEmpty else {

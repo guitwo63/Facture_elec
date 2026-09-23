@@ -398,7 +398,7 @@ public struct AuditLogEntry: Codable, Identifiable, Hashable {
 public final class AuditStore: ObservableObject {
     public static let shared = AuditStore()
     @Published public var entries: [AuditLogEntry] = []
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var key: String { env.key("facturx.audit.v1") }
     public var maxEntries = 500
@@ -465,7 +465,7 @@ public final class AuthStore: ObservableObject {
 
     public let audit = AuditStore.shared
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var usersKey: String { env.key("facturx.users.v1") }
     private var sessionKey: String { env.key("facturx.session.userid.v1") }

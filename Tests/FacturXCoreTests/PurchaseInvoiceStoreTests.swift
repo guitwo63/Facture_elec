@@ -4,8 +4,8 @@ import XCTest
 final class PurchaseInvoiceStoreTests: XCTestCase {
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "facturx.purchaseinvoices.v1")
-        UserDefaults.standard.removeObject(forKey: "facturx.audit.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.purchaseinvoices.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.audit.v1")
         super.tearDown()
     }
 

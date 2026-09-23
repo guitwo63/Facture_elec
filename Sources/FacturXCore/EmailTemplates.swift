@@ -158,7 +158,7 @@ public final class EmailTemplateStore: ObservableObject {
     /// été désignée (voir `PartyDirectory.principaleSocieteID`), sinon `templates`.
     @Published public var templatesBySociety: [UUID: [EmailTemplate]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var globalKey: String { env.key("facturx.email.templates.enabled.v1") }
     private var templatesKey: String { env.key("facturx.email.templates.v1") }

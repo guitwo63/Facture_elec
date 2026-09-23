@@ -11,11 +11,11 @@ final class AuditLogCompanyScopeTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: key)
+        AppPersistence.defaults.removeObject(forKey: key)
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: key)
+        AppPersistence.defaults.removeObject(forKey: key)
         super.tearDown()
     }
 

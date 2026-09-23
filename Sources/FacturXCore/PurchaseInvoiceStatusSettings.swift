@@ -31,7 +31,7 @@ public final class PurchaseInvoiceStatusStore: ObservableObject {
     /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
     @Published public var overridesBySociety: [UUID: [PurchaseInvoiceStatusOverride]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.purchaseInvoiceStatuses.v1") }
     private var overridesBySocietyKey: String { env.key("facturx.purchaseInvoiceStatuses.bysociety.v1") }

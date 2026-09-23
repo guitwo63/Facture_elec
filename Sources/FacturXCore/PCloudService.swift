@@ -266,7 +266,7 @@ public final class PCloudSettings: ObservableObject {
     /// credentialsBySociety`, même patron.
     @Published public var credentialsBySociety: [UUID: PCloudCredentials] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.pcloud.credentials.v1") }
     private var credentialsBySocietyKey: String { env.key("facturx.pcloud.credentials.bysociety.v1") }

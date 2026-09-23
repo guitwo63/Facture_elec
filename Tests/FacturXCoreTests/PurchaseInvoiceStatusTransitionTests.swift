@@ -6,7 +6,7 @@ import XCTest
 final class PurchaseInvoiceStatusTransitionTests: XCTestCase {
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "facturx.purchaseInvoiceStatuses.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.purchaseInvoiceStatuses.v1")
         super.tearDown()
     }
 
@@ -59,7 +59,7 @@ final class PurchaseInvoiceStatusTransitionTests: XCTestCase {
             stale[idx].reformCode = "fr:999"
         }
         let data = try JSONEncoder().encode(stale)
-        UserDefaults.standard.set(data, forKey: "facturx.purchaseInvoiceStatuses.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.purchaseInvoiceStatuses.v1")
 
         let store = PurchaseInvoiceStatusStore()
         XCTAssertEqual(store.override(for: .validated).reformCode, "fr:205")
@@ -79,7 +79,7 @@ final class PurchaseInvoiceStatusTransitionTests: XCTestCase {
         var stale = PurchaseInvoiceStatusStore.defaults
         stale.append(PurchaseInvoiceStatusOverride(id: "custom-abc123", label: "Archivée", systemImage: "doc", hexColor: "6E6E73"))
         let data = try JSONEncoder().encode(stale)
-        UserDefaults.standard.set(data, forKey: "facturx.purchaseInvoiceStatuses.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.purchaseInvoiceStatuses.v1")
 
         let store = PurchaseInvoiceStatusStore()
         XCTAssertEqual(store.overrides.count, PurchaseInvoiceStatus.allCases.count)

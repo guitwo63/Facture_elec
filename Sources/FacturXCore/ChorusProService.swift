@@ -308,7 +308,7 @@ public final class ChorusProSettings: ObservableObject {
     /// credentialsBySociety`, même patron.
     @Published public var credentialsBySociety: [UUID: ChorusProCredentials] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.choruspro.credentials.v1") }
     private var credentialsBySocietyKey: String { env.key("facturx.choruspro.credentials.bysociety.v1") }
