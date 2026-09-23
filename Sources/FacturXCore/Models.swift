@@ -1084,7 +1084,9 @@ public struct Invoice: Codable, Hashable, Identifiable {
 }
 
 public extension Double {
-    func rounded(toPlaces places: Int = 2) -> Double {
+    /// Volontairement sans valeur par défaut pour `places` : avec `= 2`, un simple `x.rounded()`
+    /// appelait cette méthode au lieu de l'arrondi à l'entier de la bibliothèque standard.
+    func rounded(toPlaces places: Int) -> Double {
         let factor = pow(10.0, Double(places))
         return (self * factor).rounded(.toNearestOrEven) / factor
     }

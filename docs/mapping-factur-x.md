@@ -148,6 +148,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 - **Code type 387** (facture de solde) : émis en `380` dans le CII car non admis par le flux FR EN16931 ; le type métier interne `finalSettlement` est conservé pour la UI et le calcul du net à payer.
 - **internalCreditNote** (INT) : émis en `381` (avoir) dans le CII pour la conformité.
 - **TotalPrepaidAmount** : doit suivre `GrandTotalAmount` dans l'ordre du XSD (sinon erreur de validation).
+- **Taux de TVA** (BT-119, BT-152, `RateApplicablePercent`) : « 20 » pour un taux entier, « 5.50 » sinon (idem Order-X). Le BR-FR-16 du Schematron France CTC (fatal) compare la chaîne à une liste fermée où « 5.5 » et « 5.50 » passent, mais pas « 5.500 » ni « 6 » ; le contrôle BR-FR-16 de l'app ne signale, lui, que les taux négatifs. Jusqu'au 2026-09-23, 5,5 % était émis « 6 » : `rate.rounded()` appelait l'extension `Double.rounded(toPlaces:)` du module, qui n'a plus de valeur par défaut.
 - Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-CO-10/14/15, et BR-CO-16 respectée par construction) ne sont pas mappées à un champ d'encadré.
 
 

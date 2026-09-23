@@ -147,7 +147,7 @@ public final class InvoicePDFRenderer {
             drawText(context: context, text: line.name, x: colX[0], y: cy, font: font(size: 10), color: .black)
             drawText(context: context, text: fmt(line.quantity), x: colX[1], y: cy, font: font(size: 10), color: .black)
             drawText(context: context, text: fmt(line.unitPrice), x: colX[2], y: cy, font: font(size: 10), color: .black)
-            drawText(context: context, text: fmt(line.vatRate, dec: 0), x: colX[3], y: cy, font: font(size: 10), color: .black)
+            drawText(context: context, text: fmtRate(line.vatRate), x: colX[3], y: cy, font: font(size: 10), color: .black)
             drawText(context: context, text: fmt(line.lineTotal), x: colX[4], y: cy, font: font(size: 10), color: .black)
             cy -= 16
         }
@@ -161,7 +161,7 @@ public final class InvoicePDFRenderer {
         drawText(context: context, text: "\(invoice.currency) \(fmt(invoice.lineTotal))", x: pageWidth - margin - 90, y: cy, font: boldFont(size: 11), color: .black)
         cy -= 16
         for item in invoice.vatBreakdown {
-            drawText(context: context, text: "TVA \(fmt(item.rate, dec: 0))%:", x: x, y: cy, font: font(size: 11), color: .black)
+            drawText(context: context, text: "TVA \(fmtRate(item.rate))%:", x: x, y: cy, font: font(size: 11), color: .black)
             drawText(context: context, text: "\(invoice.currency) \(fmt(item.amount))", x: pageWidth - margin - 90, y: cy, font: font(size: 11), color: .black)
             cy -= 16
         }
@@ -235,5 +235,11 @@ public final class InvoicePDFRenderer {
             return String(format: "%.0f", value)
         }
         return String(format: "%.\(dec)f", value)
+    }
+
+    /// Taux de TVA sans décimale superflue (« 20 », « 5.5 ») : `fmt(_:dec: 0)` imprimait
+    /// « 6 » pour 5,5 %, alors que le XML embarqué porte 5.50.
+    private func fmtRate(_ rate: Double) -> String {
+        String(format: "%g", rate)
     }
 }
