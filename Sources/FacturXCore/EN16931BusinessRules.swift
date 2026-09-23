@@ -54,9 +54,18 @@ public enum EN16931BusinessRules {
                 message: "BR-2 : La date d'émission (BT-2) est postérieure à aujourd'hui."))
         }
 
-        if invoice.dueDate < invoice.issueDate {
-            results.append(BusinessRuleResult(ruleId: "BR-9", severity: .warning,
-                message: "BR-9 : La date d'échéance (BT-9) est antérieure à la date d'émission (BT-2)."))
+        // BR-FR-CO-07 (Schematron France CTC, bloquant à la PDP) : l'échéance ne peut pas
+        // précéder la date de facture, sauf sur un acompte (386) ou en cadre « déjà payée »
+        // (B2/S2/M2), où elle est la date du paiement. Comparaison au jour près des dates
+        // écrites dans le XML, comme le Schematron : une échéance du même jour est admise,
+        // même à une heure antérieure.
+        if !invoice.type.isDeposit && !invoice.billingMode.isAlreadyPaid {
+            let issueDay = CIIXMLGenerator.xmlDate(invoice.issueDate)
+            let dueDay = CIIXMLGenerator.xmlDate(invoice.dueDate)
+            if dueDay < issueDay {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-CO-07", severity: .error,
+                    message: "BR-FR-CO-07 : L'échéance (BT-9) du \(frenchDay(dueDay)) est antérieure à la date de facture (BT-2) du \(frenchDay(issueDay)) : la PDP rejetterait la facture. Une échéance antérieure n'est admise que pour une facture d'acompte (386) ou déjà payée (cadre B2, S2 ou M2)."))
+            }
         }
 
         let knownCurrencies = Set(NormRefs.currencies.map { $0.code })
@@ -316,5 +325,12 @@ public enum EN16931BusinessRules {
         }
 
         return results
+    }
+
+    /// "20260923" (date du XML) → "23/09/2026", pour la citer telle quelle dans un message.
+    private static func frenchDay(_ xmlDate: String) -> String {
+        guard xmlDate.count == 8 else { return xmlDate }
+        let c = Array(xmlDate)
+        return String(c[6...7]) + "/" + String(c[4...5]) + "/" + String(c[0...3])
     }
 }
