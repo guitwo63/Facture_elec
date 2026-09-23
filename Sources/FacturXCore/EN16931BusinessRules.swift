@@ -136,6 +136,24 @@ public enum EN16931BusinessRules {
             results.append(BusinessRuleResult(ruleId: "BR-E-02", severity: .error,
                 message: "BR-E-02 : Une ligne exonérée de TVA (BT-151 = E) oblige l'émetteur à avoir un n° TVA (BT-31)."))
         }
+        // Catégorie « Hors champ de TVA » (BT-151 = O) : règles du Schematron EN16931, absentes
+        // du Schematron EXTENDED. Une telle facture ne porte aucun n° TVA (BR-O-02) ni aucune
+        // autre catégorie (BR-O-11 : une seule ventilation ; BR-O-12 : que des lignes O). Le
+        // taux de ligne interdit par BR-O-05, lui, est simplement omis par le générateur.
+        if invoice.profile != .extended && invoice.lines.contains(where: { $0.vatCategory == .outOfScope }) {
+            let buyerVAT = (invoice.buyer.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
+            let presentVATNumbers = [sellerVAT.isEmpty ? nil : "de l'émetteur (BT-31)",
+                                     buyerVAT.isEmpty ? nil : "de l'acheteur (BT-48)"].compactMap { $0 }
+            if !presentVATNumbers.isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-O-02", severity: .error,
+                    message: "BR-O-02 : Une facture comportant une ligne « Hors champ de TVA » (BT-151 = O) ne porte aucun n° TVA : retirez celui \(presentVATNumbers.joined(separator: " et celui ")) de la facture."))
+            }
+            let otherLines = invoice.lines.indices.filter { invoice.lines[$0].vatCategory != .outOfScope }
+            if !otherLines.isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-O-12", severity: .error,
+                    message: "BR-O-12 : Une facture comportant une ligne « Hors champ de TVA » (BT-151 = O) ne peut pas contenir de ligne d'une autre catégorie (ici ligne(s) \(otherLines.map { String($0 + 1) }.joined(separator: ", "))) : facturez-les séparément."))
+            }
+        }
         if !VATNumberValidator.hasValidCountryPrefix(invoice.seller.vatNumber) {
             results.append(BusinessRuleResult(ruleId: "BR-CO-09", severity: .error,
                 message: "BR-CO-09 : Le n° TVA de l'émetteur (BT-31) doit commencer par un préfixe pays ISO 3166-1 alpha-2 (ex. FR, DE…) — la Grèce peut utiliser « EL »."))

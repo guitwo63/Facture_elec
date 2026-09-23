@@ -319,4 +319,163 @@ final class VATCategoryTests: XCTestCase {
         XCTAssertTrue(xml.contains("<ram:CategoryCode>G</ram:CategoryCode>"),
                      "la catégorie de la ligne doit être G (export), pas S en dur")
     }
+
+    // MARK: - Catégorie O « Hors champ de TVA » (règles BR-O-* des Schematron officiels)
+
+    // Reproduit le 2026-09-23 avec le Schematron officiel (`Factur-X_1.09_EN16931.xsl`) sur le
+    // XML de l'application : BR-O-05 (taux sur la ligne), BR-O-02 (n° TVA des parties) et
+    // BR-O-11/BR-O-12 (O mêlée à une autre catégorie), alors que l'export était autorisé.
+
+    private let outOfScopeReason = "Opération hors champ d'application de la TVA"
+
+    private func outOfScopeLine(_ name: String = "Débours refacturés", unitPrice: Double = 150) -> InvoiceLine {
+        InvoiceLine(name: name, quantity: 1, unitPrice: unitPrice, vatRate: 0, vatCategory: .outOfScope,
+                    vatExemptionReason: outOfScopeReason)
+    }
+
+    /// Parties identifiées par leur SIREN ; n° TVA (BT-31, BT-48) seulement si fournis.
+    private func makeInvoice(_ lines: [InvoiceLine], sellerVAT: String? = nil, buyerVAT: String? = nil,
+                             profile: FacturXProfile = .en16931) -> Invoice {
+        var seller = party("Vendeur")
+        seller.siren = "123456782"
+        seller.vatNumber = sellerVAT
+        var buyer = party("Acheteur")
+        buyer.siren = "987654324"
+        buyer.vatNumber = buyerVAT
+        return Invoice(number: "F-O-1", profile: profile, seller: seller, buyer: buyer, lines: lines)
+    }
+
+    /// Chaque `ram:ApplicableTradeTax` du XML généré : sur une ligne ou dans la ventilation
+    /// d'en-tête (BG-23), avec ses éléments enfants (nom local → valeur).
+    private func tradeTaxes(_ invoice: Invoice) throws -> [(inLine: Bool, fields: [String: String])] {
+        let doc = try XMLDocument(data: CIIXMLGenerator().generate(invoice: invoice))
+        return try doc.nodes(forXPath: "//*[local-name()='ApplicableTradeTax']").compactMap { node in
+            guard let element = node as? XMLElement else { return nil }
+            let fields = (element.children ?? []).compactMap { $0 as? XMLElement }
+                .reduce(into: [String: String]()) { $0[$1.localName ?? ""] = $1.stringValue ?? "" }
+            return (element.parent?.localName == "SpecifiedLineTradeSettlement", fields)
+        }
+    }
+
+    /// BR-O-05 : « An Invoice line (BG-25) where the VAT category code (BT-151) is "Not subject
+    /// to VAT" shall not contain an Invoiced item VAT rate (BT-152) ». Règle présente aussi dans
+    /// le Schematron EXTENDED.
+    func testOutOfScopeLineCarriesNoVATRate() throws {
+        for profile: FacturXProfile in [.en16931, .extended] {
+            let lineTaxes = try tradeTaxes(makeInvoice([outOfScopeLine()], profile: profile)).filter(\.inLine)
+            XCTAssertEqual(lineTaxes.count, 1)
+            XCTAssertEqual(lineTaxes.first?.fields["CategoryCode"], "O")
+            XCTAssertNil(lineTaxes.first?.fields["RateApplicablePercent"], "BR-O-05 (\(profile.rawValue)) : pas de taux (BT-152) sur une ligne O")
+        }
+    }
+
+    /// Ventilation BG-23 de la catégorie O : BT-119 y est facultatif (BR-48 l'exige « except if
+    /// the Invoice is not subject to VAT », aucune règle ne l'interdit) et omis comme BT-152 ;
+    /// montant nul (BR-O-09), base = somme des lignes O (BR-O-08), motif présent (BR-O-10).
+    func testOutOfScopeBreakdownHasNoRateZeroAmountAndExemptionReason() throws {
+        let invoice = makeInvoice([outOfScopeLine(), outOfScopeLine("Frais de dossier", unitPrice: 37.5)])
+        let header = try tradeTaxes(invoice).filter { !$0.inLine }
+        XCTAssertEqual(header.count, 1, "BR-O-01 : une seule ventilation O")
+        XCTAssertEqual(header.first?.fields["CategoryCode"], "O")
+        XCTAssertNil(header.first?.fields["RateApplicablePercent"])
+        XCTAssertEqual(header.first?.fields["CalculatedAmount"], "0.00")
+        XCTAssertEqual(header.first?.fields["BasisAmount"], "187.50")
+        XCTAssertEqual(header.first?.fields["ExemptionReason"], outOfScopeReason)
+    }
+
+    /// Seule la catégorie O perd son taux : les autres le gardent, sur la ligne (BT-152) comme
+    /// dans la ventilation (BT-119, exigé par BR-48).
+    func testOtherCategoriesKeepTheirVATRate() throws {
+        let invoice = makeInvoice([
+            InvoiceLine(name: "Standard", quantity: 1, unitPrice: 100, vatRate: 20),
+            InvoiceLine(name: "Taux zéro", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .zeroRated),
+            InvoiceLine(name: "Autoliquidation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .reverseCharge,
+                        vatExemptionReason: "Autoliquidation, article 283-2 du CGI"),
+        ], sellerVAT: "FR11123456782")
+        let taxes = try tradeTaxes(invoice)
+        XCTAssertEqual(taxes.count, 6, "3 lignes + 3 ventilations")
+        for tax in taxes {
+            XCTAssertNotNil(tax.fields["RateApplicablePercent"], "catégorie \(tax.fields["CategoryCode"] ?? "?") sans taux")
+        }
+    }
+
+    /// Ligne sans taux, comme l'exige BR-O-05 (facture reçue d'un fournisseur, ou émise par
+    /// l'application) : relue à 0 %, et non aux 20 % par défaut du parseur, qui rendaient la
+    /// ligne incohérente (catégorie O à 20 %, TVA recalculée non nulle).
+    func testParserReadsLineWithoutRateAsZeroForNonStandardCategory() throws {
+        func reparsedWithoutRates(_ invoice: Invoice) throws -> Invoice {
+            let xml = String(decoding: try CIIXMLGenerator().generate(invoice: invoice), as: UTF8.self)
+                .replacingOccurrences(of: "<ram:RateApplicablePercent>[^<]*</ram:RateApplicablePercent>", with: "",
+                                      options: .regularExpression)
+            XCTAssertFalse(xml.contains("RateApplicablePercent"))
+            return try CIIXMLParser().parse(xml: Data(xml.utf8))
+        }
+
+        let outOfScope = try reparsedWithoutRates(makeInvoice([outOfScopeLine()]))
+        XCTAssertEqual(outOfScope.lines.first?.vatCategory, .outOfScope)
+        XCTAssertEqual(outOfScope.lines.first?.vatRate, 0)
+        XCTAssertEqual(outOfScope.lines.first?.vatExemptionReason, outOfScopeReason, "BT-120 repris de la ventilation d'en-tête")
+        XCTAssertEqual(outOfScope.taxTotal, 0)
+
+        let zeroRated = try reparsedWithoutRates(makeInvoice([
+            InvoiceLine(name: "Taux zéro", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .zeroRated)
+        ]))
+        XCTAssertEqual(zeroRated.lines.first?.vatRate, 0)
+    }
+
+    /// BR-O-02 : une facture ayant une ligne O ne porte ni le n° TVA de l'émetteur (BT-31) ni
+    /// celui de l'acheteur (BT-48). Bloquant : c'est à l'utilisateur de les retirer.
+    func testBusinessRulesBlockVATNumbersOnOutOfScopeInvoice() {
+        func rule(sellerVAT: String?, buyerVAT: String?) -> BusinessRuleResult? {
+            EN16931BusinessRules.evaluate(invoice: makeInvoice([outOfScopeLine()], sellerVAT: sellerVAT, buyerVAT: buyerVAT))
+                .first { $0.ruleId == "BR-O-02" }
+        }
+        let seller = rule(sellerVAT: "FR11123456782", buyerVAT: nil)
+        XCTAssertEqual(seller?.severity, .error)
+        XCTAssertTrue(seller?.message.contains("de l'émetteur (BT-31)") ?? false)
+        XCTAssertFalse(seller?.message.contains("BT-48") ?? true)
+
+        let buyer = rule(sellerVAT: nil, buyerVAT: "FR14987654324")
+        XCTAssertTrue(buyer?.message.contains("de l'acheteur (BT-48)") ?? false)
+        XCTAssertFalse(buyer?.message.contains("BT-31") ?? true)
+
+        let both = rule(sellerVAT: "FR11123456782", buyerVAT: "FR14987654324")
+        XCTAssertTrue(both?.message.contains("celui de l'émetteur (BT-31) et celui de l'acheteur (BT-48)") ?? false,
+                      both?.message ?? "")
+        XCTAssertNil(rule(sellerVAT: nil, buyerVAT: " "), "un n° TVA vide n'est pas émis")
+        XCTAssertFalse(FacturXValidator().validate(invoice: makeInvoice([outOfScopeLine()], sellerVAT: "FR11123456782")).isValid)
+    }
+
+    /// BR-O-11 / BR-O-12 : aucune autre catégorie dans une facture hors champ. Aucun XML
+    /// conforme n'existe pour ce mélange : l'export doit être bloqué.
+    func testBusinessRulesBlockMixingOutOfScopeWithOtherCategories() {
+        let mixed = makeInvoice([
+            InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 20),
+            outOfScopeLine(),
+        ], sellerVAT: "FR11123456782")
+        let rule = EN16931BusinessRules.evaluate(invoice: mixed).first { $0.ruleId == "BR-O-12" }
+        XCTAssertEqual(rule?.severity, .error)
+        XCTAssertTrue(rule?.message.contains("ligne(s) 1)") ?? false, "la ligne d'une autre catégorie est citée : \(rule?.message ?? "")")
+        XCTAssertFalse(FacturXValidator().validate(invoice: mixed).isValid)
+    }
+
+    /// Une facture entièrement hors champ et sans n° TVA reste exportable.
+    func testOutOfScopeOnlyInvoiceWithoutVATNumbersIsExportable() {
+        let invoice = makeInvoice([outOfScopeLine(), outOfScopeLine("Frais de dossier", unitPrice: 37.5)])
+        XCTAssertFalse(EN16931BusinessRules.evaluate(invoice: invoice).contains { $0.ruleId.hasPrefix("BR-O-") })
+        let result = FacturXValidator().validate(invoice: invoice)
+        XCTAssertTrue(result.isValid, "\(result.errors) \(result.businessRules.filter { $0.severity == .error }.map(\.message))")
+    }
+
+    /// Le Schematron EXTENDED ne contient ni BR-O-02 ni BR-O-11/12 (seulement BR-O-05 à 07 et
+    /// BR-O-09/10) : n° TVA et mélange de catégories y restent admis.
+    func testExtendedProfileAdmitsVATNumbersAndMixedCategoriesWithOutOfScope() {
+        let invoice = makeInvoice([
+            InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 20),
+            outOfScopeLine(),
+        ], sellerVAT: "FR11123456782", buyerVAT: "FR14987654324", profile: .extended)
+        XCTAssertFalse(EN16931BusinessRules.evaluate(invoice: invoice).contains { ["BR-O-02", "BR-O-12"].contains($0.ruleId) })
+        let result = FacturXValidator().validate(invoice: invoice)
+        XCTAssertTrue(result.isValid, "\(result.errors) \(result.businessRules.filter { $0.severity == .error }.map(\.message))")
+    }
 }

@@ -84,7 +84,10 @@ public struct CIIXMLGenerator {
         let qty = String(format: "%.4f", line.quantity)
         let price = String(format: "%.4f", line.unitPrice)
         let total = String(format: "%.2f", line.lineTotal)
-        let rate = formatRate(line.vatRate)
+        // BR-O-05 (Schematron EN16931 comme EXTENDED) : une ligne « Hors champ de TVA »
+        // (BT-151 = O) ne porte pas de taux (BT-152) ; le modèle garde `vatRate` à 0.
+        let rateXML = line.vatCategory == .outOfScope
+            ? "" : "\n              <ram:RateApplicablePercent>\(formatRate(line.vatRate))</ram:RateApplicablePercent>"
         let category = line.vatCategory.rawValue
         let unitCode = line.unit.trimmingCharacters(in: .whitespaces).isEmpty ? "C62" : line.unit
         let desc = line.description.map { """
@@ -137,8 +140,7 @@ public struct CIIXMLGenerator {
           <ram:SpecifiedLineTradeSettlement>
             <ram:ApplicableTradeTax>
               <ram:TypeCode>VAT</ram:TypeCode>
-              <ram:CategoryCode>\(category)</ram:CategoryCode>
-              <ram:RateApplicablePercent>\(rate)</ram:RateApplicablePercent>
+              <ram:CategoryCode>\(category)</ram:CategoryCode>\(rateXML)
             </ram:ApplicableTradeTax>
             <ram:SpecifiedTradeSettlementLineMonetarySummation>
               <ram:LineTotalAmount>\(total)</ram:LineTotalAmount>
@@ -338,7 +340,10 @@ public struct CIIXMLGenerator {
         let tradeTax = invoice.vatBreakdown.map { item -> String in
             let amount = String(format: "%.2f", item.amount)
             let basis = String(format: "%.2f", item.basis)
-            let rate = formatRate(item.rate)
+            // BT-119 : BR-48 l'exige « except if the Invoice is not subject to VAT » et aucune
+            // règle ne l'interdit en catégorie O ; omis comme le taux de ligne (BR-O-05).
+            let rateXML = item.category == .outOfScope
+                ? "" : "\n        <ram:RateApplicablePercent>\(formatRate(item.rate))</ram:RateApplicablePercent>"
             let category = item.category.rawValue
             let exemptionReason = item.exemptionReason.map { "\n        <ram:ExemptionReason>\(escape($0))</ram:ExemptionReason>" } ?? ""
             return """
@@ -346,8 +351,7 @@ public struct CIIXMLGenerator {
         <ram:CalculatedAmount>\(amount)</ram:CalculatedAmount>
         <ram:TypeCode>VAT</ram:TypeCode>\(exemptionReason)
         <ram:BasisAmount>\(basis)</ram:BasisAmount>
-        <ram:CategoryCode>\(category)</ram:CategoryCode>
-        <ram:RateApplicablePercent>\(rate)</ram:RateApplicablePercent>
+        <ram:CategoryCode>\(category)</ram:CategoryCode>\(rateXML)
       </ram:ApplicableTradeTax>
 """
         }.joined()
