@@ -1167,15 +1167,22 @@ struct InvoiceEditorView: View {
         return Set(v.businessRules.filter { $0.severity == .error }.map { $0.ruleId })
     }
 
+    /// Préréglage de conditions de paiement actif, résolu dans la liste de la société de la
+    /// facture (`invoice.companyID`) — celle personnalisée dans Réglages > Tables, pas le seul
+    /// réglage global. `nil` = "Personnalisé" (saisie libre).
+    private var activePaymentTermsPreset: PaymentTermsPreset? {
+        paymentTermsStore.matchingPreset(for: invoice.paymentTerms, companyID: invoice.companyID)
+    }
+
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     /// Appliquer un préréglage recalcule aussi l'échéance (BT-9) à partir de la date de
     /// facture. Le champ Échéance se grise alors (voir `dueDateIsComputedFromPreset`) :
     /// en mode Personnalisé, il reste modifiable manuellement.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
-            get: { paymentTermsStore.matchingPresetID(for: invoice.paymentTerms) },
+            get: { activePaymentTermsPreset?.id },
             set: { newID in
-                guard let id = newID, let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                guard let id = newID, let preset = paymentTermsStore.preset(id: id, companyID: invoice.companyID) else { return }
                 invoice.paymentTerms = preset.text
                 invoice.dueDate = preset.dueRule.dueDate(from: invoice.issueDate)
             }
@@ -1188,8 +1195,7 @@ struct InvoiceEditorView: View {
     /// préréglage sans règle (ex. "Comptant") ou le mode Personnalisé laissent
     /// le champ modifiable.
     private var dueDateIsComputedFromPreset: Bool {
-        guard let id = paymentTermsPresetIDBinding.wrappedValue,
-              let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return false }
+        guard let preset = activePaymentTermsPreset else { return false }
         if case .none = preset.dueRule { return false }
         return true
     }
@@ -1645,8 +1651,7 @@ struct InvoiceEditorView: View {
                                         }
                                         DatePicker("", selection: $invoice.issueDate, displayedComponents: .date).labelsHidden()
                                             .onChange(of: invoice.issueDate) { newDate in
-                                                guard let id = paymentTermsPresetIDBinding.wrappedValue,
-                                                      let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                                                guard let preset = activePaymentTermsPreset else { return }
                                                 invoice.dueDate = preset.dueRule.dueDate(from: newDate)
                                             }
                                     }
@@ -1655,8 +1660,8 @@ struct InvoiceEditorView: View {
                                             Text("Échéance").font(.caption)
                                             InfoBadge(text: "BT-9 — Date d'échéance du paiement. Calculée automatiquement par le préréglage de conditions de paiement sélectionné ; modifiable uniquement en mode « Personnalisé ».")
                                         }
-                                        DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
-                                            .disabled(fieldLocked || dueDateIsComputedFromPreset)
+                                        fieldHighlight(DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
+                                            .disabled(fieldLocked || dueDateIsComputedFromPreset), forRuleIDs: ["BR-FR-CO-07"])
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
@@ -1686,7 +1691,7 @@ struct InvoiceEditorView: View {
                                     Image(systemName: "banknote").foregroundStyle(.secondary)
                                     Text("Conditions de paiement :").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
                                     Picker("", selection: paymentTermsPresetIDBinding) {
-                                        ForEach(paymentTermsStore.presets) { preset in
+                                        ForEach(paymentTermsStore.list(for: invoice.companyID)) { preset in
                                             Text(preset.label).tag(Optional(preset.id))
                                         }
                                         Text("Personnalisé").tag(String?.none)
@@ -1805,7 +1810,7 @@ struct InvoiceEditorView: View {
                             invoice.paymentIBAN = p.iban
                             invoice.paymentBIC = p.bic
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
-                        }, locked: fieldLocked)
+                        }, locked: fieldLocked, companyID: invoice.companyID)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))

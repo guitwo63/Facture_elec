@@ -11,7 +11,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `invoice.number` | `rsm:ExchangedDocument/ram:ID` | BT-1 | BR-1 | erreur |
 | `invoice.type` | `rsm:ExchangedDocument/ram:TypeCode` | BT-3 | BR-FR-04 | avertissement (387 → 380) |
 | `invoice.issueDate` | `rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString` | BT-2 | BR-2 | avertissement |
-| `invoice.dueDate` | `ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime` | BT-9 | BR-9 | avertissement |
+| `invoice.dueDate` | `ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime` | BT-9 | BR-FR-CO-07 | erreur (sauf acompte 386 et cadres B2/S2/M2) |
 | `invoice.currency` | `ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode` | BT-5 | BR-5 | erreur |
 | `invoice.profile` | `ram:GuidelineSpecifiedDocumentContextParameter/ram:ID` | BT-24 | BR-PROFIL | erreur (MINIMUM, BASIC WL, BASIC) |
 | `invoice.billingMode` | `ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID` | BT-23 | BR-FR-CO-08, BR-FR-CO-09, BR-FR-MV-02, BR-FR-BD-02 | erreur |
@@ -99,7 +99,6 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-5 | devise (BT-5) | erreur | Devise obligatoire (ISO 4217) |
 | BR-6 | nom émetteur (BT-27) | erreur | Nom de l'émetteur obligatoire |
 | BR-7 | pays émetteur (BT-40) | erreur | Pays de l'émetteur obligatoire |
-| BR-9 | échéance (BT-9) | avertissement | Échéance antérieure à l'émission |
 | BR-13 | total TTC (BT-112) | erreur | Total TTC ≠ HT + TVA |
 | BR-12 | total HT (BT-106) | erreur | Total HT ≠ somme des lignes |
 | BR-15 | lignes (BG-25) | erreur | Au moins une ligne obligatoire |
@@ -120,6 +119,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-FR-05 | mentions légales (BT-21) | avertissement | Mentions PMT/PMD/AAB obligatoires FR |
 | BR-FR-06 | taux TVA (BT-151) | avertissement | Taux négatif inhabituel |
 | BR-FR-CO-05 | facture antérieure (BT-25/26) | erreur | Référence + date obligatoires |
+| BR-FR-CO-07 | échéance (BT-9) | erreur | Échéance antérieure à la date de facture (BT-2), au jour près dans le XML ; admise seulement pour un acompte (386) ou un cadre déjà payée (B2/S2/M2) |
 | BR-FR-CO-08 | cadre de facturation (BT-23) | erreur | Cadre 4 (définitive après acompte) interdit sur un acompte (386) |
 | BR-FR-CO-09 | cadre de facturation (BT-23) | erreur / avertissement | Cadre 2 (déjà payée) : montant payé (BT-113) = total TTC, net à payer nul ; rappel : échéance = date du paiement |
 | BR-FR-MV-02 / BR-FR-BD-02 | cadre de facturation (BT-23) | erreur | Cadres 8 (multi-vendeurs) / 9 (bidirectionnel) : lignes GROUP non produites par l'app |
@@ -128,7 +128,8 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 
 ## Notes d'implémentation
 
-- **Encadré rouge** : les champs marqués en erreur sont entourés d'un liseré rouge dans l'éditeur après validation (voir `fieldHighlight` dans `FacturXMacApp.swift`).
+- **Encadré rouge** : les champs marqués en erreur sont entourés d'un liseré rouge dans l'éditeur après validation (voir `fieldHighlight` dans `InvoicesTabView.swift`).
+- **Dates du XML** : format 102 (AAAAMMJJ), écrites en UTC (`CIIXMLGenerator.xmlDate`). BR-FR-CO-07 compare ces mêmes chaînes, comme le Schematron France CTC : une échéance du même jour que la facture est admise quelle que soit l'heure enregistrée. Limite connue : une date à 00:00 heure de Paris s'écrit la veille dans le XML — c'est le cas des échéances calculées par un préréglage « fin de mois » ; avec « fin de mois + 0 jour » sur une facture du dernier jour du mois, BR-FR-CO-07 bloque donc l'export, alors que l'éditeur affiche deux dates identiques.
 - **Code type 387** (facture de solde) : émis en `380` dans le CII car non admis par le flux FR EN16931 ; le type métier interne `finalSettlement` est conservé pour la UI et le calcul du net à payer.
 - **internalCreditNote** (INT) : émis en `381` (avoir) dans le CII pour la conformité.
 - **TotalPrepaidAmount** : doit suivre `GrandTotalAmount` dans l'ordre du XSD (sinon erreur de validation).
@@ -140,7 +141,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 `BillingMode` : la lettre donne la nature de la facture — **B** = biens, **S** = services, **M** = facture double (biens et services non accessoires l'un de l'autre) — et le chiffre le cadre : **1** = dépôt d'une facture, **2** = facture déjà payée, **4** = facture définitive après acompte, **3** = sous-traitance avec paiement direct (commande publique), **5** / **6** = dépôt par un sous-traitant / un cotraitant, **7** = TVA déjà collectée, **8** = facture multi-vendeurs, **9** = facture bidirectionnelle. Libellés d'après le dossier de spécifications externes DGFiP (cas d'usage, v2.3) ; le Schematron France CTC admet ces 20 codes (BR-FR-08).
 
 Contraintes du Schematron France CTC, reprises dans `EN16931BusinessRules` (bloquantes à l'export et au dépôt SUPER PDP) :
-- **Cadre 2** (B2/S2/M2) — BR-FR-CO-09 : montant déjà payé (BT-113) = total TTC (BT-112), net à payer (BT-115) = 0, échéance (BT-9) = date du paiement (seule sa présence est vérifiable : rappel en avertissement). Le champ « Montant déjà payé » s'affiche dans l'éditeur dès qu'un cadre 2 est choisi, et `TotalPrepaidAmount` est toujours émis dans ce cadre (même à 0).
+- **Cadre 2** (B2/S2/M2) — BR-FR-CO-09 : montant déjà payé (BT-113) = total TTC (BT-112), net à payer (BT-115) = 0, échéance (BT-9) = date du paiement (seule sa présence est vérifiable : rappel en avertissement), qui peut donc précéder la date de facture (exception à BR-FR-CO-07, comme les acomptes). Le champ « Montant déjà payé » s'affiche dans l'éditeur dès qu'un cadre 2 est choisi, et `TotalPrepaidAmount` est toujours émis dans ce cadre (même à 0).
 - **Cadre 4** (B4/S4/M4) — BR-FR-CO-08 : interdit sur une facture d'acompte (386). `InvoiceStore.newDeposit` ramène un cadre 4 au cadre 1 de même nature ; `newFinalSettlement` passe un cadre 1 au cadre 4 (la facture de solde est la facture définitive après acompte).
 - **Cadres 8 et 9** — BR-FR-MV-* / BR-FR-BD-* : exigent des lignes de regroupement par vendeur (sous-type `GROUP`) que le générateur ne produit pas. Plus proposés à la saisie (`BillingMode.selectableCases`) ; une facture existante qui les porte reste affichée, mais son export est bloqué.
 

@@ -83,10 +83,6 @@ public struct FacturXValidator {
             errors.append("La devise doit être un code ISO 4217 à 3 lettres (ex. EUR).")
         }
 
-        if invoice.issueDate > invoice.dueDate {
-            warnings.append("La date d'échéance est antérieure à la date d'émission.")
-        }
-
         if invoice.seller.endpointID == nil || (invoice.seller.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
             if (invoice.seller.siren ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
                 warnings.append("L'identifiant électronique de l'émetteur (BT-49) sera déduit du SIREN si renseigné.")

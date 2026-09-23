@@ -111,6 +111,8 @@ struct OrderPartySection: View {
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
     var locked: Bool = false
+    /// Société de la commande — voir `PartySection.companyID`.
+    var companyID: UUID? = nil
     @EnvironmentObject var directory: PartyDirectory
     @State private var showPicker = false
 
@@ -128,7 +130,7 @@ struct OrderPartySection: View {
                 }
             }
 
-            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, hideEmail: true, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) }, companyID: companyID)
         }
         .padding(8)
         .sheet(isPresented: $showPicker) {
@@ -884,7 +886,7 @@ struct OrderEditorView: View {
 
                 HStack(alignment: .top, spacing: 12) {
                     GroupBox("Société (vous)") {
-                        OrderPartySection(party: $order.seller, role: .seller, locked: fieldLocked)
+                        OrderPartySection(party: $order.seller, role: .seller, locked: fieldLocked, companyID: order.companyID)
                     }.lockable(fieldLocked)
                     GroupBox("Client") {
                         OrderPartySection(party: $order.buyer, role: .buyer, locked: fieldLocked)

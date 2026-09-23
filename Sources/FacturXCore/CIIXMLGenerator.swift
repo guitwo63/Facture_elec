@@ -8,16 +8,26 @@ public enum CIIXMLError: Error {
 public struct CIIXMLGenerator {
     public init() {}
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f
+    }()
+
+    /// Date telle qu'écrite dans le XML (format 102 = AAAAMMJJ, en UTC). `EN16931BusinessRules`
+    /// compare ces mêmes chaînes pour BR-FR-CO-07, comme le Schematron France CTC : la règle
+    /// ne peut pas diverger de ce que la PDP reçoit.
+    static func xmlDate(_ date: Date) -> String {
+        dateFormatter.string(from: date)
+    }
+
     public func generate(invoice: Invoice) throws -> Data {
         guard !invoice.lines.isEmpty else { throw CIIXMLError.emptyLines }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-
-        let issue = dateFormatter.string(from: invoice.issueDate)
-        let due = dateFormatter.string(from: invoice.dueDate)
+        let issue = Self.xmlDate(invoice.issueDate)
+        let due = Self.xmlDate(invoice.dueDate)
 
         let xmlLines = invoice.lines.enumerated().map { xmlLine($0.element, index: $0.offset) }.joined()
 
@@ -414,16 +424,7 @@ public struct CIIXMLGenerator {
 
     private func invoiceReferencedXML(_ invoice: Invoice) -> String {
         guard let ref = invoice.precedingInvoiceRef, !ref.isEmpty else { return "" }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyyMMdd"
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.timeZone = TimeZone(secondsFromGMT: 0)
-        let dateStr: String
-        if let d = invoice.precedingInvoiceDate {
-            dateStr = fmt.string(from: d)
-        } else {
-            dateStr = fmt.string(from: invoice.issueDate)
-        }
+        let dateStr = Self.xmlDate(invoice.precedingInvoiceDate ?? invoice.issueDate)
         return """
       <ram:InvoiceReferencedDocument>
         <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>

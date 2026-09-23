@@ -18,6 +18,9 @@ struct PurchasePartySection: View {
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
     var locked: Bool = false
+    /// Société de la facture d'achat — ses préréglages de conditions de paiement sont proposés
+    /// sur la fiche fournisseur (voir `PartyEditorView.companyID`).
+    var companyID: UUID? = nil
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var showPicker = false
@@ -79,7 +82,7 @@ struct PurchasePartySection: View {
             // isSociete: le fournisseur est payé sur ce document — c'est donc son IBAN/BIC
             // qui doit apparaître, même logique que PartySection affichant les coordonnées
             // bancaires côté émetteur (celui qui est payé) pour une facture de vente.
-            PartyEditorView(party: $party, isSociete: role == .supplier, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .supplier, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) }, companyID: companyID)
         }
         .padding(8)
         .sheet(isPresented: $showSuperPDPSearch) {
