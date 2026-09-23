@@ -493,13 +493,18 @@ public struct VATBreakdownEntry: Hashable, Identifiable {
     /// puis dans l'ordre de `VATCategory.allCases` (celui du sélecteur de catégorie). Sans ce
     /// second critère, deux catégories au même taux sortaient dans l'ordre d'itération d'un
     /// dictionnaire, qui change d'un lancement de l'app à l'autre (écran, PDF et XML).
+    ///
+    /// Le motif d'exonération (BT-120) n'est retenu que pour une catégorie qui l'exige :
+    /// BR-S-10 et BR-Z-10 l'interdisent en S et en Z. Or une ligne passée d'E à Z dans le menu
+    /// Catégorie garde son motif (le champ disparaît, pas la valeur) : il partait dans le XML,
+    /// rejeté par la PDP (vérifié le 2026-09-23 contre le Schematron EN16931).
     static func breakdown(of lines: [InvoiceLine]) -> [VATBreakdownEntry] {
         var basisByKey: [Key: Double] = [:]
         var reasonByKey: [Key: String] = [:]
         for line in lines {
             let key = Key(rate: line.vatRate, category: line.vatCategory)
             basisByKey[key, default: 0] += line.lineTotal
-            if reasonByKey[key] == nil,
+            if reasonByKey[key] == nil, line.vatCategory.requiresExemptionReason,
                let reason = line.vatExemptionReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
                 reasonByKey[key] = reason
             }

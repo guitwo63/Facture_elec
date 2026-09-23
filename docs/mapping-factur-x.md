@@ -73,7 +73,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `line.unitPrice` | `ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount` | BT-146 | BR-27 | erreur |
 | `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` (absent en catégorie O : BR-O-05) | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) ; BR-FR-16 (taux hors de la liste des taux français) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; erreur ; avertissement |
 | `line.vatCategory` (suit le taux saisi : S, ou E à 0 %, voir « Catégorie de TVA d'une ligne à 0 % ») | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | BR-O-12 (une ligne O exclut toute autre catégorie, hors EXTENDED) | erreur |
-| `line.vatExemptionReason` | `ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:ExemptionReason` (ventilation de TVA) | BT-120 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | erreur |
+| `line.vatExemptionReason` | `ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:ExemptionReason` (ventilation de TVA ; émis seulement en E, AE, K, G et O, BR-S-10 et BR-Z-10 l'interdisant en S et en Z) | BT-120 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | erreur |
 | `line.lineTotal` | `ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount` | BT-131 | BT-131-CALCUL (contrôle interne : quantité × prix unitaire) | erreur |
 | `line.orderReference` | — (usage interne : rattachement aux commandes, exports ; non émis) | — | — | — |
 
