@@ -57,6 +57,14 @@ public enum EN16931BusinessRules {
         category == .intraCommunity ? "IC" : category.rawValue
     }
 
+    /// BR-FR-16 : liste fermée `custom:is-valid-vat-rate` du Schematron France CTC, qui compare
+    /// des chaînes (« 5.5 » et « 5.50 » passent, « 5.500 » non).
+    private static let brFR16Rates: Set<String> = [
+        "0", "0.0", "0.00", "10", "10.0", "10.00", "13", "13.0", "13.00", "20", "20.0", "20.00",
+        "8.5", "8.50", "19.6", "19.60", "2.1", "2.10", "5.5", "5.50", "7", "7.0", "7.00",
+        "20.6", "20.60", "1.05", "0.9", "0.90", "1.75", "9.2", "9.20", "9.6", "9.60",
+    ]
+
     public static func evaluate(invoice: Invoice, context: EN16931RuleContext = .issued) -> [BusinessRuleResult] {
         var results: [BusinessRuleResult] = []
 
@@ -143,6 +151,24 @@ public enum EN16931BusinessRules {
         if hasExemptLine && sellerVAT.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-E-02", severity: .error,
                 message: "BR-E-02 : Une ligne exonérée de TVA (BT-151 = E) oblige l'émetteur à avoir un n° TVA (BT-31)."))
+        }
+        // Catégorie « Hors champ de TVA » (BT-151 = O) : règles du Schematron EN16931, absentes
+        // du Schematron EXTENDED. Une telle facture ne porte aucun n° TVA (BR-O-02) ni aucune
+        // autre catégorie (BR-O-11 : une seule ventilation ; BR-O-12 : que des lignes O). Le
+        // taux de ligne interdit par BR-O-05, lui, est simplement omis par le générateur.
+        if invoice.profile != .extended && invoice.lines.contains(where: { $0.vatCategory == .outOfScope }) {
+            let buyerVAT = (invoice.buyer.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
+            let presentVATNumbers = [sellerVAT.isEmpty ? nil : "de l'émetteur (BT-31)",
+                                     buyerVAT.isEmpty ? nil : "de l'acheteur (BT-48)"].compactMap { $0 }
+            if !presentVATNumbers.isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-O-02", severity: .error,
+                    message: "BR-O-02 : Une facture comportant une ligne « Hors champ de TVA » (BT-151 = O) ne porte aucun n° TVA : retirez celui \(presentVATNumbers.joined(separator: " et celui ")) de la facture."))
+            }
+            let otherLines = invoice.lines.indices.filter { invoice.lines[$0].vatCategory != .outOfScope }
+            if !otherLines.isEmpty {
+                results.append(BusinessRuleResult(ruleId: "BR-O-12", severity: .error,
+                    message: "BR-O-12 : Une facture comportant une ligne « Hors champ de TVA » (BT-151 = O) ne peut pas contenir de ligne d'une autre catégorie (ici ligne(s) \(otherLines.map { String($0 + 1) }.joined(separator: ", "))) : facturez-les séparément."))
+            }
         }
         if !VATNumberValidator.hasValidCountryPrefix(invoice.seller.vatNumber) {
             results.append(BusinessRuleResult(ruleId: "BR-CO-09", severity: .error,
@@ -317,14 +343,20 @@ public enum EN16931BusinessRules {
             }
         }
 
-        // BR-FR-16 n'admet qu'une liste fermée de taux français : un taux négatif en est exclu.
-        if invoice.lines.contains(where: { $0.vatRate < 0 }) {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .warning,
-                message: "BR-FR-16 : Un taux de TVA négatif (BT-152) ne fait pas partie des taux admis en France ; vérifiez la catégorie de TVA (BT-151)."))
-        }
-
         for (idx, line) in invoice.lines.enumerated() {
             let label = "Ligne \(idx + 1)"
+            // BR-FR-16 (France CTC, fatal) : on compare au Schematron la chaîne que le générateur
+            // écrira en BT-152 (reprise en BT-119). Contrôle propre à l'émission : une facture
+            // d'achat étrangère peut porter un autre taux (19 % allemand…), seul un taux négatif
+            // y reste signalé.
+            let rate = CIIXMLGenerator.xmlRate(line.vatRate)
+            if context == .issued && !brFR16Rates.contains(rate) {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .error,
+                    message: "BR-FR-16 : \(label) — le taux de TVA « \(rate) » (BT-152) ne fait pas partie des taux admis en France (0 ; 0,9 ; 1,05 ; 1,75 ; 2,1 ; 5,5 ; 7 ; 8,5 ; 9,2 ; 9,6 ; 10 ; 13 ; 19,6 ; 20 ; 20,6 %) : la PDP rejetterait la facture."))
+            } else if context == .received && line.vatRate < 0 {
+                results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .warning,
+                    message: "BR-FR-16 : \(label) — un taux de TVA négatif (BT-152) ne fait pas partie des taux admis en France ; vérifiez la catégorie de TVA (BT-151)."))
+            }
             // Contrôle interne : simple rappel, un taux nul en catégorie Z est conforme.
             if line.vatRate == 0 && line.vatCategory == .zeroRated {
                 results.append(BusinessRuleResult(ruleId: "BT-152-ZERO", severity: .warning,

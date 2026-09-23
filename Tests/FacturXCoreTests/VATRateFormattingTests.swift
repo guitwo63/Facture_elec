@@ -153,8 +153,12 @@ final class VATRateFormattingTests: XCTestCase {
 
     // MARK: - XML Order-X
 
+    /// Le récapitulatif de TVA d'en-tête n'existe qu'en profil EXTENDED (voir
+    /// `OrderXProfileConformanceTests`).
     func testOrderEmitsDecimalRatesAsIsOnLinesAndInTheVATBreakdown() throws {
-        let rates = try emittedRates(OrderCIOXMLGenerator().generate(order: order(rates: sampleRates)))
+        var extended = order(rates: sampleRates)
+        extended.profile = .extended
+        let rates = try emittedRates(OrderCIOXMLGenerator().generate(order: extended))
         XCTAssertEqual(rates.lines, ["5.50", "2.10", "8.50", "10", "20"])
         XCTAssertEqual(rates.header, ["2.10", "5.50", "8.50", "10", "20"])
     }
