@@ -1660,8 +1660,8 @@ struct InvoiceEditorView: View {
                                             Text("Échéance").font(.caption)
                                             InfoBadge(text: "BT-9 — Date d'échéance du paiement. Calculée automatiquement par le préréglage de conditions de paiement sélectionné ; modifiable uniquement en mode « Personnalisé ».")
                                         }
-                                        DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
-                                            .disabled(fieldLocked || dueDateIsComputedFromPreset)
+                                        fieldHighlight(DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
+                                            .disabled(fieldLocked || dueDateIsComputedFromPreset), forRuleIDs: ["BR-FR-CO-07"])
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
