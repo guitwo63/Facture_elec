@@ -124,4 +124,25 @@ final class ZeroRateConformanceTests: XCTestCase {
         XCTAssertTrue(EN16931BusinessRules.evaluate(invoice: invoice([standard], sellerVAT: nil)).contains { $0.ruleId == "BR-S-02" })
         XCTAssertFalse(EN16931BusinessRules.evaluate(invoice: invoice([standard])).contains { $0.ruleId == "BR-S-02" })
     }
+
+    // MARK: - Commande → facture
+
+    /// `SalesOrder.toInvoice` reconstruisait les lignes sans catégorie ni motif : une ligne
+    /// exonérée (E + motif) arrivait en Z sans motif sur la facture.
+    func testOrderToInvoiceKeepsTheVATCategoryAndExemptionReason() {
+        let icReason = "Exonération de TVA, article 262 ter I du CGI"
+        let order = SalesOrder(number: "CD-1", buyer: party("Client", siren: "303265045"),
+                               seller: party("Vendeur", vatNumber: "FR44732829320", siren: "732829320"),
+                               lines: [
+                                   InvoiceLine(name: "Formation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .exempt,
+                                               vatExemptionReason: motif),
+                                   InvoiceLine(name: "Machine", quantity: 1, unitPrice: 900, vatRate: 0, vatCategory: .intraCommunity,
+                                               vatExemptionReason: icReason),
+                                   InvoiceLine(name: "Conseil", quantity: 2, unitPrice: 50, vatRate: 20),
+                               ])
+        let lines = order.toInvoice(number: "2026-0100").lines
+        XCTAssertEqual(lines.map(\.vatCategory), [.exempt, .intraCommunity, .standard])
+        XCTAssertEqual(lines.map(\.vatExemptionReason), [motif, icReason, nil])
+        XCTAssertEqual(lines.map(\.orderReference), ["CD-1", "CD-1", "CD-1"], "rattachement à la commande inchangé")
+    }
 }

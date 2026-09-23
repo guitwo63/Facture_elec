@@ -277,6 +277,8 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
     }
 
     public func toInvoice(number: String) -> Invoice {
+        // Catégorie et motif d'exonération repris tels quels : sans eux, la catégorie était
+        // redéduite du taux, et une ligne exonérée (E + motif) arrivait en Z sans motif.
         let mappedLines = lines.map { line in
             InvoiceLine(
                 id: line.id,
@@ -286,6 +288,8 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
                 unit: line.unit,
                 unitPrice: line.unitPrice,
                 vatRate: line.vatRate,
+                vatCategory: line.vatCategory,
+                vatExemptionReason: line.vatExemptionReason,
                 orderReference: line.orderReference ?? self.number
             )
         }
