@@ -205,3 +205,15 @@ La section condensée « Champs optionnels » (en-tête + ligne) permet de saisi
 - Ordre d'émission : celui des séquences du XSD (ex. `GlobalID`, `SellerAssignedID`, `BuyerAssignedID` avant `Name` ; avis d'expédition avant avis de réception ; `AdditionalReferencedDocument` entre le contrat et le projet), indépendamment de l'ordre de saisie. `OptionalFieldsConformanceTests` le vérifie.
 - Les champs libres (balise non reconnue du catalogue) sont stockés et affichés mais ne sont pas injectés dans le XML pour ne pas risquer de casser la conformité.
 - **Vérification (2026-09-23)** : chaque champ du catalogue, seul puis tous ensemble, et chaque cadre de facturation, contre le XSD Factur-X 1.09 EN16931 (`facturx.xml_check_xsd`) et les Schematron EN16931 (`Factur-X_1.09_EN16931.xsl`) et France CTC (`BR-FR-Flux2-Schematron-CII.xslt`), exécutés avec `saxonche`. Attention en relisant un rapport SVRL : le Schematron EN16931 de Factur-X ne pose quasiment jamais `flag="fatal"` (424 assertions sur 427 n'ont aucun flag) et signale les éléments hors profil par des `svrl:successful-report` — ne retenir que `flag="fatal"` masquerait toutes ses erreurs.
+
+## Order-X (commandes) : structure par profil
+
+`OrderCIOXMLGenerator` suit le XSD du profil que la commande déclare (`OrderXProfile`, URN `urn:order-x.eu:1p0:…`) :
+
+| Profil | Récapitulatif de TVA d'en-tête (`ApplicableTradeTax`) | TVA de ligne | Description de ligne |
+|---|---|---|---|
+| BASIC | non | non | non |
+| COMFORT | non | oui | oui |
+| EXTENDED | oui | oui | oui |
+
+Dans les trois profils, la référence de commande (`BuyerOrderReferencedDocument`) précède celle du devis (`QuotationReferencedDocument`), et le total de TVA (`TaxTotalAmount`) reste émis. **Vérification (2026-09-23)** : pour chaque profil, une commande minimale et une commande complète (références, contacts, description, trois taux dont une exonération) passent le XSD et le Schematron Order-X de ce profil (paquet `factur-x`, dossiers `orderx-<profil>/`). Avant ce correctif, seul EXTENDED passait, et seulement sans référence de devis. Le Schematron Order-X ne contrôle ni les taux ni le code type du document.
