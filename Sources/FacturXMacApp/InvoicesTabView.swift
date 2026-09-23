@@ -2412,8 +2412,12 @@ struct InvoiceEditorView: View {
         Task {
             do {
                 let facturx = try FacturXGenerator().generate(invoice: invoice, logo: sellerLogo)
+                // Relevées avec le fichier envoyé, avant l'attente réseau : « Ligne 2 (…) » nomme
+                // la ligne validée, même si les lignes changent ensuite dans l'éditeur.
+                let lineNames = invoice.lines.map(\.name)
                 let service = SuperPDPService()
-                let report = try await service.validateInvoice(fileData: facturx, credentials: superPDPSettings.credentials(for: invoice.companyID))
+                var report = try await service.validateInvoice(fileData: facturx, credentials: superPDPSettings.credentials(for: invoice.companyID))
+                report.lineNames = lineNames
                 pdpValidationReport = report
                 showPDPValidationPanel = true
                 superPDPMessage = nil
@@ -2680,7 +2684,7 @@ struct InvoiceEditorView: View {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.red)
-                            Text(entry.displayText)
+                            Text(report.displayText(for: entry))
                                 .font(.caption)
                                 .foregroundStyle(.red)
                         }
@@ -2694,7 +2698,7 @@ struct InvoiceEditorView: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.orange)
-                            Text(entry.displayText)
+                            Text(report.displayText(for: entry))
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }

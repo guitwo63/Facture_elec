@@ -365,7 +365,10 @@ les lignes 2 et 3) : `location` est le chemin SVRL du XSLT officiel, repris tel 
   sert pas : le message commence déjà par `[BR-Z-05]`.
 - L'endpoint est public (`security: []` dans l'OpenAPI) : il répond sans jeton.
 
-Côté app, `SuperPDPValidationMessage` garde `message` et `location`. Son `displayText` vaut
-« Ligne 2 — [BR-Z-05]-… » pour un échec de ligne, le message seul sinon (en-tête, pas de
-`location`). `errors`/`warnings` restent le texte seul, un par échec : le compteur
-« n erreur(s) » ne change pas.
+Côté app, `SuperPDPValidationMessage` garde `message` et `location`. L'éditeur relève les
+désignations des lignes (BT-153) avec le fichier envoyé et les range dans le rapport
+(`lineNames`). `displayText(for:)` vaut alors « Ligne 2 (Désignation) — [BR-Z-05]-… » pour un
+échec de ligne, « Ligne 2 — … » si la désignation manque, et le message seul sinon (en-tête,
+pas de `location`). Relever les désignations à la validation garde le libellé juste même si
+une ligne est ensuite supprimée ou déplacée dans l'éditeur. `errors`/`warnings` restent le
+texte seul, un par échec : le compteur « n erreur(s) » ne change pas.

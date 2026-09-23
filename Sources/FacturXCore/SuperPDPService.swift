@@ -197,16 +197,30 @@ public struct SuperPDPValidationReport: Hashable {
     public var errorEntries: [SuperPDPValidationMessage]
     public var warningEntries: [SuperPDPValidationMessage]
     public var raw: [String: String]
+    /// Désignations (BT-153) des lignes de la facture validée, relevées par l'appelant avec le
+    /// fichier envoyé : le rapport décrit cette version, même si les lignes changent ensuite
+    /// dans l'éditeur (ligne supprimée ou déplacée). Vide : « Ligne n » sans désignation.
+    public var lineNames: [String]
 
     /// Texte seul de chaque échec, sans sa `location`.
     public var errors: [String] { errorEntries.map(\.message) }
     public var warnings: [String] { warningEntries.map(\.message) }
 
-    public init(isValid: Bool, errorEntries: [SuperPDPValidationMessage] = [], warningEntries: [SuperPDPValidationMessage] = [], raw: [String: String] = [:]) {
+    public init(isValid: Bool, errorEntries: [SuperPDPValidationMessage] = [], warningEntries: [SuperPDPValidationMessage] = [], raw: [String: String] = [:], lineNames: [String] = []) {
         self.isValid = isValid
         self.errorEntries = errorEntries
         self.warningEntries = warningEntries
         self.raw = raw
+        self.lineNames = lineNames
+    }
+
+    /// Texte affiché d'un échec : « Ligne 2 (Désignation) — [BR-Z-05]-… » quand il vise une
+    /// ligne, « Ligne 2 — … » si sa désignation manque, le message seul sinon.
+    public func displayText(for entry: SuperPDPValidationMessage) -> String {
+        guard let n = entry.lineNumber else { return entry.message }
+        let name = lineNames.indices.contains(n - 1)
+            ? lineNames[n - 1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return name.isEmpty ? "Ligne \(n) — \(entry.message)" : "Ligne \(n) (\(name)) — \(entry.message)"
     }
 }
 
@@ -227,16 +241,9 @@ public struct SuperPDPValidationMessage: Hashable {
 
     /// Rang (à partir de 1) de la ligne de facture en cause, nil pour un échec d'en-tête ou sans
     /// `location`. Le générateur émet les lignes dans l'ordre de l'éditeur, avec LineID (BT-126)
-    /// = rang : la ligne 2 du rapport est la 2e ligne de l'éditeur.
+    /// = rang : la ligne 2 du rapport est la 2e ligne de la facture envoyée.
     public var lineNumber: Int? {
         location.flatMap(Self.invoiceLineNumber(in:))
-    }
-
-    /// Texte affiché dans les panneaux : « Ligne 2 — [BR-Z-05]-… » quand l'échec vise une ligne,
-    /// le message seul sinon.
-    public var displayText: String {
-        guard let n = lineNumber else { return message }
-        return "Ligne \(n) — \(message)"
     }
 
     /// Le rang est le dernier prédicat numérique de l'étape `IncludedSupplyChainTradeLineItem` :

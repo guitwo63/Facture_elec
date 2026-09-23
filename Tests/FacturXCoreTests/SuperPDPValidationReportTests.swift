@@ -241,20 +241,37 @@ final class SuperPDPValidationReportTests: XCTestCase {
     }
     """
 
-    /// BR-Z-05 échoue sur les lignes 2 et 3 avec le même message : le rang lu dans `location`
-    /// les départage à l'affichage. Le compteur et le texte brut ne changent pas, et BR-Z-09
-    /// (2e sous-total de TVA d'en-tête, `ApplicableTradeTax[2]`) ne vise aucune ligne.
+    /// BR-Z-05 échoue sur les lignes 2 et 3 avec le même message : le rang lu dans `location` et
+    /// la désignation relevée à la validation les départagent à l'affichage. Le compteur et le
+    /// texte brut ne changent pas, et BR-Z-09 (2e sous-total de TVA d'en-tête,
+    /// `ApplicableTradeTax[2]`) ne vise aucune ligne.
     func testRealReportLabelsEachFailingLine() throws {
-        let report = try SuperPDPService().parseValidationReport(data: Data(realReportJSON.utf8))
+        var report = try SuperPDPService().parseValidationReport(data: Data(realReportJSON.utf8))
+        // Les désignations de la facture fictive qui a produit ce rapport.
+        report.lineNames = ["Prestation correcte", "Article Z fautif A", "Article Z fautif B"]
         XCTAssertEqual(report.errors.count, 3, "un échec = une erreur, comme avant")
         XCTAssertEqual(report.errorEntries.map(\.lineNumber), [nil, 2, 3])
         let brZ05 = "[BR-Z-05]-In an Invoice line (BG-25) where the Invoiced item VAT category code (BT-151) is \"Zero rated\" the Invoiced item VAT rate (BT-152) shall be 0 (zero)."
-        XCTAssertEqual(report.errorEntries.map(\.displayText), [
+        XCTAssertEqual(report.errorEntries.map(report.displayText(for:)), [
             report.errors[0],
-            "Ligne 2 — \(brZ05)",
-            "Ligne 3 — \(brZ05)",
+            "Ligne 2 (Article Z fautif A) — \(brZ05)",
+            "Ligne 3 (Article Z fautif B) — \(brZ05)",
         ])
         XCTAssertEqual(report.errors[1], report.errors[2], "le texte brut reste celui du validateur")
+    }
+
+    /// Sans désignation relevée pour ce rang (aucune, rang au-delà, désignation vide), le libellé
+    /// garde le rang seul ; une désignation est débarrassée de ses blancs.
+    func testLineLabelFallsBackToRankWithoutDesignation() {
+        let onLine2 = SuperPDPValidationMessage(message: "[BR-X]-M", location: "/ram:IncludedSupplyChainTradeLineItem[2]")
+        let onLine3 = SuperPDPValidationMessage(message: "[BR-X]-M", location: "/ram:IncludedSupplyChainTradeLineItem[3]")
+        var report = SuperPDPValidationReport(isValid: false, errorEntries: [onLine2, onLine3])
+        XCTAssertEqual(report.displayText(for: onLine2), "Ligne 2 — [BR-X]-M", "aucune désignation relevée")
+        report.lineNames = ["Première", "  Deuxième \n"]
+        XCTAssertEqual(report.displayText(for: onLine2), "Ligne 2 (Deuxième) — [BR-X]-M")
+        XCTAssertEqual(report.displayText(for: onLine3), "Ligne 3 — [BR-X]-M", "rang au-delà des lignes relevées")
+        report.lineNames = ["Première", "   "]
+        XCTAssertEqual(report.displayText(for: onLine2), "Ligne 2 — [BR-X]-M", "désignation vide")
     }
 
     /// Le rang est le dernier prédicat numérique de l'étape `IncludedSupplyChainTradeLineItem`,
@@ -277,8 +294,8 @@ final class SuperPDPValidationReportTests: XCTestCase {
         XCTAssertNil(line(""))
     }
 
-    /// Les avertissements (schematron français) reçoivent aussi le rang de ligne. Une entrée sans
-    /// `location` (texte simple, clé absente, erreur générique du rapport) reste telle quelle.
+    /// Les avertissements (schematron français) reçoivent aussi le libellé de ligne. Une entrée
+    /// sans `location` (texte simple, clé absente, erreur générique du rapport) reste telle quelle.
     func testWarningsGetLineLabelAndEntriesWithoutLocationStayPlain() throws {
         let json = """
         {"data": [{"is_valid": false, "error": "Fichier illisible", "subreports": [
@@ -291,9 +308,10 @@ final class SuperPDPValidationReportTests: XCTestCase {
            "messages": []}
         ]}]}
         """
-        let report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
-        XCTAssertEqual(report.errorEntries.map(\.displayText), ["[BR-1]-Texte seul", "[BR-2]-Sans location", "Fichier illisible"])
-        XCTAssertEqual(report.warningEntries.map(\.displayText), ["Ligne 3 — [BR-FR-WARN-1]-Some non-blocking recommendation."])
+        var report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
+        report.lineNames = ["Prestation A", "Prestation B", "Prestation C"]
+        XCTAssertEqual(report.errorEntries.map(report.displayText(for:)), ["[BR-1]-Texte seul", "[BR-2]-Sans location", "Fichier illisible"])
+        XCTAssertEqual(report.warningEntries.map(report.displayText(for:)), ["Ligne 3 (Prestation C) — [BR-FR-WARN-1]-Some non-blocking recommendation."])
         XCTAssertEqual(report.warnings, ["[BR-FR-WARN-1]-Some non-blocking recommendation."])
     }
 }
