@@ -18,6 +18,10 @@ struct PartyEditorView: View {
     var onPickContact: ((PartyContact) -> Void)?
     var onPickRouting: ((PartyRoutingAddress) -> Void)?
     var onPartyPicked: ((InvoiceParty) -> Void)?
+    /// Société dont les préréglages de conditions de paiement sont proposés (voir
+    /// `PaymentTermsPresetStore.list(for:)`) : la société elle-même sur sa fiche annuaire, la
+    /// société du document dans un éditeur. `nil` = société principale, sinon réglage global.
+    var companyID: UUID?
     @State private var showRoutingEditor = false
     @State private var editingAddress: PartyRoutingAddress?
     @State private var showContactEditor = false
@@ -37,15 +41,15 @@ struct PartyEditorView: View {
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
-            get: { paymentTermsStore.matchingPresetID(for: party.paymentTerms) },
+            get: { paymentTermsStore.matchingPresetID(for: party.paymentTerms, companyID: companyID) },
             set: { newID in
-                guard let id = newID, let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                guard let id = newID, let preset = paymentTermsStore.preset(id: id, companyID: companyID) else { return }
                 party.paymentTerms = preset.text
             }
         )
     }
 
-    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, locked: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil) {
+    init(party: Binding<InvoiceParty>, routingAddresses: Binding<[PartyRoutingAddress]>? = nil, contacts: Binding<[PartyContact]>? = nil, showWebButton: Bool = true, isSociete: Bool = false, hideEmail: Bool = false, hideBankDetails: Bool = false, hideElectronicAddress: Bool = false, locked: Bool = false, directory: PartyDirectory? = nil, onPickContact: ((PartyContact) -> Void)? = nil, onPickRouting: ((PartyRoutingAddress) -> Void)? = nil, onPartyPicked: ((InvoiceParty) -> Void)? = nil, companyID: UUID? = nil) {
         self._party = party
         self.showWebButton = showWebButton
         self.isSociete = isSociete
@@ -58,6 +62,7 @@ struct PartyEditorView: View {
         self.onPickContact = onPickContact
         self.onPickRouting = onPickRouting
         self.onPartyPicked = onPartyPicked
+        self.companyID = companyID
         if let ra = routingAddresses {
             self._routingAddresses = ra
         } else {
@@ -329,7 +334,7 @@ struct PartyEditorView: View {
                         TextField("BIC", text: Binding($party.bic, replacingNilWith: ""))
                             .textCase(.uppercase)
                         Picker("Conditions de paiement", selection: paymentTermsPresetIDBinding) {
-                            ForEach(paymentTermsStore.presets) { preset in
+                            ForEach(paymentTermsStore.list(for: companyID)) { preset in
                                 Text(preset.label).tag(Optional(preset.id))
                             }
                             Text("Personnalisé").tag(String?.none)

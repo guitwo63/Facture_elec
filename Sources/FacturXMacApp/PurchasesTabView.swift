@@ -329,7 +329,7 @@ struct PurchaseInvoiceEditorView: View {
                         }.lockable(fieldLocked)
 
                         GroupBox("Fournisseur") {
-                            PurchasePartySection(party: Binding(get: { record.invoice.seller }, set: { record.invoice.seller = $0 }), role: .supplier, locked: fieldLocked)
+                            PurchasePartySection(party: Binding(get: { record.invoice.seller }, set: { record.invoice.seller = $0 }), role: .supplier, locked: fieldLocked, companyID: record.invoice.companyID)
                         }.lockable(fieldLocked)
 
                         GroupBox("Notre société") {
