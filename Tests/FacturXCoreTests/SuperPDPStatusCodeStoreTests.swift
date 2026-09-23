@@ -12,11 +12,11 @@ final class SuperPDPStatusCodeStoreTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: env.key(storageKey))
+        AppPersistence.defaults.removeObject(forKey: env.key(storageKey))
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: env.key(storageKey))
+        AppPersistence.defaults.removeObject(forKey: env.key(storageKey))
         super.tearDown()
     }
 
@@ -94,7 +94,7 @@ final class SuperPDPStatusCodeStoreTests: XCTestCase {
             PDPEventCodeOverride(id: "fr:999", label: "Code maison", isSystemDefined: false)
         ]
         let data = try JSONEncoder().encode(partial)
-        UserDefaults.standard.set(data, forKey: env.key(storageKey))
+        AppPersistence.defaults.set(data, forKey: env.key(storageKey))
 
         let reloaded = SuperPDPStatusCodeStore()
         XCTAssertEqual(reloaded.override(for: "fr:205")?.label, "Personnalisé")

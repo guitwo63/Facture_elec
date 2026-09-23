@@ -298,7 +298,7 @@ public final class SMTPSettings: ObservableObject {
     /// credentialsBySociety`, même patron.
     @Published public var credentialsBySociety: [UUID: SMTPCredentials] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.smtp.credentials.v1") }
     private var credentialsBySocietyKey: String { env.key("facturx.smtp.credentials.bysociety.v1") }

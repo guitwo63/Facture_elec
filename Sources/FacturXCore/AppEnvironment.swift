@@ -16,11 +16,11 @@ public final class AppEnvironment: ObservableObject {
 
     @Published public var mode: AppEnvironmentMode
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let modeKey = "facturx.env.mode.v1"
 
     public init() {
-        let raw = UserDefaults.standard.string(forKey: "facturx.env.mode.v1")
+        let raw = AppPersistence.defaults.string(forKey: "facturx.env.mode.v1")
         switch raw {
         case "production": mode = .production
         case "test": mode = .test

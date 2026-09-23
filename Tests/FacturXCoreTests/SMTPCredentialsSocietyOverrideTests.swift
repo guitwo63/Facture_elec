@@ -14,13 +14,13 @@ final class SMTPCredentialsSocietyOverrideTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        keys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
         PartyDirectory.shared.entries = []
     }
 
     override func tearDown() {
         PartyDirectory.shared.entries = []
-        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        keys.forEach { AppPersistence.defaults.removeObject(forKey: $0) }
         super.tearDown()
     }
 

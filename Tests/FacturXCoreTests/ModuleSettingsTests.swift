@@ -30,7 +30,7 @@ final class ModuleSettingsTests: XCTestCase {
 final class ModuleStoreTests: XCTestCase {
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "facturx.modules.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.modules.v1")
         super.tearDown()
     }
 

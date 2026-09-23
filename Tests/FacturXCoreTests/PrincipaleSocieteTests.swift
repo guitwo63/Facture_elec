@@ -10,13 +10,13 @@ final class PrincipaleSocieteTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: directoryKey)
-        UserDefaults.standard.removeObject(forKey: "facturx.directory.societeInterco.migrated.v1")
+        AppPersistence.defaults.removeObject(forKey: directoryKey)
+        AppPersistence.defaults.removeObject(forKey: "facturx.directory.societeInterco.migrated.v1")
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: directoryKey)
-        UserDefaults.standard.removeObject(forKey: "facturx.directory.societeInterco.migrated.v1")
+        AppPersistence.defaults.removeObject(forKey: directoryKey)
+        AppPersistence.defaults.removeObject(forKey: "facturx.directory.societeInterco.migrated.v1")
         super.tearDown()
     }
 

@@ -1099,7 +1099,7 @@ public final class SuperPDPSettings: ObservableObject {
     /// son propre compte SUPER PDP, d'où le chantier "Réglages par société".
     @Published public var credentialsBySociety: [UUID: SuperPDPCredentials] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.superpdp.credentials.v1") }
     private var credentialsBySocietyKey: String { env.key("facturx.superpdp.credentials.bysociety.v1") }

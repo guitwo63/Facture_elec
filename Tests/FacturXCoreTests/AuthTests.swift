@@ -356,7 +356,7 @@ final class AuthTests: XCTestCase {
         let store = AuthStore()
         store.testBypassSecurity = true
         store.users = []
-        UserDefaults.standard.removeObject(forKey: "facturx.auth.seeded.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.auth.seeded.v1")
         // Premier seeding
         store.seedDefaultAdminIfEmpty()
         XCTAssertTrue(store.users.first?.mustChangePassword == true)

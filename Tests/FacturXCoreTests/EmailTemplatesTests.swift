@@ -8,13 +8,13 @@ final class EmailTemplatesTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: globalKey)
-        UserDefaults.standard.removeObject(forKey: templatesKey)
+        AppPersistence.defaults.removeObject(forKey: globalKey)
+        AppPersistence.defaults.removeObject(forKey: templatesKey)
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: globalKey)
-        UserDefaults.standard.removeObject(forKey: templatesKey)
+        AppPersistence.defaults.removeObject(forKey: globalKey)
+        AppPersistence.defaults.removeObject(forKey: templatesKey)
         super.tearDown()
     }
 

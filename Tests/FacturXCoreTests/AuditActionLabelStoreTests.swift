@@ -4,7 +4,7 @@ import XCTest
 final class AuditActionLabelStoreTests: XCTestCase {
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "facturx.auditactionlabels.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.auditactionlabels.v1")
         super.tearDown()
     }
 
@@ -57,7 +57,7 @@ final class AuditActionLabelStoreTests: XCTestCase {
         // manquants sans écraser la personnalisation déjà faite.
         let partial = [AuditActionLabel(id: "invoice_created", label: "Personnalisé")]
         let data = try! JSONEncoder().encode(partial)
-        UserDefaults.standard.set(data, forKey: "facturx.auditactionlabels.v1")
+        AppPersistence.defaults.set(data, forKey: "facturx.auditactionlabels.v1")
 
         let reloaded = AuditActionLabelStore()
         XCTAssertEqual(reloaded.label(for: "invoice_created"), "Personnalisé")

@@ -21,8 +21,8 @@ final class OrderStorePartySemanticsMigrationTests: XCTestCase {
     }
 
     private func resetPersistedState() {
-        UserDefaults.standard.removeObject(forKey: ordersKey)
-        UserDefaults.standard.removeObject(forKey: migratedKey)
+        AppPersistence.defaults.removeObject(forKey: ordersKey)
+        AppPersistence.defaults.removeObject(forKey: migratedKey)
     }
 
     /// Représente une commande telle que persistée par une version antérieure
@@ -37,7 +37,7 @@ final class OrderStorePartySemanticsMigrationTests: XCTestCase {
 
     func testLoadSwapsBuyerAndSellerForOrdersPersistedBeforeMigration() throws {
         let data = try JSONEncoder().encode([legacyOrder()])
-        UserDefaults.standard.set(data, forKey: ordersKey)
+        AppPersistence.defaults.set(data, forKey: ordersKey)
 
         let store = OrderStore()
 
@@ -48,7 +48,7 @@ final class OrderStorePartySemanticsMigrationTests: XCTestCase {
 
     func testMigrationIsNotReplayedOnSubsequentLoads() throws {
         let data = try JSONEncoder().encode([legacyOrder()])
-        UserDefaults.standard.set(data, forKey: ordersKey)
+        AppPersistence.defaults.set(data, forKey: ordersKey)
 
         _ = OrderStore()
         // Un deuxième chargement (ex. relance de l'app) doit retrouver le même

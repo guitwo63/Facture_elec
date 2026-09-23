@@ -15,7 +15,7 @@ public final class OrderStore: ObservableObject {
     public weak var audit: AuditStore?
     public var actorName: String = "system"
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("orderx.orders.v1") }
     // Nom de clé historique conservé tel quel (valeur déjà persistée chez les

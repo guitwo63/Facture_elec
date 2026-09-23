@@ -7,11 +7,11 @@ final class PaymentTermsPresetStoreTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        AppPersistence.defaults.removeObject(forKey: storageKey)
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        AppPersistence.defaults.removeObject(forKey: storageKey)
         super.tearDown()
     }
 

@@ -61,12 +61,12 @@ final class PCloudServiceTests: XCTestCase {
 final class BackupServiceTests: XCTestCase {
 
     /// Les tests d'achat de cet incrément (3.1) passent par `BackupService.restore`, qui
-    /// appelle `PurchaseInvoiceStore.upsert` — lequel persiste sur le vrai `UserDefaults`
+    /// appelle `PurchaseInvoiceStore.upsert` — lequel persiste dans `AppPersistence.defaults`
     /// (comme les autres stores de ce fichier). Nettoyage explicite pour ne pas laisser de
     /// facture d'achat résiduelle polluer `PurchaseInvoiceStoreTests`, qui s'exécute dans le
     /// même processus de test.
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "facturx.purchaseinvoices.v1")
+        AppPersistence.defaults.removeObject(forKey: "facturx.purchaseinvoices.v1")
         super.tearDown()
     }
 
@@ -207,9 +207,9 @@ final class BackupServiceTests: XCTestCase {
     func testRestoreUpsertsQuotesAdditively() {
         let bundle = BackupBundle(invoices: [], orders: [], quotes: [sampleQuote()], parties: [])
         let quoteStore = QuoteStore()
-        // Une exécution précédente de la suite peut avoir persisté des devis
-        // de test sur le vrai UserDefaults (QuoteStore.init charge depuis le
-        // disque) : on repart d'un état propre pour ce test.
+        // Un test précédent du même processus peut avoir persisté des devis
+        // dans `AppPersistence.defaults` (QuoteStore.init les recharge) : on
+        // repart d'un état propre pour ce test.
         quoteStore.quotes = []
 
         BackupService.restore(

@@ -347,7 +347,7 @@ public final class PartyDirectory: ObservableObject {
 
     @Published public var entries: [DirectoryEntry]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.directory.v1") }
     private var societeIntercoMigratedKey: String { env.key("facturx.directory.societeInterco.migrated.v1") }
@@ -535,7 +535,7 @@ public final class TagStore: ObservableObject {
     /// ajouter un qui lui est propre.
     @Published public var tagsBySociety: [UUID: [PartyTag]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.tags.v1") }
     private var tagsBySocietyKey: String { env.key("facturx.tags.bysociety.v1") }
@@ -627,7 +627,7 @@ public final class KindColorStore: ObservableObject {
     /// Surcharge éparse par société (Réglages > Tables) — voir `SocietyScopedCatalog`.
     @Published public var colorsBySociety: [UUID: [DirectoryEntryKind: String]] = [:]
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppPersistence.defaults
     private let env = AppEnvironment.shared
     private var storageKey: String { env.key("facturx.kindcolors.v1") }
     private var colorsBySocietyKey: String { env.key("facturx.kindcolors.bysociety.v1") }

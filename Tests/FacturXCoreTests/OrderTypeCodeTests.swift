@@ -22,8 +22,8 @@ final class OrderTypeCodeTests: XCTestCase {
     }
 
     private func resetPersistedState() {
-        UserDefaults.standard.removeObject(forKey: ordersKey)
-        UserDefaults.standard.removeObject(forKey: migratedKey)
+        AppPersistence.defaults.removeObject(forKey: ordersKey)
+        AppPersistence.defaults.removeObject(forKey: migratedKey)
     }
 
     private func order(_ type: OrderTypeCode, number: String = "CD2026-0009") -> SalesOrder {
@@ -73,8 +73,8 @@ final class OrderTypeCodeTests: XCTestCase {
             try persisted(order(.order, number: "CD-2"), type: "221"),
             try persisted(order(.order, number: "CD-3"), type: "222"),
         ]
-        UserDefaults.standard.set(try JSONSerialization.data(withJSONObject: list), forKey: ordersKey)
-        UserDefaults.standard.set(true, forKey: migratedKey)
+        AppPersistence.defaults.set(try JSONSerialization.data(withJSONObject: list), forKey: ordersKey)
+        AppPersistence.defaults.set(true, forKey: migratedKey)
 
         let store = OrderStore()
         XCTAssertEqual(store.orders.map(\.number).sorted(), ["CD-1", "CD-2", "CD-3"])

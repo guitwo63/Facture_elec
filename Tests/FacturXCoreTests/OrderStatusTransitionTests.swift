@@ -4,7 +4,7 @@ import XCTest
 final class OrderStatusTransitionTests: XCTestCase {
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: "orderx.statuses.v1")
+        AppPersistence.defaults.removeObject(forKey: "orderx.statuses.v1")
         super.tearDown()
     }
 
@@ -54,7 +54,7 @@ final class OrderStatusTransitionTests: XCTestCase {
             LegacyOverride(id: $0.rawValue, label: "Ancien " + $0.label, systemImage: $0.systemImage, hexColor: $0.hexColor)
         }
         let data = try JSONEncoder().encode(legacy)
-        UserDefaults.standard.set(data, forKey: "orderx.statuses.v1")
+        AppPersistence.defaults.set(data, forKey: "orderx.statuses.v1")
 
         let store = OrderStatusStore()
         XCTAssertEqual(store.override(for: .draft).label, "Ancien Brouillon")
