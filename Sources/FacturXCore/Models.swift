@@ -424,6 +424,52 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
     }
 }
 
+/// Un sous-total de TVA (BG-23) : les lignes d'un même couple (taux, catégorie). Deux lignes
+/// à 0 % peuvent relever de catégories différentes (taux zéro, exonération, autoliquidation,
+/// exportation…) et donnent alors deux sous-totaux distincts au même taux, chacun avec son
+/// propre motif d'exonération le cas échéant. L'identité est donc le couple et non le taux
+/// seul : un `ForEach(…, id: \.rate)` sur les totaux aurait deux lignes de même identité.
+public struct VATBreakdownEntry: Hashable, Identifiable {
+    /// Clé de regroupement, qui sert aussi d'identité : unique par construction dans une
+    /// ventilation, et inchangée quand la base ou le motif du sous-total change.
+    public struct Key: Hashable {
+        public let rate: Double
+        public let category: VATCategory
+    }
+
+    public let rate: Double
+    public let category: VATCategory
+    public let exemptionReason: String?
+    public let basis: Double
+    public let amount: Double
+
+    public var id: Key { Key(rate: rate, category: category) }
+
+    /// Ventilation commune aux factures, commandes et devis (`vatBreakdown`), triée par taux
+    /// puis dans l'ordre de `VATCategory.allCases` (celui du sélecteur de catégorie). Sans ce
+    /// second critère, deux catégories au même taux sortaient dans l'ordre d'itération d'un
+    /// dictionnaire, qui change d'un lancement de l'app à l'autre (écran, PDF et XML).
+    static func breakdown(of lines: [InvoiceLine]) -> [VATBreakdownEntry] {
+        var basisByKey: [Key: Double] = [:]
+        var reasonByKey: [Key: String] = [:]
+        for line in lines {
+            let key = Key(rate: line.vatRate, category: line.vatCategory)
+            basisByKey[key, default: 0] += line.lineTotal
+            if reasonByKey[key] == nil,
+               let reason = line.vatExemptionReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
+                reasonByKey[key] = reason
+            }
+        }
+        func position(_ category: VATCategory) -> Int { VATCategory.allCases.firstIndex(of: category) ?? 0 }
+        return basisByKey.map { (key, basis) in
+            let basisR = basis.rounded(toPlaces: 2)
+            let amount = (basisR * key.rate / 100).rounded(toPlaces: 2)
+            return VATBreakdownEntry(rate: key.rate, category: key.category, exemptionReason: reasonByKey[key],
+                                     basis: basisR, amount: amount)
+        }.sorted { ($0.rate, position($0.category)) < ($1.rate, position($1.category)) }
+    }
+}
+
 /// Profil Factur-X (BT-24). `CIIXMLGenerator` produit toujours la structure du profil
 /// EN 16931 et ne change que l'URN : ce XML est conforme en EN 16931 et en EXTENDED, qui
 /// l'englobe, mais pas dans les profils plus restreints. Mesuré le 2026-09-23 sur 36 cas
@@ -1051,27 +1097,9 @@ public struct Invoice: Codable, Hashable, Identifiable {
         lines.reduce(0) { $0 + $1.lineTotal }.rounded(toPlaces: 2)
     }
 
-    /// Un groupe par combinaison (taux, catégorie) : deux lignes à 0 % peuvent
-    /// relever de catégories différentes (zéro-rated, autoliquidation,
-    /// exportation…) et doivent apparaître comme des sous-totaux distincts
-    /// (BG-23), chacun avec son propre motif d'exonération le cas échéant.
-    public var vatBreakdown: [(rate: Double, category: VATCategory, exemptionReason: String?, basis: Double, amount: Double)] {
-        struct Key: Hashable { let rate: Double; let category: VATCategory }
-        var basisByKey: [Key: Double] = [:]
-        var reasonByKey: [Key: String] = [:]
-        for line in lines {
-            let key = Key(rate: line.vatRate, category: line.vatCategory)
-            basisByKey[key, default: 0] += line.lineTotal
-            if reasonByKey[key] == nil,
-               let reason = line.vatExemptionReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
-                reasonByKey[key] = reason
-            }
-        }
-        return basisByKey.map { (key, basis) in
-            let basisR = basis.rounded(toPlaces: 2)
-            let amount = (basisR * key.rate / 100).rounded(toPlaces: 2)
-            return (key.rate, key.category, reasonByKey[key], basisR, amount)
-        }.sorted { $0.rate < $1.rate }
+    /// Un sous-total (BG-23) par couple (taux, catégorie) : voir `VATBreakdownEntry`.
+    public var vatBreakdown: [VATBreakdownEntry] {
+        VATBreakdownEntry.breakdown(of: lines)
     }
 
     public var taxTotal: Double {

@@ -877,7 +877,7 @@ struct OrderEditorView: View {
                                 .font(.caption)
                             }
                             VStack(alignment: .trailing) {
-                                ForEach(order.vatBreakdown, id: \.rate) { item in
+                                ForEach(order.vatBreakdown) { item in
                                     row("TVA \(String(format: "%g%%", item.rate))", item.amount)
                                 }
                                 row("Total TTC", order.grandTotal, bold: true)
@@ -1180,13 +1180,15 @@ struct OrderEditorView: View {
                     .font(.caption2).foregroundStyle(.secondary)
                 if !v.errors.isEmpty {
                     Text("Erreurs :").font(.caption.bold())
-                    ForEach(v.errors, id: \.self) { e in
+                    // Identité = position, pas le texte : les messages d'OrderXValidator sont
+                    // aujourd'hui tous distincts, mais deux textes égaux auraient le même `id`.
+                    ForEach(Array(v.errors.enumerated()), id: \.offset) { _, e in
                         Text("• \(e)").font(.caption).foregroundStyle(.red)
                     }
                 }
                 if !v.warnings.isEmpty {
                     Text("Avertissements :").font(.caption.bold())
-                    ForEach(v.warnings, id: \.self) { w in
+                    ForEach(Array(v.warnings.enumerated()), id: \.offset) { _, w in
                         Text("• \(w)").font(.caption).foregroundStyle(.orange)
                     }
                 }

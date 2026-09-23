@@ -153,4 +153,31 @@ final class SuperPDPValidationReportTests: XCTestCase {
         XCTAssertTrue(report.errors.contains { $0.contains("BR-1") })
         XCTAssertTrue(report.errors.contains { $0.contains("BR-2") })
     }
+
+    /// Une règle Schematron échoue une fois par ligne fautive, avec le même message : seule la
+    /// `location` diffère. Le rapport garde un message par échec (le compteur « n erreur(s) »
+    /// en dépend), donc deux textes égaux : le panneau SUPER PDP ne peut pas se servir du texte
+    /// comme identité de `ForEach` (`id: \.self`), il utilise la position.
+    func testSameSchematronMessageOnSeveralLinesIsKeptOncePerFailure() throws {
+        let json = """
+        {"data": [{"is_valid": false, "subreports": [
+          {"validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/FACTUR-X_EN16931.xslt", "checks_count": 107,
+           "failures": [
+             {"message": "[BR-Z-05]-In an Invoice line (BG-25) where the Invoiced item VAT category code (BT-151) is \\"Zero rated\\" the Invoiced item VAT rate (BT-152) shall be 0 (zero).",
+              "location": "/CrossIndustryInvoice/.../IncludedSupplyChainTradeLineItem[2]/.../ApplicableTradeTax[1]"},
+             {"message": "[BR-Z-05]-In an Invoice line (BG-25) where the Invoiced item VAT category code (BT-151) is \\"Zero rated\\" the Invoiced item VAT rate (BT-152) shall be 0 (zero).",
+              "location": "/CrossIndustryInvoice/.../IncludedSupplyChainTradeLineItem[3]/.../ApplicableTradeTax[1]"}
+           ],
+           "messages": []},
+          {"validator": "FNFE_RFE_INVOICE/Factur-X/EN16931/2xslt/BR-FR-Flux2-Schematron-CII_WARNING.xslt", "checks_count": 74,
+           "failures": [{"message": "[BR-FR-WARN-1]-Same advice."}, {"message": "[BR-FR-WARN-1]-Same advice."}],
+           "messages": []}
+        ]}]}
+        """
+        let report = try SuperPDPService().parseValidationReport(data: Data(json.utf8))
+        XCTAssertEqual(report.errors.count, 2, "un message par ligne fautive, même si le texte est identique")
+        XCTAssertEqual(Set(report.errors).count, 1, "les deux erreurs ont le même texte : il ne peut pas servir d'identité")
+        XCTAssertEqual(report.warnings.count, 2)
+        XCTAssertEqual(Set(report.warnings).count, 1)
+    }
 }
