@@ -1848,7 +1848,7 @@ struct InvoiceEditorView: View {
                             VStack(alignment: .trailing, spacing: 4) {
                                 VStack(alignment: .trailing) {
                                 ForEach(invoice.vatBreakdown) { item in
-                                    row("TVA \(String(format: "%g%%", item.rate))", item.amount)
+                                    row(item.label, item.amount)
                                 }
                                 row("Total TTC", invoice.grandTotal, bold: true)
                                 if invoice.prepaidAmount > 0 {
@@ -2042,6 +2042,8 @@ struct InvoiceEditorView: View {
         }
     }
 
+    /// 320 pt : le plus long libellé de sous-total de TVA, « TVA 0% — Livraison intracommunautaire »,
+    /// tient sur une ligne à côté de son montant (à 280 pt, il passait à la ligne).
     private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {
         HStack {
             Text(label).font(bold ? .body.bold() : .body)
@@ -2049,7 +2051,7 @@ struct InvoiceEditorView: View {
             Text(String(format: "%.2f %@", value, invoice.currency))
                 .font(bold ? .body.bold() : .body)
                 .monospacedDigit()
-        }.frame(width: 280)
+        }.frame(width: 320)
     }
 
     @ViewBuilder

@@ -101,15 +101,23 @@ public final class OrderPDFRenderer {
         return cy
     }
 
+    /// Ligne du bloc des totaux : libellé dans la colonne des libellés, montant dans celle des montants.
+    private struct TotalsRow {
+        let label: String
+        let amount: String
+        let font: CTFont
+        var amountFont: CTFont? = nil
+    }
+
     private func drawTotals(context: CGContext, order: SalesOrder, y: CGFloat) {
-        let x = pageWidth - margin - 180
+        let amount = { (value: Double) in "\(order.currency) \(self.fmt(value))" }
+        let rowsAboveRule = [TotalsRow(label: "Total HT:", amount: amount(order.lineTotal), font: font(size: 11), amountFont: boldFont(size: 11))]
+            + order.vatBreakdown.map { TotalsRow(label: "\($0.label):", amount: amount($0.amount), font: font(size: 11)) }
+        let rowsBelowRule = [TotalsRow(label: "Total TTC:", amount: amount(order.grandTotal), font: boldFont(size: 13))]
+        let x = totalsLabelX(rowsAboveRule + rowsBelowRule)
         var cy = y
-        drawText(context: context, text: "Total HT:", x: x, y: cy, font: font(size: 11), color: .black)
-        drawText(context: context, text: "\(order.currency) \(fmt(order.lineTotal))", x: pageWidth - margin - 90, y: cy, font: boldFont(size: 11), color: .black)
-        cy -= 16
-        for item in order.vatBreakdown {
-            drawText(context: context, text: "TVA \(fmtRate(item.rate))%:", x: x, y: cy, font: font(size: 11), color: .black)
-            drawText(context: context, text: "\(order.currency) \(fmt(item.amount))", x: pageWidth - margin - 90, y: cy, font: font(size: 11), color: .black)
+        for row in rowsAboveRule {
+            drawTotalsRow(context: context, row, x: x, y: cy)
             cy -= 16
         }
         cy -= 4
@@ -117,9 +125,25 @@ public final class OrderPDFRenderer {
         context.move(to: CGPoint(x: x, y: cy))
         context.addLine(to: CGPoint(x: pageWidth - margin, y: cy))
         context.strokePath()
-        cy -= 16
-        drawText(context: context, text: "Total TTC:", x: x, y: cy, font: boldFont(size: 13), color: .black)
-        drawText(context: context, text: "\(order.currency) \(fmt(order.grandTotal))", x: pageWidth - margin - 90, y: cy, font: boldFont(size: 13), color: .black)
+        for row in rowsBelowRule {
+            cy -= 16
+            drawTotalsRow(context: context, row, x: x, y: cy)
+        }
+    }
+
+    /// Colonne des montants du bloc des totaux, à 90 pt de la marge droite.
+    private var totalsAmountX: CGFloat { pageWidth - margin - 90 }
+
+    /// Colonne des libellés : 90 pt avant les montants, décalée vers la gauche dès qu'un libellé
+    /// n'y tient plus avec 12 pt d'écart (« TVA 0% — Livraison intracommunautaire: » fait 203 pt).
+    private func totalsLabelX(_ rows: [TotalsRow]) -> CGFloat {
+        let widest = rows.map { textWidth($0.label, font: $0.font) }.max() ?? 0
+        return min(totalsAmountX - 90, totalsAmountX - 12 - widest)
+    }
+
+    private func drawTotalsRow(context: CGContext, _ row: TotalsRow, x: CGFloat, y: CGFloat) {
+        drawText(context: context, text: row.label, x: x, y: y, font: row.font, color: .black)
+        drawText(context: context, text: row.amount, x: totalsAmountX, y: y, font: row.amountFont ?? row.font, color: .black)
     }
 
     private func drawFooter(context: CGContext, order: SalesOrder) {
@@ -144,6 +168,13 @@ public final class OrderPDFRenderer {
         let line = CTLineCreateWithAttributedString(attr as CFAttributedString)
         context.textPosition = CGPoint(x: x, y: y)
         CTLineDraw(line, context)
+    }
+
+    /// Largeur du texte tel que `drawText` le dessine.
+    private func textWidth(_ text: String, font: CTFont) -> CGFloat {
+        let attr = NSAttributedString(string: text, attributes: [.font: font])
+        let line = CTLineCreateWithAttributedString(attr as CFAttributedString)
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
     }
 
     private func boldFont(size: CGFloat) -> CTFont {

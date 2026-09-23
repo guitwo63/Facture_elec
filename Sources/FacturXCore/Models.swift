@@ -446,6 +446,15 @@ public struct VATBreakdownEntry: Hashable, Identifiable {
 
     public var id: Key { Key(rate: rate, category: category) }
 
+    /// Libellé du sous-total, commun aux totaux des éditeurs et aux PDF : « TVA 20% », suivi de
+    /// la catégorie dès qu'elle n'est pas S (« TVA 0% — Exonérée »). Avec le taux seul, les
+    /// sous-totaux à 0 % en taux zéro et en exonération portaient le même libellé, et un
+    /// sous-total en autoliquidation ou à l'export ne disait pas pourquoi la TVA était nulle.
+    public var label: String {
+        let rateLabel = "TVA \(String(format: "%g", rate))%"
+        return category == .standard ? rateLabel : "\(rateLabel) — \(category.label)"
+    }
+
     /// Ventilation commune aux factures, commandes et devis (`vatBreakdown`), triée par taux
     /// puis dans l'ordre de `VATCategory.allCases` (celui du sélecteur de catégorie). Sans ce
     /// second critère, deux catégories au même taux sortaient dans l'ordre d'itération d'un

@@ -878,10 +878,10 @@ struct OrderEditorView: View {
                             }
                             VStack(alignment: .trailing) {
                                 ForEach(order.vatBreakdown) { item in
-                                    row("TVA \(String(format: "%g%%", item.rate))", item.amount)
+                                    row(item.label, item.amount)
                                 }
                                 row("Total TTC", order.grandTotal, bold: true)
-                                Divider().frame(width: 280)
+                                Divider().frame(width: 320)
                                 row("Montant facturé", linkedInvoicesAmount)
                                 row("Reste à facturer", max(0, order.grandTotal - linkedInvoicesAmount), bold: true)
                             }
@@ -1023,6 +1023,8 @@ struct OrderEditorView: View {
         }.rounded(toPlaces: 2)
     }
 
+    /// 320 pt : le plus long libellé de sous-total de TVA, « TVA 0% — Livraison intracommunautaire »,
+    /// tient sur une ligne à côté de son montant (à 280 pt, il passait à la ligne).
     private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {
         HStack {
             Text(label).font(bold ? .body.bold() : .body)
@@ -1030,7 +1032,7 @@ struct OrderEditorView: View {
             Text(String(format: "%.2f %@", value, order.currency))
                 .font(bold ? .body.bold() : .body)
                 .monospacedDigit()
-        }.frame(width: 280)
+        }.frame(width: 320)
     }
 
     private func export() {
