@@ -46,6 +46,9 @@ public final class InvoiceStore: ObservableObject {
     @Published public var numberFormatOverrides: [UUID: InvoiceNumberingFormat] = [:]
     public weak var audit: AuditStore?
     public var actorName: String = "system"
+    /// Préréglages de conditions de paiement : l'échéance des factures créées ici (`newDraft`,
+    /// `duplicate`, `newDeposit`, `newFinalSettlement`) suit celui de leurs conditions.
+    public var paymentTermsPresets: PaymentTermsPresetStore = .shared
 
     private let defaults = UserDefaults.standard
     private let env = AppEnvironment.shared
@@ -222,7 +225,7 @@ public final class InvoiceStore: ObservableObject {
         // À défaut d'une condition propre à la société émettrice, "30 jours net" sert de
         // condition standard par défaut plutôt qu'un champ vide à chaque nouvelle facture.
         let defaultPaymentTerms = PaymentTermsPresetStore.defaults.first(where: { $0.id == "net30" })?.text ?? "Paiement à 30 jours"
-        return Invoice(
+        var draft = Invoice(
             number: nextNumber(companyID: companyID),
             profile: (sellerEntry?.profile ?? .en16931).forNewInvoice,
             seller: seller,
@@ -233,6 +236,27 @@ public final class InvoiceStore: ObservableObject {
             paymentBIC: seller.bic,
             paymentTerms: seller.paymentTerms ?? defaultPaymentTerms
         )
+        // L'échéance suit le préréglage de ces conditions s'il fixe un délai, comme quand on
+        // le choisit dans l'éditeur : « 30 jours fin de mois » ne tombe pas sur les 30 jours
+        // nets de l'échéance par défaut. Sans cela, l'éditeur afficherait « Personnalisé » dès
+        // la création (voir `PaymentTermsPresetStore.matchingPreset(for:)`).
+        if let preset = paymentTermsPresets.matchingPreset(for: draft.paymentTerms, companyID: companyID),
+           preset.dueRule.computesDueDate {
+            draft.dueDate = preset.dueRule.dueDate(from: draft.issueDate)
+        }
+        return draft
+    }
+
+    /// Échéance d'une facture tirée de `source` (copie, acompte, solde) et datée `issueDate`.
+    /// Si la source suit un préréglage à délai (`PaymentTermsPresetStore.matchingPreset(for:)`),
+    /// la nouvelle facture le suit aussi, depuis sa propre date : « 30 jours fin de mois » ne
+    /// fait pas le même nombre de jours d'un mois à l'autre. Sinon, notamment pour une
+    /// échéance saisie à la main (« Personnalisé »), elle garde le délai de la source.
+    private func dueDate(forCopyOf source: Invoice, issuedOn issueDate: Date) -> Date {
+        if let preset = paymentTermsPresets.matchingPreset(for: source), preset.dueRule.computesDueDate {
+            return preset.dueRule.dueDate(from: issueDate)
+        }
+        return issueDate.addingTimeInterval(source.dueDate.timeIntervalSince(source.issueDate))
     }
 
     public func duplicate(from invoice: Invoice) -> Invoice {
@@ -242,7 +266,7 @@ public final class InvoiceStore: ObservableObject {
         copy.status = .draft
         copy.profile = invoice.profile.forNewInvoice
         copy.issueDate = Date()
-        copy.dueDate = copy.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
+        copy.dueDate = dueDate(forCopyOf: invoice, issuedOn: copy.issueDate)
         copy.precedingInvoiceRef = nil
         copy.precedingInvoiceDate = nil
         copy.linkedSettlementRef = nil
@@ -284,7 +308,7 @@ public final class InvoiceStore: ObservableObject {
         deposit.status = .draft
         deposit.profile = invoice.profile.forNewInvoice
         deposit.issueDate = Date()
-        deposit.dueDate = deposit.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
+        deposit.dueDate = dueDate(forCopyOf: invoice, issuedOn: deposit.issueDate)
         deposit.precedingInvoiceRef = nil
         deposit.precedingInvoiceDate = nil
         deposit.linkedSettlementRef = nil
@@ -302,7 +326,7 @@ public final class InvoiceStore: ObservableObject {
         final.status = .draft
         final.profile = invoice.profile.forNewInvoice
         final.issueDate = Date()
-        final.dueDate = final.issueDate.addingTimeInterval(invoice.dueDate.timeIntervalSince(invoice.issueDate))
+        final.dueDate = dueDate(forCopyOf: invoice, issuedOn: final.issueDate)
         final.precedingInvoiceRef = deposits.first?.number
         final.precedingInvoiceDate = deposits.first?.issueDate
         final.linkedSettlementRef = nil

@@ -8,6 +8,11 @@ import FacturXCore
 /// Schematron officiel (paquets Python factur-x et saxonche) sur le XML de l'app le 2026-09-23.
 final class DueDateBeforeIssueDateTests: XCTestCase {
 
+    /// Scénarios d'un utilisateur à Paris : le XML écrit le jour du fuseau de l'app.
+    override func invokeTest() {
+        inAppTimeZone("Europe/Paris") { super.invokeTest() }
+    }
+
     // MARK: - Outils
 
     private func utc(_ s: String) -> Date {
@@ -151,9 +156,9 @@ final class DueDateBeforeIssueDateTests: XCTestCase {
     }
 
     /// La règle juge les dates que la PDP recevra, pas les instants saisis : autour de minuit
-    /// (UTC dans le XML aujourd'hui), ou pour une échéance « fin de mois » calculée à 00:00
-    /// heure de Paris — qui s'écrit la veille dans le XML. Formulé comme un invariant pour
-    /// rester vrai si le fuseau des dates du XML change un jour.
+    /// UTC, ou pour une échéance « fin de mois » calculée à 00:00 heure de Paris (le XML l'a
+    /// longtemps écrite la veille, en UTC ; elle porte désormais le jour du fuseau de l'app).
+    /// Formulé comme un invariant, vrai quel que soit le fuseau des dates du XML.
     func testRuleFollowsTheDatesWrittenInTheXML() throws {
         var paris = Calendar(identifier: .gregorian)
         paris.timeZone = TimeZone(identifier: "Europe/Paris")!

@@ -6,11 +6,15 @@ import FacturXCore
 /// échouer immédiatement.
 final class CIIXMLParserTests: XCTestCase {
 
+    /// Ce jour-là dans le fuseau de l'app, comme une date saisie dans l'éditeur.
     private func makeDate(_ s: String) -> Date {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(secondsFromGMT: 0)
         return f.date(from: s)!
+    }
+
+    private func day(_ date: Date) -> DateComponents {
+        Calendar.current.dateComponents([.year, .month, .day], from: date)
     }
 
     private func richInvoice() -> Invoice {
@@ -83,8 +87,10 @@ final class CIIXMLParserTests: XCTestCase {
         XCTAssertEqual(parsed.currency, original.currency)
         XCTAssertEqual(parsed.profile, original.profile)
         XCTAssertEqual(parsed.billingMode, original.billingMode)
-        XCTAssertEqual(parsed.issueDate.timeIntervalSince1970, original.issueDate.timeIntervalSince1970, accuracy: 1)
-        XCTAssertEqual(parsed.dueDate.timeIntervalSince1970, original.dueDate.timeIntervalSince1970, accuracy: 1)
+        // Le XML ne porte que le jour : l'aller-retour conserve le jour dans le fuseau de l'app
+        // (celui de l'éditeur et du PDF), pas l'heure. Voir `XMLDatesTimeZoneTests`.
+        XCTAssertEqual(day(parsed.issueDate), day(original.issueDate))
+        XCTAssertEqual(day(parsed.dueDate), day(original.dueDate))
 
         XCTAssertEqual(parsed.seller.name, original.seller.name)
         XCTAssertEqual(parsed.seller.street, original.seller.street)

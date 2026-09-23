@@ -228,7 +228,7 @@ public struct FacturXEmbedder {
         let created = isoNow()
         let sellerName = escapeXML(invoice.seller.name)
         let number = escapeXML(invoice.number)
-        let date = isoDate(invoice.issueDate)
+        let date = DocumentDate.isoString(invoice.issueDate)
         let title = "\(sellerName): Invoice \(number)"
         let desc = "Invoice \(number) dated \(date) issued by \(sellerName)"
         let conformance = invoice.profile.conformanceLevel
@@ -326,13 +326,6 @@ public struct FacturXEmbedder {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f.string(from: Date())
-    }
-
-    private func isoDate(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        return f.string(from: d)
     }
 
     private func escapeXML(_ s: String) -> String {

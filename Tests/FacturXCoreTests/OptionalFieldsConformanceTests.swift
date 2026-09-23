@@ -33,11 +33,11 @@ final class OptionalFieldsConformanceTests: XCTestCase {
 
     // MARK: - Outils
 
+    /// Ce jour-là dans le fuseau de l'app, comme une date saisie dans l'éditeur.
     private func makeDate(_ s: String) -> Date {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
         return f.date(from: s)!
     }
 

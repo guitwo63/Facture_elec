@@ -219,9 +219,10 @@ public final class OrderStore: ObservableObject {
 
     /// Le plus petit numéro libre à partir du numéro de départ, pas "plus haut numéro + 1" —
     /// voir `InvoiceStore.nextSequence` pour le détail (recycle le numéro d'une commande
-    /// supprimée au lieu de le laisser à jamais inutilisé).
-    private func nextSequence(headKey: String, companyID: UUID?) -> Int {
-        let paddedStart = max(1, numberStart)
+    /// supprimée au lieu de le laisser à jamais inutilisé). `start` : le numéro de début du
+    /// format utilisé (celui de la société si elle a son propre format), pas `numberStart`.
+    private func nextSequence(headKey: String, companyID: UUID?, start: Int) -> Int {
+        let paddedStart = max(1, start)
         let matching = orders.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }
         let usedSeqs = Set(matching.compactMap { Int($0.number.dropFirst(headKey.count)) })
         var candidate = paddedStart
@@ -233,15 +234,17 @@ public final class OrderStore: ObservableObject {
     /// avant, une seule séquence de commandes était partagée par toutes les sociétés,
     /// ce qui n'avait pas de sens dès qu'un compte gère plusieurs sociétés émettrices.
     public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
-        let headKey = self.headKey(prefix: prefix, format: numberingFormat(for: companyID))
-        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
+        let format = numberingFormat(for: companyID)
+        let headKey = self.headKey(prefix: prefix, format: format)
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID, start: format.start))
         return headKey + chrono
     }
 
     /// `format` : prévisualise ce format précis — voir `InvoiceStore.previewNextNumber`.
     public func previewNextNumber(prefix: String = "", companyID: UUID? = nil, format: InvoiceNumberingFormat? = nil) -> String {
-        let headKey = self.headKey(prefix: prefix, format: format ?? numberingFormat(for: companyID))
-        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
+        let resolved = format ?? numberingFormat(for: companyID)
+        let headKey = self.headKey(prefix: prefix, format: resolved)
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID, start: resolved.start))
         return headKey + chrono
     }
 }

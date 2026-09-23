@@ -218,14 +218,6 @@ private final class Delegate: NSObject, XMLParserDelegate {
     private var precedingInvoiceRef: String?
     private var precedingInvoiceDateRaw: String?
 
-    private let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        return f
-    }()
-
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
         text = ""
         // Livré à (BG-13) : sous-arbre à part, dont seul le pays (BT-80, en en-tête) est lu. Ses
@@ -461,9 +453,11 @@ private final class Delegate: NSObject, XMLParserDelegate {
         let type = InvoiceTypeCode(rawValue: typeCodeRaw) ?? .commercialInvoice
         let profile = FacturXProfile.allCases.first { $0.urn == profileURN } ?? .en16931
         let billingMode = BillingMode(rawValue: billingModeRaw) ?? .m1
-        let issueDate = issueDateRaw.isEmpty ? Date() : (dateFormatter.date(from: issueDateRaw) ?? Date())
-        let dueDate = dueDateRaw.isEmpty ? issueDate : (dateFormatter.date(from: dueDateRaw) ?? issueDate)
-        let precedingDate = precedingInvoiceDateRaw.flatMap { dateFormatter.date(from: $0) }
+        // Le jour du XML, lu dans le fuseau de l'app comme `CIIXMLGenerator` l'écrit : l'app
+        // affiche ce jour-là, et le régénérer redonne la même date.
+        let issueDate = issueDateRaw.isEmpty ? Date() : (DocumentDate.date(xmlString: issueDateRaw) ?? Date())
+        let dueDate = dueDateRaw.isEmpty ? issueDate : (DocumentDate.date(xmlString: dueDateRaw) ?? issueDate)
+        let precedingDate = precedingInvoiceDateRaw.flatMap { DocumentDate.date(xmlString: $0) }
 
         let plainNote = notes.first { $0.subjectCode == nil }?.content
         let pmt = notes.first { $0.subjectCode == "PMT" }?.content ?? ""
