@@ -263,23 +263,9 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         lines.reduce(0) { $0 + $1.lineTotal }.rounded(toPlaces: 2)
     }
 
-    public var vatBreakdown: [(rate: Double, category: VATCategory, exemptionReason: String?, basis: Double, amount: Double)] {
-        struct Key: Hashable { let rate: Double; let category: VATCategory }
-        var basisByKey: [Key: Double] = [:]
-        var reasonByKey: [Key: String] = [:]
-        for line in lines {
-            let key = Key(rate: line.vatRate, category: line.vatCategory)
-            basisByKey[key, default: 0] += line.lineTotal
-            if reasonByKey[key] == nil,
-               let reason = line.vatExemptionReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
-                reasonByKey[key] = reason
-            }
-        }
-        return basisByKey.map { (key, basis) in
-            let basisR = basis.rounded(toPlaces: 2)
-            let amount = (basisR * key.rate / 100).rounded(toPlaces: 2)
-            return (key.rate, key.category, reasonByKey[key], basisR, amount)
-        }.sorted { $0.rate < $1.rate }
+    /// Un sous-total par couple (taux, catégorie) : voir `VATBreakdownEntry`.
+    public var vatBreakdown: [VATBreakdownEntry] {
+        VATBreakdownEntry.breakdown(of: lines)
     }
 
     public var taxTotal: Double {

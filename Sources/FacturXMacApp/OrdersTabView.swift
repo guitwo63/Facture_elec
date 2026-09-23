@@ -877,7 +877,7 @@ struct OrderEditorView: View {
                                 .font(.caption)
                             }
                             VStack(alignment: .trailing) {
-                                ForEach(order.vatBreakdown, id: \.rate) { item in
+                                ForEach(order.vatBreakdown) { item in
                                     row("TVA \(String(format: "%g%%", item.rate))", item.amount)
                                 }
                                 row("Total TTC", order.grandTotal, bold: true)
