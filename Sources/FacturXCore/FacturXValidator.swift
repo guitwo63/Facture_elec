@@ -43,7 +43,7 @@ public struct FacturXValidator {
         let sellerHasEndpoint = (invoice.seller.endpointID?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         let sellerHasSiren = (invoice.seller.siren?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         if !sellerHasEndpoint && !sellerHasSiren {
-            errors.append("L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-49).")
+            errors.append("L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-34).")
         }
 
         if invoice.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -55,7 +55,7 @@ public struct FacturXValidator {
         let buyerHasEndpoint = (invoice.buyer.endpointID?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         let buyerHasSiren = (invoice.buyer.siren?.trimmingCharacters(in: .whitespaces).isEmpty ?? true) == false
         if !buyerHasEndpoint && !buyerHasSiren {
-            errors.append("Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-34).")
+            errors.append("Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-49).")
         }
 
         if invoice.lines.isEmpty {
@@ -85,12 +85,12 @@ public struct FacturXValidator {
 
         if invoice.seller.endpointID == nil || (invoice.seller.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
             if (invoice.seller.siren ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-                warnings.append("L'identifiant électronique de l'émetteur (BT-49) sera déduit du SIREN si renseigné.")
+                warnings.append("L'identifiant électronique de l'émetteur (BT-34) sera déduit du SIREN si renseigné.")
             }
         }
         if invoice.buyer.endpointID == nil || (invoice.buyer.endpointID ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
             if (invoice.buyer.siren ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-                warnings.append("L'identifiant électronique du destinataire (BT-34) sera déduit du SIREN si renseigné.")
+                warnings.append("L'identifiant électronique du destinataire (BT-49) sera déduit du SIREN si renseigné.")
             }
         }
 

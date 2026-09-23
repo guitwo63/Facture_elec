@@ -335,8 +335,8 @@ final class FacturXCoreTests: XCTestCase {
         var inv = sampleInvoice()
         inv.lines.append(InvoiceLine(name: "Ligne test", quantity: 1, unit: "C62", unitPrice: 100, vatRate: 20))
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertFalse(rules.contains { $0.ruleId == "BR-12" && $0.severity == .error },
-                       "BR-12 ne doit pas remonter si la somme des lignes est cohérente")
+        XCTAssertFalse(rules.contains { $0.ruleId == "BR-CO-10" && $0.severity == .error },
+                       "BR-CO-10 ne doit pas remonter si la somme des lignes est cohérente")
     }
 
     func testLuhnValidSiren() {
@@ -388,8 +388,8 @@ final class FacturXCoreTests: XCTestCase {
         var inv = sampleInvoice()
         inv.paymentIBAN = "FR7630006000011234567890188"
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertTrue(rules.contains { $0.ruleId == "BR-50" && $0.severity == .error },
-                     "BR-50 doit remonter une erreur pour un IBAN à clé invalide")
+        XCTAssertTrue(rules.contains { $0.ruleId == "BT-84-IBAN" && $0.severity == .error },
+                     "BT-84-IBAN doit remonter une erreur pour un IBAN à clé invalide")
     }
 
     func testBusinessRulesInvalidSiren() {
@@ -401,24 +401,24 @@ final class FacturXCoreTests: XCTestCase {
             endpointID: inv.seller.endpointID, endpointSchemeID: inv.seller.endpointSchemeID
         )
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertTrue(rules.contains { $0.ruleId == "BR-49" && $0.severity == .warning && $0.message.contains("SIREN") },
-                     "BR-49 doit avertir sur un SIREN émetteur invalide (clé Luhn)")
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-FR-10" && $0.severity == .warning && $0.message.contains("SIREN") },
+                     "BR-FR-10 doit avertir sur un SIREN émetteur invalide (clé Luhn)")
     }
 
     func testBusinessRulesUnknownCurrencyWarns() {
         var inv = sampleInvoice()
         inv.currency = "XXX"
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertTrue(rules.contains { $0.ruleId == "BR-5" && $0.severity == .warning },
-                     "BR-5 doit avertir pour une devise hors liste ISO 4217 de référence")
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-CL-04" && $0.severity == .warning },
+                     "BR-CL-04 doit avertir pour une devise hors liste ISO 4217 de référence")
     }
 
     func testBusinessRulesVATCategoryCoherence() {
         var inv = sampleInvoice()
         inv.lines = [InvoiceLine(name: "Ligne exonérée", quantity: 1, unit: "C62", unitPrice: 100, vatRate: 0)]
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertTrue(rules.contains { $0.ruleId == "BR-CO-16" },
-                     "BR-CO-16 doit signaler un taux nul pour inviter à vérifier l'exonération")
+        XCTAssertTrue(rules.contains { $0.ruleId == "BT-152-ZERO" },
+                     "BT-152-ZERO doit signaler un taux nul pour inviter à vérifier l'exonération")
     }
 
     // MARK: - Export enrichi
