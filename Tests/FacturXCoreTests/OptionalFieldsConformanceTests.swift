@@ -100,7 +100,13 @@ final class OptionalFieldsConformanceTests: XCTestCase {
     }
 
     private func everyCatalogueField(for template: OptionalFieldTemplate) -> OptionalField {
-        OptionalField(tagName: template.tagName, value: template.tagName == "ram:GlobalID" ? "3017620422003" : "VAL-\(template.bt)")
+        let value: String
+        switch template.bt {
+        case "BT-157": value = "3017620422003"
+        case "BT-80": value = "AT"
+        default: value = "VAL-\(template.bt)"
+        }
+        return OptionalField(tagName: template.tagName, value: value)
     }
 
     // MARK: - Catalogue : numéros BT de la norme EN 16931
@@ -113,6 +119,7 @@ final class OptionalFieldsConformanceTests: XCTestCase {
             "BT-15 ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID",
             "BT-16 ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID",
             "BT-17 ram:AdditionalReferencedDocument/ram:IssuerAssignedID",
+            "BT-80 ram:ShipToTradeParty/ram:PostalTradeAddress/ram:CountryID",
         ])
         XCTAssertEqual(OptionalFieldCatalogue.line.map { "\($0.bt) \($0.tagName)" }, [
             "BT-132 ram:BuyerOrderReferencedDocument/ram:LineID",

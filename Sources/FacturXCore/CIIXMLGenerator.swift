@@ -41,9 +41,10 @@ public struct CIIXMLGenerator {
 """
         // Le XSD impose l'avis d'expédition (BT-16) AVANT l'avis de réception (BT-15) : l'ordre
         // inverse, utilisé jusqu'ici, rendait le XML invalide dès que les deux étaient saisis.
+        // Le livré à (BT-80) vient en premier.
         let delivery = """
         <ram:ApplicableHeaderTradeDelivery>
-          <ram:ActualDeliverySupplyChainEvent>
+\(shipToXML(invoice))          <ram:ActualDeliverySupplyChainEvent>
             <ram:OccurrenceDateTime>
               <udt:DateTimeString format="102">\(issue)</udt:DateTimeString>
             </ram:OccurrenceDateTime>
@@ -284,6 +285,20 @@ public struct CIIXMLGenerator {
       <ram:ReceivingAdviceReferencedDocument>
         <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
       </ram:ReceivingAdviceReferencedDocument>
+"""
+    }
+    /// BT-80 : `ShipToTradeParty` réduit au pays, seule donnée de livraison que l'application
+    /// connaît (voir `Invoice.effectiveDeliveryCountry`). Se termine par un saut de ligne : le
+    /// XML d'une facture sans BT-80 reste identique à l'octet près.
+    private func shipToXML(_ invoice: Invoice) -> String {
+        guard let country = invoice.effectiveDeliveryCountry else { return "" }
+        return """
+          <ram:ShipToTradeParty>
+            <ram:PostalTradeAddress>
+              <ram:CountryID>\(escape(country))</ram:CountryID>
+            </ram:PostalTradeAddress>
+          </ram:ShipToTradeParty>
+
 """
     }
     private func despatchAdviceXML(_ invoice: Invoice) -> String {

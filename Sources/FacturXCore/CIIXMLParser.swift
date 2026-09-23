@@ -151,6 +151,7 @@ private final class Delegate: NSObject, XMLParserDelegate {
         case sellerParty, buyerParty, partyContact, partyAddress, partyLegalOrg, partyTaxReg, partyEndpoint
         case agreement, delivery, settlement
         case settlementTax, paymentMeans, paymentTerms, monetarySummation, invoiceReferenced
+        case shipToParty, shipToAddress
     }
 
     private enum PartyContext { case none, seller, buyer }
@@ -194,6 +195,9 @@ private final class Delegate: NSObject, XMLParserDelegate {
     private var procuringProjectID: String?
     private var receivingAdviceRef: String?
     private var despatchAdviceRef: String?
+    private var deliveryCountry: String?
+    /// Conteneur (livraison d'en-tête ou de ligne) d'où l'on est entré dans un `ShipToTradeParty`.
+    private var shipToParent: Container = .none
 
     private var currency = "EUR"
     private var paymentIBAN: String?
@@ -220,6 +224,14 @@ private final class Delegate: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
         text = ""
+        // Livré à (BG-13) : sous-arbre à part, dont seul le pays (BT-80, en en-tête) est lu. Ses
+        // éléments portent les noms de ceux du vendeur et de l'acheteur (nom, adresse, contact…) :
+        // les cas génériques les leur attribueraient, et la fermeture de son adresse basculait le
+        // conteneur sur l'acheteur, ce qui faisait perdre BT-15/BT-16, lus ensuite.
+        if container == .shipToParty || container == .shipToAddress {
+            if container == .shipToParty && elementName == "ram:PostalTradeAddress" { container = .shipToAddress }
+            return
+        }
         switch elementName {
         case "ram:BusinessProcessSpecifiedDocumentContextParameter": container = .businessProcessParam
         case "ram:GuidelineSpecifiedDocumentContextParameter": container = .guidelineParam
@@ -278,6 +290,9 @@ private final class Delegate: NSObject, XMLParserDelegate {
         case "ram:SpecifiedProcuringProject" where container == .agreement: pendingAgreementRef = .project
         case "ram:ReceivingAdviceReferencedDocument" where container == .delivery: pendingDeliveryRef = .receivingAdvice
         case "ram:DespatchAdviceReferencedDocument" where container == .delivery: pendingDeliveryRef = .despatchAdvice
+        case "ram:ShipToTradeParty" where container == .delivery || container == .lineDelivery:
+            shipToParent = container
+            container = .shipToParty
         default:
             break
         }
@@ -290,6 +305,16 @@ private final class Delegate: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         defer { text = "" }
+
+        if container == .shipToParty || container == .shipToAddress {
+            switch elementName {
+            case "ram:CountryID" where container == .shipToAddress && shipToParent == .delivery: deliveryCountry = value
+            case "ram:PostalTradeAddress" where container == .shipToAddress: container = .shipToParty
+            case "ram:ShipToTradeParty" where container == .shipToParty: container = shipToParent
+            default: break
+            }
+            return
+        }
 
         switch elementName {
         case "ram:ID" where container == .businessProcessParam: billingModeRaw = value
@@ -486,6 +511,7 @@ private final class Delegate: NSObject, XMLParserDelegate {
         invoice.tenderRef = tenderRef
         invoice.receivingAdviceRef = receivingAdviceRef
         invoice.despatchAdviceRef = despatchAdviceRef
+        invoice.deliveryCountry = deliveryCountry
 
         // BT-120 (motif d'exonération) est porté par la ventilation TVA d'en-tête (BG-23),
         // jamais par la ligne elle-même dans le XML que produit CIIXMLGenerator — voir la
