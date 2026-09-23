@@ -14,6 +14,9 @@ struct PartySection: View {
     let role: Role
     var onPartyPicked: ((InvoiceParty) -> Void)? = nil
     var locked: Bool = false
+    /// Société du document — ses préréglages de conditions de paiement sont proposés sur la
+    /// fiche émetteur (voir `PartyEditorView.companyID`).
+    var companyID: UUID? = nil
     @EnvironmentObject var directory: PartyDirectory
     @EnvironmentObject var superPDPSettings: SuperPDPSettings
     @State private var showPicker = false
@@ -69,7 +72,7 @@ struct PartySection: View {
                 }
             }
 
-            PartyEditorView(party: $party, isSociete: role == .seller, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) })
+            PartyEditorView(party: $party, isSociete: role == .seller, locked: locked, directory: directory, onPickContact: { updatePartyFromContact($0) }, onPickRouting: { updatePartyFromRouting($0) }, onPartyPicked: { p in onPartyPicked?(p) }, companyID: companyID)
         }
         .padding(8)
         .sheet(isPresented: $showSuperPDPSearch) {
@@ -1270,7 +1273,7 @@ struct DirectoryEditorView: View {
             }
 
             GroupBox("Identité et adresse") {
-                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kinds.contains(.societe), hideBankDetails: !entry.isPayee, hideElectronicAddress: entry.isSupplierOnly)
+                PartyEditorView(party: $entry.party, routingAddresses: $entry.routingAddresses, contacts: $entry.contacts, isSociete: entry.kinds.contains(.societe), hideBankDetails: !entry.isPayee, hideElectronicAddress: entry.isSupplierOnly, companyID: entry.kinds.contains(.societe) ? entry.id : nil)
             }
 
             if !tagStore.tags.isEmpty {

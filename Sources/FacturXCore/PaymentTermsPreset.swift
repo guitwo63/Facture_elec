@@ -176,8 +176,22 @@ public final class PaymentTermsPresetStore: ObservableObject {
 
     /// Variante par société — cherche aussi parmi les préréglages propres à `companyID`.
     public func matchingPresetID(for text: String?, companyID: UUID?) -> String? {
+        matchingPreset(for: text, companyID: companyID)?.id
+    }
+
+    /// Le préréglage actif d'un texte de conditions de paiement, tel que `companyID` l'a
+    /// personnalisé (texte et règle d'échéance lus dans `list(for:)`, jamais dans le réglage
+    /// global seul). `nil` = aucun préréglage de cette société ne correspond ("Personnalisé").
+    public func matchingPreset(for text: String?, companyID: UUID?) -> PaymentTermsPreset? {
         let trimmed = text?.trimmingCharacters(in: .whitespaces) ?? ""
         guard !trimmed.isEmpty else { return nil }
-        return list(for: companyID).first { $0.text == trimmed }?.id
+        return list(for: companyID).first { $0.text == trimmed }
+    }
+
+    /// Un préréglage par id dans la liste effective de `companyID` — pour appliquer le choix
+    /// fait dans un menu construit sur `list(for: companyID)`, y compris un préréglage propre
+    /// à cette société.
+    public func preset(id: String, companyID: UUID?) -> PaymentTermsPreset? {
+        list(for: companyID).first { $0.id == id }
     }
 }

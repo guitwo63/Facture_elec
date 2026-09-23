@@ -233,6 +233,10 @@ struct FullSettingsWizardView: View {
         }
     }
 
+    /// Édite volontairement le réglage global (`presets`), pas `list(for:)` : relire ici la
+    /// liste résolue sur la société principale puis l'écrire avec `upsert` recopierait ses
+    /// personnalisations dans le réglage commun à toutes les sociétés. La personnalisation par
+    /// société se fait dans Réglages > Tables.
     private var paymentTermsStep: some View {
         stepContainer(icon: "banknote", title: "Conditions de paiement") {
             Text("Préréglages proposés à la saisie sur les fiches société, avec calcul automatique de l'échéance. Modifiez le texte directement :")
