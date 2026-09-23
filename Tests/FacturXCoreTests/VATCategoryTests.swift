@@ -442,7 +442,7 @@ final class VATCategoryTests: XCTestCase {
         let both = rule(sellerVAT: "FR11123456782", buyerVAT: "FR14987654324")
         XCTAssertTrue(both?.message.contains("celui de l'émetteur (BT-31) et celui de l'acheteur (BT-48)") ?? false,
                       both?.message ?? "")
-        XCTAssertNil(rule(sellerVAT: nil, buyerVAT: " "), "un n° TVA vide n'est pas émis")
+        XCTAssertNil(rule(sellerVAT: nil, buyerVAT: " "), "un n° TVA blanc compte comme absent, comme pour BR-S-02 et BR-E-02")
         XCTAssertFalse(FacturXValidator().validate(invoice: makeInvoice([outOfScopeLine()], sellerVAT: "FR11123456782")).isValid)
     }
 
