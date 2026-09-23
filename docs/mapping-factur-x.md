@@ -39,7 +39,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `seller.siren` | `ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` (schéma 0002) | BT-30 | BR-FR-10 (9 chiffres, clé Luhn), BR-FR-13 (SIREN ou identifiant électronique) | avertissement (format) / erreur (ni l'un ni l'autre) |
 | `seller.siret` | — (non émis ; serait le BT-29, schéma 0009) | — | BR-FR-09 (14 chiffres, clé Luhn) | avertissement |
 | `seller.endpointID` | `ram:SellerTradeParty/ram:URIUniversalCommunication/ram:URIID` (schéma 0225 ; déduit du SIREN si vide) | BT-34 | BR-FR-13 | erreur |
-| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | BR-CO-09 (préfixe pays), BR-S-02 / BR-E-02 (obligatoire avec une ligne S / E) | erreur |
+| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | BR-CO-09 (préfixe pays), BR-S-02 / BR-E-02 (obligatoire avec une ligne S / E), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
 | `seller.street` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:LineOne` | BT-35 | — | — |
 | `seller.postcode` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode` | BT-38 | — | — |
 | `seller.city` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:CityName` | BT-37 | — | — |
@@ -52,7 +52,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `buyer.siren` | `ram:BuyerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` (schéma 0002) | BT-47 | BR-FR-32 (9 chiffres, clé Luhn ; BR-FR-11 ne vaut qu'avec une note BAR = B2B, non émise), BR-FR-12 (SIREN ou identifiant électronique) | avertissement (format) / erreur (ni l'un ni l'autre) |
 | `buyer.siret` | — (non émis ; serait le BT-46, schéma 0009) | — | BR-FR-09 (14 chiffres, clé Luhn) | avertissement |
 | `buyer.endpointID` | `ram:BuyerTradeParty/ram:URIUniversalCommunication/ram:URIID` (schéma 0225 ; déduit du SIREN si vide) | BT-49 | BR-FR-12 | erreur |
-| `buyer.vatNumber` | `ram:BuyerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-48 | BR-CO-09 (préfixe pays) | erreur |
+| `buyer.vatNumber` | `ram:BuyerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-48 | BR-CO-09 (préfixe pays), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
 | `buyer.street` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:LineOne` | BT-50 | — | — |
 | `buyer.postcode` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode` | BT-53 | — | — |
 | `buyer.city` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CityName` | BT-52 | — | — |
@@ -70,8 +70,8 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `line.quantity` | `ram:SpecifiedLineTradeDelivery/ram:BilledQuantity` | BT-129 | BT-129-POSITIVE (contrôle interne : EN 16931 admet une quantité nulle ou négative) | erreur |
 | `line.unit` | `ram:BilledQuantity/@unitCode` (C62 si vide) | BT-130 | BR-23 | avertissement |
 | `line.unitPrice` | `ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount` | BT-146 | BR-27 | erreur |
-| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) ; BR-FR-16 (taux hors de la liste des taux français) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; erreur ; avertissement |
-| `line.vatCategory` (déduit du taux) | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | — | — |
+| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` (absent en catégorie O : BR-O-05) | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) ; BR-FR-16 (taux hors de la liste des taux français) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; erreur ; avertissement |
+| `line.vatCategory` (déduit du taux) | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | BR-O-12 (une ligne O exclut toute autre catégorie, hors EXTENDED) | erreur |
 | `line.vatExemptionReason` | `ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:ExemptionReason` (ventilation de TVA) | BT-120 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | erreur |
 | `line.lineTotal` | `ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount` | BT-131 | BT-131-CALCUL (contrôle interne : quantité × prix unitaire) | erreur |
 | `line.orderReference` | — (usage interne : rattachement aux commandes, exports ; non émis) | — | — | — |
@@ -115,6 +115,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-CO-14 | total TVA (BT-110) | erreur | Total TVA ≠ somme des montants de TVA par taux (BT-117) |
 | BR-CO-15 | total TTC (BT-112) | erreur | Total TTC ≠ total HT (BT-109) + total TVA (BT-110) |
 | BR-S-02 / BR-E-02 | n° TVA émetteur (BT-31) | erreur | Obligatoire avec une ligne à TVA normale (S) / exonérée (E) |
+| BR-O-02 / BR-O-12 | n° TVA (BT-31, BT-48) / catégorie de TVA (BT-151) | erreur | Facture avec une ligne hors champ de TVA (O), hors EXTENDED : aucun n° TVA ; aucune ligne d'une autre catégorie (BR-O-11 : une seule ventilation) |
 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 | taux de TVA (BT-152) | erreur | Taux non nul avec une catégorie autre que S (catégorie K : règles BR-IC-*) |
 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | motif d'exonération (BT-120) | erreur | Motif obligatoire pour la catégorie de TVA (BT-151) de la ligne |
 | BR-FR-04 | code type (BT-3) | — | Respectée à l'émission : 387 émis en 380, INT en 381 |
@@ -149,6 +150,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 - **internalCreditNote** (INT) : émis en `381` (avoir) dans le CII pour la conformité.
 - **TotalPrepaidAmount** : doit suivre `GrandTotalAmount` dans l'ordre du XSD (sinon erreur de validation).
 - **Taux de TVA** (BT-119, BT-152, `RateApplicablePercent`) : « 20 » pour un taux entier, « 5.50 » sinon (idem Order-X). Le BR-FR-16 du Schematron France CTC (fatal) compare la chaîne à une liste fermée où « 5.5 » et « 5.50 » passent, mais pas « 5.500 » ni « 6 » ; le contrôle BR-FR-16 de l'app compare cette même chaîne (`CIIXMLGenerator.xmlRate`) à la liste et bloque l'export, sauf sur une facture reçue, où seul un taux négatif est signalé. Jusqu'au 2026-09-23, 5,5 % était émis « 6 » : `rate.rounded()` appelait l'extension `Double.rounded(toPlaces:)` du module, qui n'a plus de valeur par défaut.
+- **Catégorie O (hors champ de TVA)** : ni taux de ligne (BT-152, interdit par BR-O-05 dans les Schematron EN16931 comme EXTENDED) ni taux de ventilation (BT-119 : facultatif, BR-48 exemptant O ; omis par cohérence) ; le modèle garde `vatRate` = 0 et `CIIXMLParser` relit une ligne sans taux à 0 % hors catégorie S. BR-O-02 et BR-O-11/12 n'existent que dans le Schematron EN16931, d'où leur blocage hors EXTENDED. Vérifié le 2026-09-23 (XSD, Schematron EN16931, EXTENDED, EXTENDED-CTC-FR et France CTC). Avertissement EXTENDED connu, non bloquant et antérieur, aussi en catégorie E : BR-FXEXT-<catégorie>-08rev regroupe les lignes par motif d'exonération porté sur la ligne, que le générateur n'émet que dans la ventilation.
 - Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-CO-10/14/15, et BR-CO-16 respectée par construction) ne sont pas mappées à un champ d'encadré.
 
 

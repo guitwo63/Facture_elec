@@ -86,7 +86,9 @@ private struct LineBuilder {
     var quantity: Double = 1
     var unit = "C62"
     var unitPrice: Double = 0
-    var vatRate: Double = 20
+    /// `nil` tant que `ram:RateApplicablePercent` n'est pas lu : une ligne O n'en porte pas
+    /// (BR-O-05). Voir `build()`.
+    var vatRate: Double?
     var vatCategory: VATCategory = .standard
     var globalID: String?
     var sellerAssignedID: String?
@@ -117,9 +119,11 @@ private struct LineBuilder {
         if let c = contractRef, !c.isEmpty {
             fields.append(OptionalField(tagName: "ram:ContractReferencedDocument/ram:IssuerAssignedID", value: c))
         }
+        // Sans taux, toute catégorie autre que S vaut 0 % (le modèle n'en admet pas d'autre) :
+        // les 20 % par défaut d'avant faisaient d'une ligne O une ligne à 20 % de TVA.
         return InvoiceLine(
             name: name, description: description, quantity: quantity, unit: unit,
-            unitPrice: unitPrice, vatRate: vatRate, vatCategory: vatCategory,
+            unitPrice: unitPrice, vatRate: vatRate ?? (vatCategory == .standard ? 20 : 0), vatCategory: vatCategory,
             optionalFields: fields
         )
     }
