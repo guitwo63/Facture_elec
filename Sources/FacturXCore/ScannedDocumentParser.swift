@@ -143,7 +143,9 @@ public enum ScannedDocumentParser {
                 description = String(description[fullQtyRange.upperBound...]).trimmingCharacters(in: .whitespaces)
             }
             guard !description.isEmpty else { continue }
-            let unitPrice = ((amount / quantity) * 100).rounded() / 100
+            // 4 décimales, la précision du prix unitaire dans le XML : arrondi au centime,
+            // « 12 x Vis 1,00 » donnerait 0,08 € pièce et une ligne à 0,96 €.
+            let unitPrice = (amount / quantity).rounded(toPlaces: 4)
             result.append(InvoiceLine(name: description, quantity: quantity, unitPrice: unitPrice, vatRate: 20))
         }
         return result
