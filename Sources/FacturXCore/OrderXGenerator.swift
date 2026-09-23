@@ -2,7 +2,7 @@ import Foundation
 
 /// Façade : génère une commande Order-X complète à partir d'un modèle SalesOrder.
 /// Produit un PDF lisible (rendu CoreGraphics) + CIO XML (D20B)
-/// embarqué dans un conteneur PDF/A-3 avec XMP Order-X (fx:DocumentType=ORDER).
+/// embarqué dans un conteneur PDF/A-3 avec XMP Order-X (fx:DocumentType selon le type de document).
 public struct OrderXGenerator {
     public init() {}
 
