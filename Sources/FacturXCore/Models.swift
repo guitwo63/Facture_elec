@@ -345,7 +345,7 @@ public enum VATCategory: String, Codable, CaseIterable {
         }
     }
 
-    /// BR-E-05/BR-AE-05/BR-G-05/BR-K-05/BR-O-05 (EN16931) : un motif
+    /// BR-E-10/BR-AE-10/BR-IC-10/BR-G-10/BR-O-10 (EN16931) : un motif
     /// d'exonération (BT-120) est obligatoire pour ces catégories.
     public var requiresExemptionReason: Bool {
         switch self {

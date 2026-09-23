@@ -116,7 +116,7 @@ final class VATCategoryTests: XCTestCase {
             InvoiceLine(name: "Prestation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .reverseCharge)
         ])
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertTrue(rules.contains { $0.ruleId == "BR-AE-05" && $0.severity == .error },
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-AE-10" && $0.severity == .error },
                      "un motif d'exonération est obligatoire pour l'autoliquidation")
     }
 
@@ -126,7 +126,7 @@ final class VATCategoryTests: XCTestCase {
                         vatExemptionReason: "Autoliquidation, article 283-2 du CGI")
         ])
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertFalse(rules.contains { $0.ruleId == "BR-AE-05" })
+        XCTAssertFalse(rules.contains { $0.ruleId == "BR-AE-10" })
     }
 
     func testBusinessRulesDoNotRequireReasonForZeroRatedOrStandard() {
@@ -135,7 +135,8 @@ final class VATCategoryTests: XCTestCase {
             InvoiceLine(name: "Zéro-rated", quantity: 1, unitPrice: 50, vatRate: 0, vatCategory: .zeroRated)
         ])
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertFalse(rules.contains { $0.ruleId.hasSuffix("-05") })
+        // Ni motif d'exonération exigé (BR-<cat>-10) ni taux incohérent (BR-<cat>-05).
+        XCTAssertFalse(rules.contains { ["BR-S-10", "BR-Z-10", "BR-Z-05"].contains($0.ruleId) })
     }
 
     /// Régression : repérée en conditions réelles via SUPER PDP (rejet BR-Z-05/BR-Z-09) sur une
@@ -158,7 +159,7 @@ final class VATCategoryTests: XCTestCase {
                         vatExemptionReason: "Autoliquidation, article 283-2 du CGI")
         ])
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertTrue(rules.contains { $0.ruleId == "BR-AE-RATE" && $0.severity == .error },
+        XCTAssertTrue(rules.contains { $0.ruleId == "BR-AE-05" && $0.severity == .error },
                      "toute catégorie non standard implique un taux nul, même quand le motif d'exonération est renseigné")
     }
 

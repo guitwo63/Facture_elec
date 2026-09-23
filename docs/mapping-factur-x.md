@@ -4,15 +4,17 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 
 **Colonne Règle** : identifiant de la règle qui s'applique au champ (vide = pas de règle spécifique). Les règles en **erreur** bloquent la conformité ; celles en *avertissement* sont signalées sans bloquer.
 
+**Sources des numéros** : numéros BT/BG du modèle sémantique EN 16931 et identifiants de règle tels que les citent les Schematron officiels fournis par le paquet PyPI `factur-x` — EN 16931 : `facturx-en16931/Factur-X_1.09_EN16931.xsl` (les numéros à un chiffre s'y écrivent BR-01…BR-09) ; France CTC : `cii-schematron-fr-ctc/BR-FR-Flux2-Schematron-CII.xslt` (BR-FR-*). BR-CL-04 (liste ISO 4217 des devises), sans identifiant dans le Schematron Factur-X EN16931, est nommée dans les artefacts CEN du même paquet (`cii-extended-ctc-fr/EXTENDED-CTC-FR-CII.xslt`). Un contrôle propre à l'application, sans règle officielle, porte un identifiant interne « BT-<n>-<MOTIF> » (n = terme métier contrôlé), jamais un BR-xx qui désignerait une autre règle officielle.
+
 ## En-tête de facture
 
 | Champ application | Balise CII / UBL | BT/BG | Règle | Sévérité |
 |---|---|---|---|---|
-| `invoice.number` | `rsm:ExchangedDocument/ram:ID` | BT-1 | BR-1 | erreur |
-| `invoice.type` | `rsm:ExchangedDocument/ram:TypeCode` | BT-3 | BR-FR-04 | avertissement (387 → 380) |
-| `invoice.issueDate` | `rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString` | BT-2 | BR-2 | avertissement |
+| `invoice.number` | `rsm:ExchangedDocument/ram:ID` | BT-1 | BR-02 | erreur |
+| `invoice.type` | `rsm:ExchangedDocument/ram:TypeCode` | BT-3 | BR-FR-04 | — (respectée à l'émission : 387 émis en 380, INT en 381) |
+| `invoice.issueDate` | `rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString` | BT-2 | BT-2-FUTURE (contrôle interne) | avertissement (date future) |
 | `invoice.dueDate` | `ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime` | BT-9 | BR-FR-CO-07 | erreur (sauf acompte 386 et cadres B2/S2/M2) |
-| `invoice.currency` | `ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode` | BT-5 | BR-5 | erreur |
+| `invoice.currency` | `ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode` | BT-5 | BR-05 (présence), BR-CL-04 (code ISO 4217) | erreur (code absent de la liste de référence : avertissement) |
 | `invoice.profile` | `ram:GuidelineSpecifiedDocumentContextParameter/ram:ID` | BT-24 | BR-PROFIL | erreur (MINIMUM, BASIC WL, BASIC) |
 | `invoice.billingMode` | `ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID` | BT-23 | BR-FR-CO-08, BR-FR-CO-09, BR-FR-MV-02, BR-FR-BD-02 | erreur |
 | `invoice.buyerReference` | `ram:BuyerReference` | BT-10 | — | — |
@@ -21,34 +23,36 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `invoice.tenderRef` | `ram:AdditionalReferencedDocument/ram:IssuerAssignedID` + `ram:TypeCode` = `50` | BT-17 | — | — |
 | `invoice.receivingAdviceRef` | `ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID` | BT-15 | — | — |
 | `invoice.despatchAdviceRef` | `ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID` | BT-16 | — | — |
-| `invoice.precedingInvoiceRef` | `ram:ApplicableHeaderTradeSettlement/.../ram:IssuerAssignedID` (invoiceReferencedXML) | BT-25 | BR-FR-CO-05 | erreur |
-| `invoice.precedingInvoiceDate` | `ram:ApplicableHeaderTradeSettlement/.../ram:FormattedIssueDateTime` | BT-26 | BR-FR-CO-05 | erreur |
+| `invoice.precedingInvoiceRef` | `ram:ApplicableHeaderTradeSettlement/.../ram:IssuerAssignedID` (invoiceReferencedXML) | BT-25 | BR-FR-CO-04 (rectificative 384), BR-FR-CO-05 (avoir 381), BT-25-SOLDE (facture de solde, contrôle interne) | erreur |
+| `invoice.precedingInvoiceDate` | `ram:ApplicableHeaderTradeSettlement/.../ram:FormattedIssueDateTime` | BT-26 | BR-FR-CO-04, BR-FR-CO-05, BT-25-SOLDE | erreur |
 | `invoice.notes` | `ram:IncludedNote/ram:Content` (sans SubjectCode) | BT-22 | — | — |
-| `invoice.legalNotePMT` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMT` | BT-21 (PMT) | BR-FR-05 | avertissement |
-| `invoice.legalNotePMD` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMD` | BT-21 (PMD) | BR-FR-05 | avertissement |
-| `invoice.legalNoteAAB` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `AAB` | BT-21 (AAB) | BR-FR-05 | avertissement |
+| `invoice.legalNotePMT` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMT` | BT-22 (BT-21 = PMT) | BR-FR-05 | avertissement |
+| `invoice.legalNotePMD` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `PMD` | BT-22 (BT-21 = PMD) | BR-FR-05 | avertissement |
+| `invoice.legalNoteAAB` | `ram:IncludedNote/ram:Content` + `ram:SubjectCode` = `AAB` | BT-22 (BT-21 = AAB) | BR-FR-05 | avertissement |
 
 ## Émetteur / Destinataire (Party)
 
 | Champ application | Balise CII | BT/BG | Règle | Sévérité |
 |---|---|---|---|---|
-| `seller.name` | `ram:SellerTradeParty/ram:Name` | BT-27 | BR-6 | erreur |
-| `seller.country` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:CountryID` | BT-40 | BR-7 | erreur |
-| `seller.siren` | `ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` | BT-30 | BR-49 | erreur |
-| `seller.endpointID` | `ram:SellerTradeParty/ram:URIUniversalCommunication/ram:URIID` | BT-49 | BR-49 | erreur |
-| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | — | — |
+| `seller.name` | `ram:SellerTradeParty/ram:Name` | BT-27 | BR-06 | erreur |
+| `seller.country` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:CountryID` | BT-40 | BR-09 | erreur |
+| `seller.siren` | `ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` (schéma 0002) | BT-30 | BR-FR-10 (9 chiffres, clé Luhn), BR-FR-13 (SIREN ou identifiant électronique) | avertissement (format) / erreur (ni l'un ni l'autre) |
+| `seller.siret` | — (non émis ; serait le BT-29, schéma 0009) | — | BR-FR-09 (14 chiffres, clé Luhn) | avertissement |
+| `seller.endpointID` | `ram:SellerTradeParty/ram:URIUniversalCommunication/ram:URIID` (schéma 0225 ; déduit du SIREN si vide) | BT-34 | BR-FR-13 | erreur |
+| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | BR-CO-09 (préfixe pays), BR-S-02 / BR-E-02 (obligatoire avec une ligne S / E) | erreur |
 | `seller.street` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:LineOne` | BT-35 | — | — |
 | `seller.postcode` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode` | BT-38 | — | — |
 | `seller.city` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:CityName` | BT-37 | — | — |
 | `seller.contactName` | `ram:SellerTradeParty/ram:DefinedTradeContact/ram:PersonName` | BT-41 | — | — |
 | `seller.contactPhone` | `ram:SellerTradeParty/ram:DefinedTradeContact/ram:TelephoneUniversalCommunication` | BT-42 | — | — |
 | `seller.contactEmail` | `ram:SellerTradeParty/ram:DefinedTradeContact/ram:EmailURIUniversalCommunication` | BT-43 | — | — |
-| `seller.iban` | `ram:PayeePartyCreditorFinancialAccount/ram:IBANID` (paiement) | BT-90 | BR-50 | avertissement (longueur) |
-| `buyer.name` | `ram:BuyerTradeParty/ram:Name` | BT-44 | BR-25 | erreur |
-| `buyer.country` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CountryID` | BT-55 | BR-26 | erreur |
-| `buyer.siren` | `ram:BuyerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` | BT-47 | BR-46 | erreur |
-| `buyer.endpointID` | `ram:BuyerTradeParty/ram:URIUniversalCommunication/ram:URIID` | BT-34 | BR-46 | erreur |
-| `buyer.vatNumber` | `ram:BuyerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-48 | — | — |
+| `seller.iban` | recopié dans `invoice.paymentIBAN` au choix du tiers (voir Paiement) | BT-84 | BT-84-IBAN (contrôle interne) | voir Paiement |
+| `buyer.name` | `ram:BuyerTradeParty/ram:Name` | BT-44 | BR-07 | erreur |
+| `buyer.country` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CountryID` | BT-55 | BR-11 | erreur |
+| `buyer.siren` | `ram:BuyerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` (schéma 0002) | BT-47 | BR-FR-32 (9 chiffres, clé Luhn ; BR-FR-11 ne vaut qu'avec une note BAR = B2B, non émise), BR-FR-12 (SIREN ou identifiant électronique) | avertissement (format) / erreur (ni l'un ni l'autre) |
+| `buyer.siret` | — (non émis ; serait le BT-46, schéma 0009) | — | BR-FR-09 (14 chiffres, clé Luhn) | avertissement |
+| `buyer.endpointID` | `ram:BuyerTradeParty/ram:URIUniversalCommunication/ram:URIID` (schéma 0225 ; déduit du SIREN si vide) | BT-49 | BR-FR-12 | erreur |
+| `buyer.vatNumber` | `ram:BuyerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-48 | BR-CO-09 (préfixe pays) | erreur |
 | `buyer.street` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:LineOne` | BT-50 | — | — |
 | `buyer.postcode` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode` | BT-53 | — | — |
 | `buyer.city` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CityName` | BT-52 | — | — |
@@ -61,70 +65,81 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | Champ application | Balise CII | BT/BG | Règle | Sévérité |
 |---|---|---|---|---|
 | `line.id` (index) | `ram:AssociatedDocumentLineDocument/ram:LineID` | BT-126 | — | — |
-| `line.name` | `ram:SpecifiedTradeProduct/ram:Name` | BT-153 | BR-21 | erreur |
+| `line.name` | `ram:SpecifiedTradeProduct/ram:Name` | BT-153 | BR-25 | erreur |
 | `line.description` | `ram:SpecifiedTradeProduct/ram:Description` | BT-154 | — | — |
-| `line.quantity` | `ram:SpecifiedLineTradeDelivery/ram:BilledQuantity` | BT-129 | BR-16 | erreur |
-| `line.unit` | `ram:BilledQuantity/@unitCode` | BT-130 | BR-20 | avertissement |
-| `line.unitPrice` | `ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount` | BT-146 | BR-17 | erreur |
-| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` | BT-151 | BR-FR-06 | avertissement (négatif) |
+| `line.quantity` | `ram:SpecifiedLineTradeDelivery/ram:BilledQuantity` | BT-129 | BT-129-POSITIVE (contrôle interne : EN 16931 admet une quantité nulle ou négative) | erreur |
+| `line.unit` | `ram:BilledQuantity/@unitCode` (C62 si vide) | BT-130 | BR-23 | avertissement |
+| `line.unitPrice` | `ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount` | BT-146 | BR-27 | erreur |
+| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) ; BR-FR-16 (taux négatif) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; avertissement ; avertissement |
 | `line.vatCategory` (déduit du taux) | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | — | — |
-| `line.lineTotal` | `ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount` | BT-149 | BR-27 | erreur |
+| `line.vatExemptionReason` | `ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:ExemptionReason` (ventilation de TVA) | BT-120 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | erreur |
+| `line.lineTotal` | `ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount` | BT-131 | BT-131-CALCUL (contrôle interne : quantité × prix unitaire) | erreur |
 | `line.orderReference` | — (usage interne : rattachement aux commandes, exports ; non émis) | — | — | — |
 
 ## Totaux (SpecifiedTradeSettlementHeaderMonetarySummation)
 
 | Champ application | Balise CII | BT/BG | Règle | Sévérité |
 |---|---|---|---|---|
-| `invoice.lineTotal` (calculé) | `ram:LineTotalAmount` | BT-106 | BR-12 | erreur |
-| `invoice.lineTotal` (base TVA) | `ram:TaxBasisTotalAmount` | BT-116 | — | — |
-| `invoice.taxTotal` (calculé) | `ram:TaxTotalAmount` | BT-110 | BR-53 | erreur |
-| `invoice.grandTotal` (calculé) | `ram:GrandTotalAmount` | BT-112 | BR-13 | erreur |
-| `invoice.prepaidAmount` | `ram:TotalPrepaidAmount` | BT-113 | BR-AC-01 | avertissement (solde) |
-| `invoice.netToPay` (calculé) | `ram:DuePayableAmount` | BT-115 | BR-CO-16 | erreur (cohérence) |
+| `invoice.lineTotal` (calculé) | `ram:LineTotalAmount` | BT-106 | BR-CO-10 | erreur |
+| `invoice.lineTotal` (base TVA) | `ram:TaxBasisTotalAmount` | BT-109 | — | — |
+| `invoice.taxTotal` (calculé) | `ram:TaxTotalAmount` | BT-110 | BR-CO-14 | erreur |
+| `invoice.grandTotal` (calculé) | `ram:GrandTotalAmount` | BT-112 | BR-CO-15 | erreur |
+| `invoice.prepaidAmount` | `ram:TotalPrepaidAmount` | BT-113 | BT-113-SOLDE (facture de solde, contrôle interne) ; BR-FR-CO-09 (cadre 2) | avertissement ; erreur |
+| `invoice.netToPay` (calculé) | `ram:DuePayableAmount` | BT-115 | BR-CO-16 | — (respectée par construction, non contrôlée) |
 
 ## Paiement (SpecifiedTradeSettlementPaymentMeans)
 
 | Champ application | Balise CII | BT/BG | Règle | Sévérité |
 |---|---|---|---|---|
-| `invoice.paymentIBAN` | `ram:PayeePartyCreditorFinancialAccount/ram:IBANID` | BT-90 | BR-50 | avertissement |
-| `invoice.paymentBIC` | `ram:PayeeSpecifiedCreditorFinancialInstitution/ram:BICID` | BT-91 | BR-50 | avertissement |
+| `invoice.paymentIBAN` | `ram:PayeePartyCreditorFinancialAccount/ram:IBANID` | BT-84 | BT-84-IBAN (contrôle interne : BR-50/BR-61 n'exigent que la présence) | erreur (clé mod 97) / avertissement (longueur, casse) |
+| `invoice.paymentBIC` | `ram:PayeeSpecifiedCreditorFinancialInstitution/ram:BICID` | BT-86 | — | — |
 | `invoice.paymentTerms` | `ram:SpecifiedTradePaymentTerms/ram:Description` | BT-20 | — | — |
 
 ## Récapitulatif des règles métier
 
 | Règle | Champ concerné | Sévérité | Message |
 |---|---|---|---|
-| BR-1 | numéro (BT-1) | erreur | Numéro de facture obligatoire |
-| BR-2 | date émission (BT-2) | avertissement | Date postérieure à aujourd'hui |
-| BR-5 | devise (BT-5) | erreur | Devise obligatoire (ISO 4217) |
-| BR-6 | nom émetteur (BT-27) | erreur | Nom de l'émetteur obligatoire |
-| BR-7 | pays émetteur (BT-40) | erreur | Pays de l'émetteur obligatoire |
-| BR-13 | total TTC (BT-112) | erreur | Total TTC ≠ HT + TVA |
-| BR-12 | total HT (BT-106) | erreur | Total HT ≠ somme des lignes |
-| BR-15 | lignes (BG-25) | erreur | Au moins une ligne obligatoire |
-| BR-16 | quantité (BT-129) | erreur | Quantité doit être positive |
-| BR-17 | prix unitaire (BT-146) | erreur | Prix unitaire non négatif |
-| BR-20 | unité (BT-130) | avertissement | Unité non renseignée |
-| BR-21 | désignation (BT-153) | erreur | Désignation obligatoire |
-| BR-25 | nom destinataire (BT-44) | erreur | Nom du destinataire obligatoire |
-| BR-26 | pays destinataire (BT-55) | erreur | Pays du destinataire obligatoire |
-| BR-27 | total ligne (BT-149) | erreur | Total ligne ≠ quantité × prix |
-| BR-46 | SIREN/endpoint destinataire (BT-34) | erreur | Identifiant destinataire obligatoire |
-| BR-49 | SIREN/endpoint émetteur (BT-49) | erreur | Identifiant émetteur obligatoire |
-| BR-50 | IBAN (BT-90) | avertissement | Longueur/majuscules IBAN |
-| BR-53 | total TVA (BT-110) | erreur | Total TVA ≠ somme par taux |
-| BR-AC-01 | acompte payé (BT-113) | avertissement | Solde : acompte attendu |
-| BR-CO-16 | net à payer (BT-115) | erreur | BT-115 = BT-112 − BT-113 + BT-114 |
-| BR-FR-04 | code type (BT-3) | avertissement | Code type non admis flux FR |
-| BR-FR-05 | mentions légales (BT-21) | avertissement | Mentions PMT/PMD/AAB obligatoires FR |
-| BR-FR-06 | taux TVA (BT-151) | avertissement | Taux négatif inhabituel |
-| BR-FR-CO-05 | facture antérieure (BT-25/26) | erreur | Référence + date obligatoires |
+| BR-02 | numéro (BT-1) | erreur | Numéro de facture obligatoire |
+| BR-05 | devise (BT-5) | erreur | Devise obligatoire |
+| BR-06 | nom émetteur (BT-27) | erreur | Nom de l'émetteur obligatoire |
+| BR-07 | nom destinataire (BT-44) | erreur | Nom du destinataire obligatoire |
+| BR-09 | pays émetteur (BT-40) | erreur | Pays de l'émetteur obligatoire |
+| BR-11 | pays destinataire (BT-55) | erreur | Pays du destinataire obligatoire |
+| BR-16 | lignes (BG-25) | erreur | Au moins une ligne obligatoire |
+| BR-23 | unité (BT-130) | avertissement | Unité non renseignée (C62 émis par défaut) |
+| BR-25 | désignation (BT-153) | erreur | Désignation obligatoire |
+| BR-27 | prix unitaire (BT-146) | erreur | Prix unitaire non négatif |
+| BR-CL-04 | devise (BT-5) | erreur / avertissement | Code ISO 4217 à 3 lettres ; avertissement si absent de la liste de référence |
+| BR-CO-09 | n° TVA émetteur / destinataire (BT-31 / BT-48) | erreur | Préfixe pays ISO 3166-1 alpha-2 (EL admis pour la Grèce) |
+| BR-CO-10 | total HT (BT-106) | erreur | Total HT ≠ somme des montants nets de ligne (BT-131) |
+| BR-CO-14 | total TVA (BT-110) | erreur | Total TVA ≠ somme des montants de TVA par taux (BT-117) |
+| BR-CO-15 | total TTC (BT-112) | erreur | Total TTC ≠ total HT (BT-109) + total TVA (BT-110) |
+| BR-S-02 / BR-E-02 | n° TVA émetteur (BT-31) | erreur | Obligatoire avec une ligne à TVA normale (S) / exonérée (E) |
+| BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 | taux de TVA (BT-152) | erreur | Taux non nul avec une catégorie autre que S (catégorie K : règles BR-IC-*) |
+| BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | motif d'exonération (BT-120) | erreur | Motif obligatoire pour la catégorie de TVA (BT-151) de la ligne |
+| BR-FR-04 | code type (BT-3) | — | Respectée à l'émission : 387 émis en 380, INT en 381 |
+| BR-FR-05 | mentions légales (BT-22, BT-21 = PMT/PMD/AAB) | avertissement | Mentions PMT/PMD/AAB obligatoires FR |
+| BR-FR-09 | SIRET émetteur / destinataire | avertissement | 14 chiffres, clé Luhn (SIRET non émis dans le XML) |
+| BR-FR-10 | SIREN émetteur (BT-30) | avertissement | 9 chiffres, clé Luhn |
+| BR-FR-12 | identifiant électronique destinataire (BT-49) | erreur | SIREN ou identifiant électronique obligatoire (BT-49 déduit du SIREN si vide) |
+| BR-FR-13 | identifiant électronique émetteur (BT-34) | erreur | SIREN ou identifiant électronique obligatoire (BT-34 déduit du SIREN si vide) |
+| BR-FR-16 | taux de TVA (BT-152) | avertissement | Taux négatif, absent de la liste des taux admis en France |
+| BR-FR-32 | SIREN destinataire (BT-47) | avertissement | 9 chiffres (schéma 0002), clé Luhn |
+| BR-FR-CO-04 | facture antérieure (BT-25/26) | erreur | Facture rectificative (384) : référence + date obligatoires |
+| BR-FR-CO-05 | facture antérieure (BT-25/26) | erreur | Avoir (381) : référence + date obligatoires |
 | BR-FR-CO-07 | échéance (BT-9) | erreur | Échéance antérieure à la date de facture (BT-2), au jour près dans le XML ; admise seulement pour un acompte (386) ou un cadre déjà payée (B2/S2/M2) |
 | BR-FR-CO-08 | cadre de facturation (BT-23) | erreur | Cadre 4 (définitive après acompte) interdit sur un acompte (386) |
 | BR-FR-CO-09 | cadre de facturation (BT-23) | erreur / avertissement | Cadre 2 (déjà payée) : montant payé (BT-113) = total TTC, net à payer nul ; rappel : échéance = date du paiement |
 | BR-FR-MV-02 / BR-FR-BD-02 | cadre de facturation (BT-23) | erreur | Cadres 8 (multi-vendeurs) / 9 (bidirectionnel) : lignes GROUP non produites par l'app |
+| BT-2-FUTURE | date d'émission (BT-2) | avertissement | Date postérieure à aujourd'hui — contrôle interne |
+| BT-25-SOLDE | facture antérieure (BT-25/26) | erreur | Facture de solde (émise en 380) : référence à l'acompte obligatoire — contrôle interne |
+| BT-84-IBAN | IBAN (BT-84) | erreur / avertissement | Clé mod 97 ; longueur, casse — contrôle interne |
+| BT-113-SOLDE | montant déjà payé (BT-113) | avertissement | Facture de solde sans montant d'acomptes — contrôle interne |
+| BT-129-POSITIVE | quantité (BT-129) | erreur | Quantité doit être positive — contrôle interne |
+| BT-131-CALCUL | montant net de ligne (BT-131) | erreur | Montant net ≠ quantité × prix unitaire — contrôle interne |
+| BT-152-ZERO | taux de TVA (BT-152) | avertissement | Taux nul en catégorie Z : vérifier l'exonération — contrôle interne |
 | BT-157-GTIN | identifiant normalisé de l'article (BT-157) | avertissement | Valeur qui n'est pas un GTIN (émise avec le schéma 0160) — contrôle interne |
-| BR-PROFIL | profil (BT-24) | erreur | Profil MINIMUM, BASIC WL ou BASIC : XML non conforme au XSD du profil, export bloqué |
+| BR-PROFIL | profil (BT-24) | erreur | Profil MINIMUM, BASIC WL ou BASIC : XML non conforme au XSD du profil, export bloqué — contrôle interne |
 
 ## Notes d'implémentation
 
@@ -133,7 +148,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 - **Code type 387** (facture de solde) : émis en `380` dans le CII car non admis par le flux FR EN16931 ; le type métier interne `finalSettlement` est conservé pour la UI et le calcul du net à payer.
 - **internalCreditNote** (INT) : émis en `381` (avoir) dans le CII pour la conformité.
 - **TotalPrepaidAmount** : doit suivre `GrandTotalAmount` dans l'ordre du XSD (sinon erreur de validation).
-- Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-12/13/53/CO-16) ne sont pas mappées à un champ d'encadré.
+- Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-CO-10/14/15, et BR-CO-16 respectée par construction) ne sont pas mappées à un champ d'encadré.
 
 
 ## Cadre de facturation (BT-23)
