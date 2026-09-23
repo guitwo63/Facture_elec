@@ -155,7 +155,7 @@ public struct OrderXEmbedder {
         let created = isoNow()
         let buyerName = escapeXML(order.buyer.name)
         let number = escapeXML(order.number)
-        let date = isoDate(order.issueDate)
+        let date = DocumentDate.isoString(order.issueDate)
         let title = "\(buyerName): Order \(number)"
         let desc = "Order \(number) dated \(date) issued by \(buyerName)"
         let conformance = order.profile.conformanceLevel
@@ -253,13 +253,6 @@ public struct OrderXEmbedder {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f.string(from: Date())
-    }
-
-    private func isoDate(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        return f.string(from: d)
     }
 
     private func escapeXML(_ s: String) -> String {

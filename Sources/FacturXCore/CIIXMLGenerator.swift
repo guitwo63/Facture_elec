@@ -8,19 +8,12 @@ public enum CIIXMLError: Error {
 public struct CIIXMLGenerator {
     public init() {}
 
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
-        return f
-    }()
-
-    /// Date telle qu'écrite dans le XML (format 102 = AAAAMMJJ, en UTC). `EN16931BusinessRules`
-    /// compare ces mêmes chaînes pour BR-FR-CO-07, comme le Schematron France CTC : la règle
-    /// ne peut pas diverger de ce que la PDP reçoit.
+    /// Date telle qu'écrite dans le XML (format 102 = AAAAMMJJ) : le jour affiché par l'éditeur
+    /// et imprimé sur le PDF, pris dans le fuseau de l'application (voir `DocumentDate`).
+    /// `EN16931BusinessRules` compare ces mêmes chaînes pour BR-FR-CO-07, comme le Schematron
+    /// France CTC : la règle ne peut pas diverger de ce que la PDP reçoit.
     static func xmlDate(_ date: Date) -> String {
-        dateFormatter.string(from: date)
+        DocumentDate.xmlString(date)
     }
 
     public func generate(invoice: Invoice) throws -> Data {
