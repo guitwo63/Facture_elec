@@ -14,13 +14,9 @@ public struct OrderCIOXMLGenerator {
     public func generate(order: SalesOrder) throws -> Data {
         guard !order.lines.isEmpty else { throw OrderCIOXMLError.emptyLines }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-
-        let issue = dateFormatter.string(from: order.issueDate)
-        let requested = dateFormatter.string(from: order.requestedDeliveryDate)
+        // Jour du fuseau de l'app, celui du PDF de la commande (voir `DocumentDate`).
+        let issue = DocumentDate.xmlString(order.issueDate)
+        let requested = DocumentDate.xmlString(order.requestedDeliveryDate)
 
         let xmlLines = order.lines.enumerated().map { xmlLine($0.element, index: $0.offset, profile: order.profile) }.joined()
 

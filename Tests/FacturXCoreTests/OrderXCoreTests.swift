@@ -186,10 +186,10 @@ final class OrderXCoreTests: XCTestCase {
         XCTAssertTrue(v.errors.contains(where: { $0.contains("/EmbeddedFiles") }))
     }
 
+    /// Ce jour-là dans le fuseau de l'app, comme une date saisie dans l'éditeur.
     private func makeDate(_ s: String) -> Date {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(secondsFromGMT: 0)
         return f.date(from: s)!
     }
 }
