@@ -520,16 +520,13 @@ struct QuoteEditorView: View {
                             TextField("Désignation", text: $line.name).disabled(isLocked)
                             TextField("Qté", value: $line.quantity, format: .number).frame(width: 50).disabled(isLocked)
                             TextField("Prix U.", value: $line.unitPrice, format: .number).frame(width: 70).disabled(isLocked)
-                            TextField("TVA %", value: $line.vatRate, format: .number).frame(width: 50).disabled(isLocked)
-                                .onChange(of: line.vatRate) { newRate in
-                                    // Un devis n'affiche pas de sélecteur de catégorie TVA (il n'émet pas de
-                                    // XML), mais toInvoice()/toOrder() recopient les lignes telles quelles :
-                                    // sans ce recalage, une catégorie "zéro-rated" laissée par un ancien taux
-                                    // à 0 % suivrait la ligne jusqu'à la facture/commande, rejetée par le
-                                    // validateur EN16931 (BR-Z-05/BR-Z-09).
-                                    line.vatCategory = newRate == 0 ? .zeroRated : .standard
-                                    if newRate != 0 { line.vatExemptionReason = nil }
-                                }
+                            // Un devis n'affiche pas de sélecteur de catégorie TVA (il n'émet pas de XML),
+                            // mais toInvoice()/toOrder() recopient les lignes telles quelles : la catégorie
+                            // suit donc le taux (`editedVATRate` : S, ou E à 0 %, dont le motif se saisit
+                            // dans la facture ou la commande). Sans ce recalage, une catégorie laissée par
+                            // un ancien taux à 0 % suivait la ligne repassée à taux plein, rejetée par le
+                            // validateur EN16931 (BR-Z-05/BR-Z-09).
+                            TextField("TVA %", value: $line.editedVATRate, format: .number).frame(width: 50).disabled(isLocked)
                             Text(String(format: "%.2f", line.lineTotal)).foregroundStyle(.secondary).frame(width: 70)
                         }
                     }

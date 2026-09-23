@@ -351,7 +351,7 @@ struct PurchaseInvoiceEditorView: View {
                                         DoubleField("Qté", value: $line.quantity, format: .number)
                                         NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
                                         DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
-                                        VATRatePicker(rate: $line.vatRate)
+                                        VATRatePicker(rate: $line.editedVATRate)
                                         Text(String(format: "%.2f", line.lineTotal))
                                             .monospacedDigit().frame(width: 80, alignment: .trailing)
                                         Button {
@@ -361,10 +361,6 @@ struct PurchaseInvoiceEditorView: View {
                                         } label: {
                                             Image(systemName: "minus.circle")
                                         }
-                                    }
-                                    .onChange(of: line.vatRate) { newRate in
-                                        line.vatCategory = newRate == 0 ? .zeroRated : .standard
-                                        if newRate != 0 { line.vatExemptionReason = nil }
                                     }
                                     if line.vatRate == 0 {
                                         HStack(spacing: 8) {
@@ -383,7 +379,7 @@ struct PurchaseInvoiceEditorView: View {
                                         .padding(.leading, 4)
                                 }
                                 Button {
-                                    record.invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: record.invoice.lines.last?.vatRate ?? 20))
+                                    record.invoice.lines.append(.blank(after: record.invoice.lines.last))
                                 } label: { Label("Ajouter une ligne", systemImage: "plus") }
                             }.padding(8)
                         }.lockable(fieldLocked)

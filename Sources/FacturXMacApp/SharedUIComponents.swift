@@ -370,6 +370,18 @@ struct NormRefPicker: View {
     }
 }
 
+extension InvoiceLine {
+    /// Taux tel que l'éditent `VATRatePicker` et le champ « TVA % » des devis : l'écrire passe
+    /// par `setVATRate(_:)`, qui tient la catégorie cohérente (0 % → E). Remplace les
+    /// `.onChange(of: line.vatRate)` des éditeurs : un effet voulu par l'utilisateur va dans le
+    /// setter du binding, pas dans un onChange (voir #135).
+    var editedVATRate: Double {
+        get { vatRate }
+        set { setVATRate(newValue) }
+    }
+}
+
+/// Branché sur `$line.editedVATRate` : « 0 % — Exonéré » met la ligne en catégorie E.
 struct VATRatePicker: View {
     @Binding var rate: Double
 

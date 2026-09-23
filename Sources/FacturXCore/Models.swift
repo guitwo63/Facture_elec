@@ -389,6 +389,9 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         self.unit = unit
         self.unitPrice = unitPrice
         self.vatRate = vatRate
+        // Sans catégorie explicite, déduite du taux comme avant l'existence des catégories
+        // (0 % → Z), à l'image de `init(from:)` qui relit ainsi les anciennes lignes, émises
+        // en Z. Les éditeurs passent par `setVATRate(_:)`, qui met une ligne à 0 % en E.
         self.vatCategory = vatCategory ?? (vatRate == 0 ? .zeroRated : .standard)
         self.vatExemptionReason = vatExemptionReason
         self.orderReference = orderReference
@@ -422,6 +425,37 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
 
     public var lineTotal: Double {
         (quantity * unitPrice).rounded(toPlaces: 2)
+    }
+
+    /// Taux choisi par l'utilisateur dans un éditeur (sélecteur de TVA, saisie libre), la
+    /// catégorie (BT-151) suivant : un taux non nul repasse en S et perd son motif
+    /// d'exonération ; une ligne qui passe à 0 % devient exonérée (E), le cas courant en France
+    /// (art. 261, 293 B du CGI…), et son motif (BT-120) reste à saisir : l'export est bloqué
+    /// tant qu'il manque (BR-E-10). Z, AE, K, G et O se choisissent ensuite dans le menu
+    /// Catégorie. Jusqu'au 2026-09-23, 0 % donnait Z « Taux zéro », rare en France, sous le
+    /// libellé « 0 % — Exonéré ». Sans effet quand le taux ne change pas : resélectionner 0 %
+    /// garde la catégorie déjà choisie (K, AE…).
+    public mutating func setVATRate(_ newRate: Double) {
+        guard newRate != vatRate else { return }
+        vatRate = newRate
+        if newRate == 0 {
+            vatCategory = .exempt
+        } else {
+            vatCategory = .standard
+            vatExemptionReason = nil
+        }
+    }
+
+    /// Ligne vide de « Ajouter une ligne » : elle reprend le taux de la précédente (20 % sans
+    /// ligne), sa catégorie et son motif d'exonération. Avec le taux seul, la ligne qui suivait
+    /// une ligne exonérée tombait en Z (déduite du taux), et le motif, contrôlé ligne par ligne
+    /// (BR-E-10…), était à retaper. Le motif n'est repris que pour une catégorie qui l'exige :
+    /// ailleurs, ce serait un reliquat.
+    public static func blank(after previous: InvoiceLine?) -> InvoiceLine {
+        guard let previous else { return InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20) }
+        return InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: previous.vatRate,
+                           vatCategory: previous.vatCategory,
+                           vatExemptionReason: previous.vatCategory.requiresExemptionReason ? previous.vatExemptionReason : nil)
     }
 }
 

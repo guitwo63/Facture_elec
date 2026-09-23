@@ -357,10 +357,11 @@ public enum EN16931BusinessRules {
                 results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .warning,
                     message: "BR-FR-16 : \(label) — un taux de TVA négatif (BT-152) ne fait pas partie des taux admis en France ; vérifiez la catégorie de TVA (BT-151)."))
             }
-            // Contrôle interne : simple rappel, un taux nul en catégorie Z est conforme.
+            // Contrôle interne : simple rappel, un taux nul en catégorie Z est conforme, mais rare
+            // en France, où une ligne à 0 % est le plus souvent exonérée (E, motif obligatoire).
             if line.vatRate == 0 && line.vatCategory == .zeroRated {
                 results.append(BusinessRuleResult(ruleId: "BT-152-ZERO", severity: .warning,
-                    message: "BT-152 : \(label) — taux nul en catégorie Z (BT-151) : vérifiez qu'il s'agit bien d'une exonération et non d'un oubli de taux."))
+                    message: "BT-152 : \(label) — taux nul en catégorie Z « Taux zéro » (BT-151), rare en France. Opération exonérée : choisissez la catégorie E « Exonérée » et indiquez son motif (BT-120). Opération taxable : vérifiez que le taux n'a pas été oublié."))
             }
             // Toute catégorie autre que "Standard" (Z, AE, K, G, E, O) implique un taux à 0 — sinon
             // le sous-total de TVA calculé pour ce groupe (BG-23) est non nul alors que sa catégorie

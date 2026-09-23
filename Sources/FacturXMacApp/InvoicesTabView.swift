@@ -1906,8 +1906,8 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    fieldHighlight(VATRatePicker(rate: $line.vatRate), forRuleIDs: ["BR-FR-16"])
-                                    InfoBadge(text: "BT-152 — Taux de TVA appliqué (%). Catégorie (BT-151) et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
+                                    fieldHighlight(VATRatePicker(rate: $line.editedVATRate), forRuleIDs: ["BR-FR-16"])
+                                    InfoBadge(text: "BT-152 — Taux de TVA appliqué (%). À 0 %, la ligne est exonérée (catégorie E) : indiquez le motif d'exonération ci-dessous, ou choisissez une autre catégorie (BT-151).")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
@@ -1922,10 +1922,6 @@ struct InvoiceEditorView: View {
                                     Image(systemName: "minus.circle")
                                 }
                             }
-                            .onChange(of: line.vatRate) { newRate in
-                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
-                                if newRate != 0 { line.vatExemptionReason = nil }
-                            }
                             // Catégorie/motif d'exonération : uniquement pertinents à taux 0 % (autoliquidation,
                             // export, exonération…) — masqués pour le cas standard afin de ne pas allonger
                             // la ligne pour rien.
@@ -1939,7 +1935,7 @@ struct InvoiceEditorView: View {
                                         }
                                         .labelsHidden()
                                         .frame(width: 210)
-                                        InfoBadge(text: "BT-151 — Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                        InfoBadge(text: "BT-151 — Catégorie de TVA d'une ligne à 0 % : E = exonérée (par défaut), Z = taux zéro (rare en France), AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, O = hors champ.")
                                     }
                                     if line.vatCategory.requiresExemptionReason {
                                         HStack(spacing: 2) {
@@ -1955,7 +1951,7 @@ struct InvoiceEditorView: View {
                                 .padding(.leading, 4)
                         }
                         Button {
-                            invoice.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: invoice.lines.last?.vatRate ?? 20))
+                            invoice.lines.append(.blank(after: invoice.lines.last))
                         } label: { Label("Ajouter une ligne", systemImage: "plus") }
                     }.padding(8)
                 }.lockable(fieldLocked)
