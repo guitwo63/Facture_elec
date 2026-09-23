@@ -23,6 +23,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `invoice.tenderRef` | `ram:AdditionalReferencedDocument/ram:IssuerAssignedID` + `ram:TypeCode` = `50` | BT-17 | — | — |
 | `invoice.receivingAdviceRef` | `ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID` | BT-15 | — | — |
 | `invoice.despatchAdviceRef` | `ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID` | BT-16 | — | — |
+| `invoice.deliveryCountry` (champ optionnel) | `ram:ApplicableHeaderTradeDelivery/ram:ShipToTradeParty/ram:PostalTradeAddress/ram:CountryID` — sur une facture K, pays de l'acheteur à défaut de saisie (`effectiveDeliveryCountry`) | BT-80 | BR-IC-12 (respectée à l'émission), BR-CL-14 (code ISO 3166-1), BT-80-UE (contrôle interne) | erreur (code invalide) / avertissement (BT-80-UE) |
 | `invoice.precedingInvoiceRef` | `ram:ApplicableHeaderTradeSettlement/.../ram:IssuerAssignedID` (invoiceReferencedXML) | BT-25 | BR-FR-CO-04 (rectificative 384), BR-FR-CO-05 (avoir 381), BT-25-SOLDE (facture de solde, contrôle interne) | erreur |
 | `invoice.precedingInvoiceDate` | `ram:ApplicableHeaderTradeSettlement/.../ram:FormattedIssueDateTime` | BT-26 | BR-FR-CO-04, BR-FR-CO-05, BT-25-SOLDE | erreur |
 | `invoice.notes` | `ram:IncludedNote/ram:Content` (sans SubjectCode) | BT-22 | — | — |
@@ -39,7 +40,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `seller.siren` | `ram:SellerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` (schéma 0002) | BT-30 | BR-FR-10 (9 chiffres, clé Luhn), BR-FR-13 (SIREN ou identifiant électronique) | avertissement (format) / erreur (ni l'un ni l'autre) |
 | `seller.siret` | — (non émis ; serait le BT-29, schéma 0009) | — | BR-FR-09 (14 chiffres, clé Luhn) | avertissement |
 | `seller.endpointID` | `ram:SellerTradeParty/ram:URIUniversalCommunication/ram:URIID` (schéma 0225 ; déduit du SIREN si vide) | BT-34 | BR-FR-13 | erreur |
-| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | BR-CO-09 (préfixe pays), BR-S-02 / BR-E-02 (obligatoire avec une ligne S / E), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
+| `seller.vatNumber` | `ram:SellerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-31 | BR-CO-09 (préfixe pays), BR-S-02 / BR-E-02 / BR-IC-02 (obligatoire avec une ligne S / E / K), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
 | `seller.street` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:LineOne` | BT-35 | — | — |
 | `seller.postcode` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode` | BT-38 | — | — |
 | `seller.city` | `ram:SellerTradeParty/ram:PostalTradeAddress/ram:CityName` | BT-37 | — | — |
@@ -52,7 +53,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `buyer.siren` | `ram:BuyerTradeParty/ram:SpecifiedLegalOrganization/ram:ID` (schéma 0002) | BT-47 | BR-FR-32 (9 chiffres, clé Luhn ; BR-FR-11 ne vaut qu'avec une note BAR = B2B, non émise), BR-FR-12 (SIREN ou identifiant électronique) | avertissement (format) / erreur (ni l'un ni l'autre) |
 | `buyer.siret` | — (non émis ; serait le BT-46, schéma 0009) | — | BR-FR-09 (14 chiffres, clé Luhn) | avertissement |
 | `buyer.endpointID` | `ram:BuyerTradeParty/ram:URIUniversalCommunication/ram:URIID` (schéma 0225 ; déduit du SIREN si vide) | BT-49 | BR-FR-12 | erreur |
-| `buyer.vatNumber` | `ram:BuyerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-48 | BR-CO-09 (préfixe pays), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
+| `buyer.vatNumber` | `ram:BuyerTradeParty/ram:SpecifiedTaxRegistration/ram:ID` | BT-48 | BR-CO-09 (préfixe pays), BR-IC-02 (obligatoire avec une ligne K), BR-O-02 (interdit avec une ligne O, hors EXTENDED) | erreur |
 | `buyer.street` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:LineOne` | BT-50 | — | — |
 | `buyer.postcode` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:PostcodeCode` | BT-53 | — | — |
 | `buyer.city` | `ram:BuyerTradeParty/ram:PostalTradeAddress/ram:CityName` | BT-52 | — | — |
@@ -110,11 +111,13 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-25 | désignation (BT-153) | erreur | Désignation obligatoire |
 | BR-27 | prix unitaire (BT-146) | erreur | Prix unitaire non négatif |
 | BR-CL-04 | devise (BT-5) | erreur / avertissement | Code ISO 4217 à 3 lettres ; avertissement si absent de la liste de référence |
+| BR-CL-14 | pays de livraison (BT-80) | erreur | Code pays ISO 3166-1 (liste du Schematron : plus 1A et XI) |
 | BR-CO-09 | n° TVA émetteur / destinataire (BT-31 / BT-48) | erreur | Préfixe pays ISO 3166-1 alpha-2 (EL admis pour la Grèce) |
 | BR-CO-10 | total HT (BT-106) | erreur | Total HT ≠ somme des montants nets de ligne (BT-131) |
 | BR-CO-14 | total TVA (BT-110) | erreur | Total TVA ≠ somme des montants de TVA par taux (BT-117) |
 | BR-CO-15 | total TTC (BT-112) | erreur | Total TTC ≠ total HT (BT-109) + total TVA (BT-110) |
 | BR-S-02 / BR-E-02 | n° TVA émetteur (BT-31) | erreur | Obligatoire avec une ligne à TVA normale (S) / exonérée (E) |
+| BR-IC-02 | n° TVA émetteur et acheteur (BT-31, BT-48) | erreur | Tous deux obligatoires avec une ligne en livraison intracommunautaire (K) |
 | BR-O-02 / BR-O-12 | n° TVA (BT-31, BT-48) / catégorie de TVA (BT-151) | erreur | Facture avec une ligne hors champ de TVA (O), hors EXTENDED : aucun n° TVA ; aucune ligne d'une autre catégorie (BR-O-11 : une seule ventilation) |
 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 | taux de TVA (BT-152) | erreur | Taux non nul avec une catégorie autre que S (catégorie K : règles BR-IC-*) |
 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | motif d'exonération (BT-120) | erreur | Motif obligatoire pour la catégorie de TVA (BT-151) de la ligne |
@@ -134,6 +137,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-FR-MV-02 / BR-FR-BD-02 | cadre de facturation (BT-23) | erreur | Cadres 8 (multi-vendeurs) / 9 (bidirectionnel) : lignes GROUP non produites par l'app |
 | BT-2-FUTURE | date d'émission (BT-2) | avertissement | Date postérieure à aujourd'hui — contrôle interne |
 | BT-25-SOLDE | facture antérieure (BT-25/26) | erreur | Facture de solde (émise en 380) : référence à l'acompte obligatoire — contrôle interne |
+| BT-80-UE | pays de livraison (BT-80) | avertissement | Livraison intracommunautaire (K) vers le pays de l'émetteur ou hors de l'UE — contrôle interne |
 | BT-84-IBAN | IBAN (BT-84) | erreur / avertissement | Clé mod 97 ; longueur, casse — contrôle interne |
 | BT-113-SOLDE | montant déjà payé (BT-113) | avertissement | Facture de solde sans montant d'acomptes — contrôle interne |
 | BT-129-POSITIVE | quantité (BT-129) | erreur | Quantité doit être positive — contrôle interne |
@@ -149,6 +153,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 - **Code type 387** (facture de solde) : émis en `380` dans le CII car non admis par le flux FR EN16931 ; le type métier interne `finalSettlement` est conservé pour la UI et le calcul du net à payer.
 - **internalCreditNote** (INT) : émis en `381` (avoir) dans le CII pour la conformité.
 - **TotalPrepaidAmount** : doit suivre `GrandTotalAmount` dans l'ordre du XSD (sinon erreur de validation).
+- **Identifiants vides** : un n° TVA (BT-31/BT-48) ou un SIREN (BT-30/BT-47) vidé dans l'éditeur est enregistré `""`, pas `nil`. Le générateur n'émet que la valeur rognée non vide : l'identifiant vide qu'il émettait était rejeté par BR-CO-09 (n° TVA) ou BR-FR-32 (SIREN), sans que l'application ne le signale, et un n° TVA vide comptait comme présent pour BR-O-02 (vérifié le 2026-09-23 contre les Schematron EN16931 et France CTC).
 - **Taux de TVA** (BT-119, BT-152, `RateApplicablePercent`) : « 20 » pour un taux entier, « 5.50 » sinon (idem Order-X). Le BR-FR-16 du Schematron France CTC (fatal) compare la chaîne à une liste fermée où « 5.5 » et « 5.50 » passent, mais pas « 5.500 » ni « 6 » ; le contrôle BR-FR-16 de l'app compare cette même chaîne (`CIIXMLGenerator.xmlRate`) à la liste et bloque l'export, sauf sur une facture reçue, où seul un taux négatif est signalé. Jusqu'au 2026-09-23, 5,5 % était émis « 6 » : `rate.rounded()` appelait l'extension `Double.rounded(toPlaces:)` du module, qui n'a plus de valeur par défaut.
 - **Catégorie O (hors champ de TVA)** : ni taux de ligne (BT-152, interdit par BR-O-05 dans les Schematron EN16931 comme EXTENDED) ni taux de ventilation (BT-119 : facultatif, BR-48 exemptant O ; omis par cohérence) ; le modèle garde `vatRate` = 0 et `CIIXMLParser` relit une ligne sans taux à 0 % hors catégorie S. BR-O-02 et BR-O-11/12 n'existent que dans le Schematron EN16931, d'où leur blocage hors EXTENDED. Vérifié le 2026-09-23 (XSD, Schematron EN16931, EXTENDED, EXTENDED-CTC-FR et France CTC). Avertissement EXTENDED connu, non bloquant et antérieur, aussi en catégorie E : BR-FXEXT-<catégorie>-08rev regroupe les lignes par motif d'exonération porté sur la ligne, que le générateur n'émet que dans la ventilation.
 - Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-CO-10/14/15, et BR-CO-16 respectée par construction) ne sont pas mappées à un champ d'encadré.
@@ -183,6 +188,20 @@ Contraintes du Schematron France CTC, reprises dans `EN16931BusinessRules` (bloq
 - Une facture émise encore en MINIMUM, BASIC WL ou BASIC est bloquée à l'export et au dépôt (BR-PROFIL, erreur). L'éditeur affiche alors un sélecteur « Profil Factur-X (BT-24) », et seulement dans ce cas, pour la repasser en EN 16931 ou EXTENDED.
 - Tous les profils restent décodables : factures existantes, et factures reçues dont le profil est lu dans le XML (`CIIXMLParser`). BR-PROFIL ne s'applique pas à une facture reçue (`EN16931RuleContext.received`).
 
+## Livraison intracommunautaire (catégorie K) et pays de livraison (BT-80)
+
+Règles BR-IC-* du Schematron EN16931, présentes aussi dans celui d'EXTENDED (hormis BR-IC-01 et BR-IC-08, respectées par construction : la ventilation de TVA est calculée à partir des lignes) :
+- **BR-IC-12** — pays de livraison (BT-80) obligatoire. Le générateur émet `ApplicableHeaderTradeDelivery/ShipToTradeParty/PostalTradeAddress/CountryID`, premier enfant de la livraison dans la séquence du XSD, avec le pays saisi dans le champ optionnel « Pays de livraison » (BT-80), mis en majuscules, ou à défaut **le pays de l'acheteur (BT-55)**, le bien partant en général à son adresse (`Invoice.effectiveDeliveryCountry`). Le livré à se réduit au pays, seule donnée de livraison que l'application connaît. BT-80 n'est pas imprimé sur le PDF, comme les autres champs optionnels d'en-tête (décision de l'utilisateur du 2026-09-23). Hors catégorie K, BT-80 n'est émis que s'il est saisi : le XML d'une facture sans K ni BT-80 est inchangé à l'octet près.
+- **BR-IC-11** — date de livraison (BT-72) ou période de facturation (BG-14) : respectée par construction, le générateur émet toujours une date de livraison (la date de facture).
+- **BR-IC-02** — n° de TVA de l'émetteur (BT-31) et de l'acheteur (BT-48) : erreur bloquante. Le représentant fiscal (BT-63), que la règle admet à la place du BT-31, n'est pas géré par l'application : le BT-31 est donc exigé.
+- **BR-IC-05 / BR-IC-10** — taux nul et motif d'exonération (BT-120) : contrôlés par les règles de catégorie de TVA des lignes.
+- **BR-CL-14** — un pays de livraison saisi doit figurer dans la liste du Schematron (ISO 3166-1, plus 1A pour le Kosovo et XI pour l'Irlande du Nord) : erreur bloquante, que la facture soit en catégorie K ou non. Erreurs typiques : EL (préfixe de TVA de la Grèce, dont le code pays est GR) et UK (GB).
+- **BT-80-UE** (contrôle interne, avertissement) : un BT-80 accepté par le Schematron peut rester incohérent avec la catégorie K, par exemple une livraison vers le pays de l'émetteur (le repli sur un acheteur établi en France), ou hors de l'UE, ce qui relève de l'exportation (catégorie G). Le message indique quand le pays vient du repli sur l'acheteur.
+
+Relecture (`CIIXMLParser`) : BT-80 est lu dans le livré à d'en-tête, sous le même champ optionnel. Le sous-arbre `ShipToTradeParty` est isolé : ses éléments portent les noms de ceux du vendeur et de l'acheteur, et la fermeture de son adresse faisait basculer la lecture sur l'acheteur, ce qui perdait les avis d'expédition et de réception (BT-16, BT-15) qui le suivent.
+
+**Vérification (2026-09-23)** : 14 factures, dont 12 en catégorie K (BT-80 par défaut, saisi, en minuscules, invalide, hors UE ; K + S ; profil EXTENDED ; avec avis d'expédition et de réception ; tous les champs optionnels ; n° de TVA manquant), contre le XSD Factur-X 1.09 et le Schematron du profil déclaré (EN16931 ou EXTENDED) et contre le Schematron France CTC. Avant : les 12 factures K étaient rejetées (BR-IC-12, et en plus BR-IC-02 pour deux d'entre elles) alors que l'application autorisait l'export. Après : validateurs officiels et application rendent le même verdict dans les 14 cas.
+
 ## Champs optionnels EN 16931 (catalogue + champs libres)
 
 La section condensée « Champs optionnels » (en-tête + ligne) permet de saisir des champs optionnels du schéma EN 16931 non couverts par les champs dédiés. Chaque entrée couple un nom de balise CII et une valeur. Les champs du catalogue prédéfini (`OptionalFieldCatalogue`) sont émis dans le CII à leur position conforme ; les champs libres sont stockés et affichés mais non émis dans le XML.
@@ -195,6 +214,7 @@ La section condensée « Champs optionnels » (en-tête + ligne) permet de saisi
 | Réf. bon de réception | `ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID` | BT-15 | `ApplicableHeaderTradeDelivery/ReceivingAdviceReferencedDocument` | émis après l'avis d'expédition (ordre du XSD) |
 | Réf. bon de livraison | `ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID` | BT-16 | `ApplicableHeaderTradeDelivery/DespatchAdviceReferencedDocument` | |
 | Réf. appel d'offres ou lot | `ram:AdditionalReferencedDocument/ram:IssuerAssignedID` | BT-17 | `.../AdditionalReferencedDocument` (`IssuerAssignedID` + `TypeCode` 50) | ancienne clé `ram:TendererReferencedDocument/...` migrée au décodage |
+| Pays de livraison | `ram:ShipToTradeParty/ram:PostalTradeAddress/ram:CountryID` | BT-80 | `ApplicableHeaderTradeDelivery/ShipToTradeParty/PostalTradeAddress/CountryID` | premier enfant de la livraison, mis en majuscules ; sur une facture K, pays de l'acheteur à défaut de saisie (voir la section catégorie K) |
 | N° ligne de commande | `ram:BuyerOrderReferencedDocument/ram:LineID` | BT-132 | `SpecifiedLineTradeAgreement/BuyerOrderReferencedDocument/LineID` | le n° de commande lui-même est le BT-13 (en-tête) |
 | Réf. article vendeur | `ram:SellerAssignedID` | BT-155 | `SpecifiedTradeProduct/SellerAssignedID` | |
 | Réf. article acheteur | `ram:BuyerAssignedID` | BT-156 | `SpecifiedTradeProduct/BuyerAssignedID` | n'était jamais émis avant le 2026-09-23 |

@@ -400,6 +400,7 @@ public enum EN16931BusinessRules {
                 message: "BR-PROFIL : Le profil \(invoice.profile.rawValue) (BT-24) n'est plus proposé à l'émission : l'application produit un XML de structure EN 16931, que le XSD du profil \(invoice.profile.rawValue) \(rejection). Repassez la facture en EN 16931 (ou EXTENDED)."))
         }
 
+        results += deliveryRules(invoice)
         return results
     }
 
@@ -424,4 +425,57 @@ public enum EN16931BusinessRules {
         let c = Array(xmlDate)
         return String(c[6...7]) + "/" + String(c[4...5]) + "/" + String(c[0...3])
     }
+
+    /// Pays de livraison (BT-80) et livraison intracommunautaire (catégorie K : règles BR-IC-*
+    /// du Schematron EN16931, présentes aussi dans celui d'EXTENDED). Le générateur respecte
+    /// de lui-même BR-IC-12 (BT-80 obligatoire), en émettant le pays de l'acheteur à défaut de
+    /// pays de livraison saisi (`Invoice.effectiveDeliveryCountry`), et BR-IC-11 (date de
+    /// livraison ou période), par la date de livraison (BT-72) qu'il émet toujours.
+    private static func deliveryRules(_ invoice: Invoice) -> [BusinessRuleResult] {
+        var results: [BusinessRuleResult] = []
+        let entered = (invoice.deliveryCountry ?? "").trimmingCharacters(in: .whitespaces).uppercased()
+        if !entered.isEmpty && !deliveryCountryCodes.contains(entered) {
+            results.append(BusinessRuleResult(ruleId: "BR-CL-14", severity: .error,
+                message: "BR-CL-14 : Le pays de livraison (BT-80) « \(entered) » n'est pas un code pays ISO 3166-1 à 2 lettres (ex. DE ; GR pour la Grèce et non EL, GB pour le Royaume-Uni et non UK)."))
+        }
+
+        guard invoice.lines.contains(where: { $0.vatCategory == .intraCommunity }) else { return results }
+
+        // Le représentant fiscal du vendeur (BT-63), que BR-IC-02 admet à la place du BT-31,
+        // n'est pas géré par l'application : le n° TVA de l'émetteur est donc exigé.
+        let sellerVAT = (invoice.seller.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
+        let buyerVAT = (invoice.buyer.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
+        if sellerVAT.isEmpty || buyerVAT.isEmpty {
+            let missing = sellerVAT.isEmpty && buyerVAT.isEmpty ? "les deux"
+                : sellerVAT.isEmpty ? "celui de l'émetteur" : "celui de l'acheteur"
+            results.append(BusinessRuleResult(ruleId: "BR-IC-02", severity: .error,
+                message: "BR-IC-02 : Une livraison intracommunautaire (BT-151 = K) exige le n° de TVA intracommunautaire de l'émetteur (BT-31) et celui de l'acheteur (BT-48) ; il manque \(missing)."))
+        }
+
+        // Contrôle interne : un BT-80 conforme au Schematron peut rester incohérent avec la
+        // catégorie K — c'est le cas du repli sur le pays d'un acheteur établi en France.
+        if let country = invoice.effectiveDeliveryCountry, deliveryCountryCodes.contains(country) {
+            let shown = invoice.deliveryCountry == nil ? "\(country) (pays de l'acheteur, émis faute de pays de livraison saisi)" : country
+            let sellerCountry = invoice.seller.country.trimmingCharacters(in: .whitespaces).uppercased()
+            if country == sellerCountry {
+                results.append(BusinessRuleResult(ruleId: "BT-80-UE", severity: .warning,
+                    message: "BT-80 : Livraison intracommunautaire (BT-151 = K) vers \(shown), le pays de l'émetteur, alors qu'elle suppose une expédition vers un autre État membre. Renseignez le pays de livraison (champ optionnel BT-80) s'il diffère de celui de l'acheteur, ou revoyez la catégorie de TVA."))
+            } else if !intraCommunityDestinations.contains(country) {
+                results.append(BusinessRuleResult(ruleId: "BT-80-UE", severity: .warning,
+                    message: "BT-80 : Livraison intracommunautaire (BT-151 = K) vers \(shown), hors de l'Union européenne : une livraison hors UE relève de l'exportation (catégorie G). Vérifiez le pays de livraison (champ optionnel BT-80) ou la catégorie de TVA."))
+            }
+        }
+        return results
+    }
+
+    /// Codes pays admis par le Schematron (codedb Factur-X, BR-CL-14) : ISO 3166-1, plus 1A
+    /// (Kosovo) et XI (Irlande du Nord).
+    private static let deliveryCountryCodes = VATNumberValidator.isoCountryCodes.union(["1A", "XI"])
+
+    /// Destinations d'une livraison intracommunautaire : les 27 États membres (GR pour la
+    /// Grèce) et l'Irlande du Nord (XI), qui reste soumise aux règles de l'UE pour les biens.
+    private static let intraCommunityDestinations: Set<String> = [
+        "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU",
+        "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI",
+    ]
 }

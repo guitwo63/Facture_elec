@@ -282,6 +282,7 @@ public enum OptionalFieldCatalogue {
         OptionalFieldTemplate("BT-15", "Réf. bon de réception", "ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-15 - Référence de l'avis de réception (ReceivingAdviceReferencedDocument)."),
         OptionalFieldTemplate("BT-16", "Réf. bon de livraison", "ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-16 - Référence de l'avis d'expédition (DespatchAdviceReferencedDocument)."),
         OptionalFieldTemplate("BT-17", "Réf. appel d'offres ou lot", "ram:AdditionalReferencedDocument/ram:IssuerAssignedID", .header, "BT-17 - Référence de l'appel d'offres ou du lot (AdditionalReferencedDocument, code type 50)."),
+        OptionalFieldTemplate("BT-80", "Pays de livraison", "ram:ShipToTradeParty/ram:PostalTradeAddress/ram:CountryID", .header, "BT-80 - Pays de livraison (ShipToTradeParty/PostalTradeAddress/CountryID), code pays ISO 3166-1 à 2 lettres (ex. DE ; GR pour la Grèce, pas EL). Exigé pour une livraison intracommunautaire (catégorie K, BR-IC-12) : sans saisie, le pays de l'acheteur (BT-55) est émis."),
     ]
     public static let line: [OptionalFieldTemplate] = [
         OptionalFieldTemplate("BT-132", "N° ligne de commande", "ram:BuyerOrderReferencedDocument/ram:LineID", .line, "BT-132 - Numéro de la ligne concernée dans la commande de l'acheteur. Le numéro de la commande elle-même est le BT-13, en en-tête."),
@@ -984,6 +985,25 @@ public struct Invoice: Codable, Hashable, Identifiable {
     public var despatchAdviceRef: String? {
         get { referenceField("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID") }
         set { setReferenceField("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", newValue) }
+    }
+    /// BT-80 : pays de livraison saisi (champ optionnel), tel quel. Voir `effectiveDeliveryCountry`
+    /// pour celui qui est émis.
+    public var deliveryCountry: String? {
+        get { referenceField("ram:ShipToTradeParty/ram:PostalTradeAddress/ram:CountryID") }
+        set { setReferenceField("ram:ShipToTradeParty/ram:PostalTradeAddress/ram:CountryID", newValue) }
+    }
+
+    /// Pays de livraison émis dans le XML (BT-80) : celui saisi, en majuscules ; à défaut, pour
+    /// une livraison intracommunautaire (une ligne en catégorie K), le pays de l'acheteur
+    /// (BT-55) — BR-IC-12 exige alors un BT-80, et le bien part en général à l'adresse de
+    /// l'acheteur. `nil` : pas de BT-80 à émettre.
+    public var effectiveDeliveryCountry: String? {
+        if let entered = deliveryCountry {
+            return entered.trimmingCharacters(in: .whitespaces).uppercased()
+        }
+        guard lines.contains(where: { $0.vatCategory == .intraCommunity }) else { return nil }
+        let buyerCountry = buyer.country.trimmingCharacters(in: .whitespaces)
+        return buyerCountry.isEmpty ? nil : buyerCountry
     }
 
     private func referenceField(_ tagName: String) -> String? {
