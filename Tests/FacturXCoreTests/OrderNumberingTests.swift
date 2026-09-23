@@ -117,6 +117,44 @@ final class OrderNumberingTests: XCTestCase {
         XCTAssertTrue(store.previewNextNumber(companyID: nil).hasPrefix("CD"))
     }
 
+    /// Régression : le numéro de début d'une société à format propre était ignoré, le
+    /// compteur partait toujours de `numberStart` — voir
+    /// InvoiceNumberingTests.testOverrideStartNumberIsIndependentOfDefault.
+    func testOverrideStartNumberIsIndependentOfDefault() {
+        let store = OrderStore()
+        store.numberPrefix = "CD"
+        store.numberIncludeYear = false
+        store.numberUseSeparator = false
+        store.numberStart = 1
+        let cid = UUID()
+        store.numberFormatOverrides[cid] = InvoiceNumberingFormat(prefix: "X", includeYear: false, start: 500, useSeparator: false)
+
+        XCTAssertEqual(store.nextNumber(companyID: cid), "X0500")
+        // Aperçus de Réglages › Application : société sélectionnée, puis « Toutes (format par défaut) ».
+        XCTAssertEqual(store.previewNextNumber(companyID: cid, format: store.numberingFormat(for: cid)), "X0500")
+        XCTAssertEqual(store.previewNextNumber(format: store.defaultNumberingFormat), "CD0001")
+        XCTAssertEqual(store.nextNumber(companyID: UUID()), "CD0001", "une société sans format propre garde le numéro de début par défaut")
+    }
+
+    /// Le plus petit numéro libre se cherche à partir du numéro de début de la société :
+    /// X0001 (numéroté quand ce numéro de début était ignoré) ne fait pas repartir le
+    /// compteur d'en bas, et un numéro libéré au-dessus du début est recyclé.
+    func testOverrideStartIsTheFloorOfRecycledNumbers() {
+        let store = OrderStore()
+        let cid = UUID()
+        store.numberFormatOverrides[cid] = InvoiceNumberingFormat(prefix: "X", includeYear: false, start: 500, useSeparator: false)
+        store.upsert(SalesOrder(number: "X0001", buyer: party(), seller: party(), companyID: cid))
+
+        let order1 = SalesOrder(number: store.nextNumber(companyID: cid), buyer: party(), seller: party(), companyID: cid)
+        store.upsert(order1)
+        let order2 = SalesOrder(number: store.nextNumber(companyID: cid), buyer: party(), seller: party(), companyID: cid)
+        store.upsert(order2)
+        XCTAssertEqual([order1.number, order2.number], ["X0500", "X0501"])
+
+        store.delete(order1)
+        XCTAssertEqual(store.nextNumber(companyID: cid), "X0500")
+    }
+
     func testRemovingFormatOverrideRevertsToDefaultFormat() {
         let store = OrderStore()
         store.numberPrefix = "CD"

@@ -206,11 +206,13 @@ final class SocietePrincipaleInheritanceTests: XCTestCase {
         let principaleID = designatePrincipale()
         let store = OrderStore()
         store.numberPrefix = "CD"
+        store.numberStart = 7
         store.numberFormatOverrides[principaleID] = InvoiceNumberingFormat(prefix: "PRINC", includeYear: false, start: 1, useSeparator: false)
 
         XCTAssertEqual(store.defaultNumberingFormat.prefix, "CD")
-        XCTAssertTrue(store.previewNextNumber().hasPrefix("PRINC"))
+        XCTAssertEqual(store.previewNextNumber(), "PRINC0001")
         XCTAssertTrue(store.previewNextNumber(format: store.defaultNumberingFormat).hasPrefix("CD"))
+        XCTAssertTrue(store.previewNextNumber(format: store.defaultNumberingFormat).hasSuffix("0007"))
         XCTAssertTrue(store.previewNextNumber(companyID: UUID()).hasPrefix("CD"))
     }
 
@@ -218,11 +220,13 @@ final class SocietePrincipaleInheritanceTests: XCTestCase {
         let principaleID = designatePrincipale()
         let store = QuoteStore()
         store.numberPrefix = "DEV"
+        store.numberStart = 7
         store.numberFormatOverrides[principaleID] = InvoiceNumberingFormat(prefix: "PRINC", includeYear: false, start: 1, useSeparator: false)
 
         XCTAssertEqual(store.defaultNumberingFormat.prefix, "DEV")
-        XCTAssertTrue(store.previewNextNumber().hasPrefix("PRINC"))
+        XCTAssertEqual(store.previewNextNumber(), "PRINC0001")
         XCTAssertTrue(store.previewNextNumber(format: store.defaultNumberingFormat).hasPrefix("DEV"))
+        XCTAssertTrue(store.previewNextNumber(format: store.defaultNumberingFormat).hasSuffix("0007"))
         XCTAssertTrue(store.previewNextNumber(companyID: UUID()).hasPrefix("DEV"))
     }
 }
