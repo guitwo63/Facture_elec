@@ -1167,15 +1167,22 @@ struct InvoiceEditorView: View {
         return Set(v.businessRules.filter { $0.severity == .error }.map { $0.ruleId })
     }
 
+    /// Préréglage de conditions de paiement actif, résolu dans la liste de la société de la
+    /// facture (`invoice.companyID`) — celle personnalisée dans Réglages > Tables, pas le seul
+    /// réglage global. `nil` = "Personnalisé" (saisie libre).
+    private var activePaymentTermsPreset: PaymentTermsPreset? {
+        paymentTermsStore.matchingPreset(for: invoice.paymentTerms, companyID: invoice.companyID)
+    }
+
     /// `nil` = "Personnalisé" (saisie libre) ; sinon l'id du préréglage sélectionné.
     /// Appliquer un préréglage recalcule aussi l'échéance (BT-9) à partir de la date de
     /// facture. Le champ Échéance se grise alors (voir `dueDateIsComputedFromPreset`) :
     /// en mode Personnalisé, il reste modifiable manuellement.
     private var paymentTermsPresetIDBinding: Binding<String?> {
         Binding(
-            get: { paymentTermsStore.matchingPresetID(for: invoice.paymentTerms) },
+            get: { activePaymentTermsPreset?.id },
             set: { newID in
-                guard let id = newID, let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                guard let id = newID, let preset = paymentTermsStore.preset(id: id, companyID: invoice.companyID) else { return }
                 invoice.paymentTerms = preset.text
                 invoice.dueDate = preset.dueRule.dueDate(from: invoice.issueDate)
             }
@@ -1188,8 +1195,7 @@ struct InvoiceEditorView: View {
     /// préréglage sans règle (ex. "Comptant") ou le mode Personnalisé laissent
     /// le champ modifiable.
     private var dueDateIsComputedFromPreset: Bool {
-        guard let id = paymentTermsPresetIDBinding.wrappedValue,
-              let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return false }
+        guard let preset = activePaymentTermsPreset else { return false }
         if case .none = preset.dueRule { return false }
         return true
     }
@@ -1567,7 +1573,7 @@ struct InvoiceEditorView: View {
                 if hasMandatoryWarnings {
                     DisclosureGroup(isExpanded: $showMandatoryDetails) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-49/34), n° TVA si applicable.").font(.caption)
+                            Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-34 émetteur, BT-49 destinataire), n° TVA si applicable.").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
                             Text("En-tête : numéro de facture, date, échéance, devise (EUR), mode de facturation (BT-23).").font(.caption)
                             Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
@@ -1612,7 +1618,7 @@ struct InvoiceEditorView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     LabeledContent {
-                                        fieldHighlight(TextField("", text: $invoice.number).frame(width: 160), forRuleIDs: ["BR-1"])
+                                        fieldHighlight(TextField("", text: $invoice.number).frame(width: 160), forRuleIDs: ["BR-02"])
                                     } label: {
                                         HStack(spacing: 3) {
                                             Text("Numéro *").foregroundColor(.red)
@@ -1632,9 +1638,9 @@ struct InvoiceEditorView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
                                             Text("Devise").font(.caption)
-                                            InfoBadge(text: "BT-5 — Code de la devise (ram:TaxCurrencyCode / ram:InvoiceCurrencyCode).")
+                                            InfoBadge(text: "BT-5 — Code de la devise de la facture (ram:InvoiceCurrencyCode). À ne pas confondre avec la devise de comptabilisation de la TVA (BT-6, ram:TaxCurrencyCode), que l'application n'émet pas.")
                                         }
-                                        fieldHighlight(NormRefPicker("", options: NormRefs.currencies, code: $invoice.currency).labelsHidden().frame(width: 160), forRuleIDs: ["BR-5"])
+                                        fieldHighlight(NormRefPicker("", options: NormRefs.currencies, code: $invoice.currency).labelsHidden().frame(width: 160), forRuleIDs: ["BR-05", "BR-CL-04"])
                                     }
                                 }
                                 HStack(alignment: .top) {
@@ -1645,8 +1651,7 @@ struct InvoiceEditorView: View {
                                         }
                                         DatePicker("", selection: $invoice.issueDate, displayedComponents: .date).labelsHidden()
                                             .onChange(of: invoice.issueDate) { newDate in
-                                                guard let id = paymentTermsPresetIDBinding.wrappedValue,
-                                                      let preset = paymentTermsStore.presets.first(where: { $0.id == id }) else { return }
+                                                guard let preset = activePaymentTermsPreset else { return }
                                                 invoice.dueDate = preset.dueRule.dueDate(from: newDate)
                                             }
                                     }
@@ -1655,8 +1660,8 @@ struct InvoiceEditorView: View {
                                             Text("Échéance").font(.caption)
                                             InfoBadge(text: "BT-9 — Date d'échéance du paiement. Calculée automatiquement par le préréglage de conditions de paiement sélectionné ; modifiable uniquement en mode « Personnalisé ».")
                                         }
-                                        DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
-                                            .disabled(fieldLocked || dueDateIsComputedFromPreset)
+                                        fieldHighlight(DatePicker("", selection: $invoice.dueDate, displayedComponents: .date).labelsHidden()
+                                            .disabled(fieldLocked || dueDateIsComputedFromPreset), forRuleIDs: ["BR-FR-CO-07"])
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
@@ -1672,7 +1677,7 @@ struct InvoiceEditorView: View {
                                     Image(systemName: "banknote").foregroundStyle(.secondary)
                                     Text("Conditions de paiement :").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
                                     Picker("", selection: paymentTermsPresetIDBinding) {
-                                        ForEach(paymentTermsStore.presets) { preset in
+                                        ForEach(paymentTermsStore.list(for: invoice.companyID)) { preset in
                                             Text(preset.label).tag(Optional(preset.id))
                                         }
                                         Text("Personnalisé").tag(String?.none)
@@ -1735,7 +1740,7 @@ struct InvoiceEditorView: View {
                                             }
                                             .buttonStyle(.bordered)
                                             .overlay(RoundedRectangle(cornerRadius: 4)
-                                                .stroke(Color.red, lineWidth: errorRuleIDs.contains("BR-FR-CO-05") ? 1.5 : 0))
+                                                .stroke(Color.red, lineWidth: ["BR-FR-CO-04", "BR-FR-CO-05", "BT-25-SOLDE"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                                             if linkableInvoices.isEmpty {
                                                 Text("Aucune facture disponible").font(.caption2).foregroundStyle(.secondary)
                                             }
@@ -1791,15 +1796,15 @@ struct InvoiceEditorView: View {
                             invoice.paymentIBAN = p.iban
                             invoice.paymentBIC = p.bic
                             if let pt = p.paymentTerms, !pt.isEmpty { invoice.paymentTerms = pt }
-                        }, locked: fieldLocked)
+                        }, locked: fieldLocked, companyID: invoice.companyID)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.red, lineWidth: ["BR-6", "BR-7", "BR-49"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
+                        .stroke(Color.red, lineWidth: ["BR-06", "BR-09", "BR-FR-13"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
                         PartySection(party: $invoice.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.red, lineWidth: ["BR-25", "BR-26", "BR-46"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
+                        .stroke(Color.red, lineWidth: ["BR-07", "BR-11", "BR-FR-12"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                 }
 
                 GroupBox("Lignes") {
@@ -1807,7 +1812,7 @@ struct InvoiceEditorView: View {
                         ForEach($invoice.lines) { $line in
                             HStack {
                                 HStack(spacing: 2) {
-                                    fieldHighlight(TextField("Désignation *", text: $line.name).frame(minWidth: 220), forRuleIDs: ["BR-21"])
+                                    fieldHighlight(TextField("Désignation *", text: $line.name).frame(minWidth: 220), forRuleIDs: ["BR-25"])
                                     InfoBadge(text: "BT-153 — Désignation de la ligne. Obligatoire.")
                                 }
                                 HStack(spacing: 2) {
@@ -1816,20 +1821,20 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "Commande d'origine de la ligne — usage interne (rattachement aux commandes, exports), non transmise dans le XML Factur-X. Pour le numéro de ligne de commande normé, utilisez le champ optionnel BT-132.")
                                 }
                                 HStack(spacing: 2) {
-                                    fieldHighlight(DoubleField("Qté", value: $line.quantity, format: .number), forRuleIDs: ["BR-16"])
-                                    InfoBadge(text: "BT-149 — Quantité. Doit être positive (facture) ou négative (avoir).")
+                                    fieldHighlight(DoubleField("Qté", value: $line.quantity, format: .number), forRuleIDs: ["BT-129-POSITIVE"])
+                                    InfoBadge(text: "BT-129 — Quantité facturée. Doit être positive, y compris sur un avoir : c'est le type de document (381) qui porte le sens du crédit.")
                                 }
                                 HStack(spacing: 2) {
                                     NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
-                                    InfoBadge(text: "BT-150 — Unité de mesure (UN/ECE Rec 20).")
+                                    InfoBadge(text: "BT-130 — Unité de mesure (UN/ECE Rec 20).")
                                 }
                                 HStack(spacing: 2) {
-                                    fieldHighlight(DoubleField("P.U. HT", value: $line.unitPrice, format: .number), forRuleIDs: ["BR-17"])
+                                    fieldHighlight(DoubleField("P.U. HT", value: $line.unitPrice, format: .number), forRuleIDs: ["BR-27"])
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
                                     VATRatePicker(rate: $line.vatRate)
-                                    InfoBadge(text: "BT-151 — Taux de TVA appliqué (%). Catégorie et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
+                                    InfoBadge(text: "BT-152 — Taux de TVA appliqué (%). Catégorie (BT-151) et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)

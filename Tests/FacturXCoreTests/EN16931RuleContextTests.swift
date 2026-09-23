@@ -38,7 +38,7 @@ final class EN16931RuleContextTests: XCTestCase {
         var invoice = invoiceWithoutLegalNotesOrProfile()
         invoice.number = ""
         let results = EN16931BusinessRules.evaluate(invoice: invoice, context: .received)
-        XCTAssertTrue(results.contains { $0.ruleId == "BR-1" }, "un numéro manquant doit rester détecté, reçu ou pas")
+        XCTAssertTrue(results.contains { $0.ruleId == "BR-02" }, "un numéro manquant doit rester détecté, reçu ou pas")
     }
 
     func testDefaultContextIsIssued() {

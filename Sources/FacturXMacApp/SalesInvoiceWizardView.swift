@@ -74,12 +74,12 @@ struct SalesInvoiceWizardView: View {
     }
 
     /// Si les conditions de paiement de la société émettrice correspondent à un
-    /// préréglage connu, propose l'échéance calculée — l'utilisateur garde la main
-    /// pour la modifier à l'étape récapitulative (DatePicker normal, non verrouillé).
+    /// préréglage de cette société (Réglages > Tables), propose l'échéance calculée —
+    /// l'utilisateur garde la main pour la modifier à l'étape récapitulative
+    /// (DatePicker normal, non verrouillé).
     private func applySuggestedDueDate() {
         guard let cid = companyID, let company = visibleCompanies.first(where: { $0.id == cid }) else { return }
-        guard let presetID = paymentTermsStore.matchingPresetID(for: company.party.paymentTerms),
-              let preset = paymentTermsStore.presets.first(where: { $0.id == presetID }) else { return }
+        guard let preset = paymentTermsStore.matchingPreset(for: company.party.paymentTerms, companyID: cid) else { return }
         dueDate = preset.dueRule.dueDate(from: Date())
     }
 
