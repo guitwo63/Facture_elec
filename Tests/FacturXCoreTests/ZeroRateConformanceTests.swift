@@ -68,4 +68,35 @@ final class ZeroRateConformanceTests: XCTestCase {
         let xml = String(decoding: try OrderCIOXMLGenerator().generate(order: order), as: UTF8.self)
         XCTAssertFalse(xml.contains("ExemptionReason"), xml)
     }
+
+    // MARK: - BR-S-05 : taux strictement positif en catégorie S
+
+    /// Ligne à 0 % mise en « S — Taux normal » dans le menu Catégorie : la PDP la rejette
+    /// (confirmé sur l'API SUPER PDP), l'app l'exportait.
+    func testStandardCategoryWithZeroRateBlocksExport() {
+        let line = InvoiceLine(name: "Formation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .standard)
+        let rule = EN16931BusinessRules.evaluate(invoice: invoice([line])).first { $0.ruleId == "BR-S-05" }
+        XCTAssertEqual(rule?.severity, .error)
+        XCTAssertTrue(rule?.message.contains("Ligne 1") ?? false, rule?.message ?? "")
+        XCTAssertFalse(FacturXValidator().validate(invoice: invoice([line])).isValid)
+    }
+
+    func testStandardCategoryWithPositiveRateIsFine() {
+        let rules = EN16931BusinessRules.evaluate(invoice: invoice([
+            InvoiceLine(name: "Conseil", quantity: 1, unitPrice: 100, vatRate: 20),
+            InvoiceLine(name: "Livre", quantity: 1, unitPrice: 100, vatRate: 5.5),
+            InvoiceLine(name: "Formation", quantity: 1, unitPrice: 100, vatRate: 0, vatCategory: .exempt, vatExemptionReason: motif),
+        ]))
+        XCTAssertFalse(rules.contains { $0.ruleId == "BR-S-05" })
+    }
+
+    /// Le menu Catégorie d'une ligne à 0 % ne propose plus S, sauf à une ligne déjà en S,
+    /// qu'il doit pouvoir afficher avant correction.
+    func testZeroRateCategoryChoicesLeaveOutStandard() {
+        for category in VATCategory.allCases where category != .standard {
+            XCTAssertEqual(VATCategory.zeroRateChoices(current: category), [.zeroRated, .exempt, .reverseCharge, .intraCommunity, .export, .outOfScope],
+                           category.rawValue)
+        }
+        XCTAssertEqual(VATCategory.zeroRateChoices(current: .standard), VATCategory.allCases)
+    }
 }

@@ -71,7 +71,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `line.quantity` | `ram:SpecifiedLineTradeDelivery/ram:BilledQuantity` | BT-129 | BT-129-POSITIVE (contrôle interne : EN 16931 admet une quantité nulle ou négative) | erreur |
 | `line.unit` | `ram:BilledQuantity/@unitCode` (C62 si vide) | BT-130 | BR-23 | avertissement |
 | `line.unitPrice` | `ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount` | BT-146 | BR-27 | erreur |
-| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` (absent en catégorie O : BR-O-05) | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) ; BR-FR-16 (taux hors de la liste des taux français) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; erreur ; avertissement |
+| `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` (absent en catégorie O : BR-O-05) | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) et BR-S-05 (taux nul ou négatif en catégorie S) ; BR-FR-16 (taux hors de la liste des taux français) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; erreur ; avertissement |
 | `line.vatCategory` (suit le taux saisi : S, ou E à 0 %, voir « Catégorie de TVA d'une ligne à 0 % ») | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | BR-O-12 (une ligne O exclut toute autre catégorie, hors EXTENDED) | erreur |
 | `line.vatExemptionReason` | `ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax/ram:ExemptionReason` (ventilation de TVA ; émis seulement en E, AE, K, G et O, BR-S-10 et BR-Z-10 l'interdisant en S et en Z) | BT-120 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | erreur |
 | `line.lineTotal` | `ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount` | BT-131 | BT-131-CALCUL (contrôle interne : quantité × prix unitaire) | erreur |
@@ -120,6 +120,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-IC-02 | n° TVA émetteur et acheteur (BT-31, BT-48) | erreur | Tous deux obligatoires avec une ligne en livraison intracommunautaire (K) |
 | BR-O-02 / BR-O-12 | n° TVA (BT-31, BT-48) / catégorie de TVA (BT-151) | erreur | Facture avec une ligne hors champ de TVA (O), hors EXTENDED : aucun n° TVA ; aucune ligne d'une autre catégorie (BR-O-11 : une seule ventilation) |
 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 | taux de TVA (BT-152) | erreur | Taux non nul avec une catégorie autre que S (catégorie K : règles BR-IC-*) |
+| BR-S-05 | taux de TVA (BT-152) | erreur | Taux nul ou négatif en catégorie S (ligne à 0 % mise en « Taux normal » ; le menu Catégorie d'une ligne à 0 % ne propose plus S) |
 | BR-E-10, BR-AE-10, BR-IC-10, BR-G-10, BR-O-10 | motif d'exonération (BT-120) | erreur | Motif obligatoire pour la catégorie de TVA (BT-151) de la ligne |
 | BR-FR-04 | code type (BT-3) | — | Respectée à l'émission : 387 émis en 380, INT en 381 |
 | BR-FR-05 | mentions légales (BT-22, BT-21 = PMT/PMD/AAB) | avertissement | Mentions PMT/PMD/AAB obligatoires FR |

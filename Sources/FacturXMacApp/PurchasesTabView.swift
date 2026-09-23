@@ -365,7 +365,7 @@ struct PurchaseInvoiceEditorView: View {
                                     if line.vatRate == 0 {
                                         HStack(spacing: 8) {
                                             Picker("", selection: $line.vatCategory) {
-                                                ForEach(VATCategory.allCases, id: \.self) { cat in
+                                                ForEach(VATCategory.zeroRateChoices(current: line.vatCategory), id: \.self) { cat in
                                                     Text("\(cat.rawValue) — \(cat.label)").tag(cat)
                                                 }
                                             }.labelsHidden().frame(width: 210)

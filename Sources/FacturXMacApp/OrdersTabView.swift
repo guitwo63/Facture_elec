@@ -938,7 +938,7 @@ struct OrderEditorView: View {
                                 HStack(spacing: 8) {
                                     HStack(spacing: 2) {
                                         Picker("", selection: $line.vatCategory) {
-                                            ForEach(VATCategory.allCases, id: \.self) { cat in
+                                            ForEach(VATCategory.zeroRateChoices(current: line.vatCategory), id: \.self) { cat in
                                                 Text("\(cat.rawValue) — \(cat.label)").tag(cat)
                                             }
                                         }

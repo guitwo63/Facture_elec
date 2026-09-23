@@ -373,6 +373,12 @@ public enum EN16931BusinessRules {
                 results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
                     message: "\(ruleId) : \(label) — catégorie « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) incompatible avec un taux non nul (BT-152=\(line.vatRate)) ; changez la catégorie ou repassez le taux à 0."))
             }
+            // Réciproque pour S : taux strictement positif. Cas d'une ligne à 0 % mise en
+            // « Taux normal » dans le menu Catégorie, que la PDP rejetait (vérifié le 2026-09-23).
+            if line.vatCategory == .standard && line.vatRate <= 0 {
+                results.append(BusinessRuleResult(ruleId: "BR-S-05", severity: .error,
+                    message: "BR-S-05 : \(label) — catégorie « \(VATCategory.standard.label) » (BT-151=S) avec un taux nul ou négatif (BT-152) ; indiquez le taux, ou choisissez la catégorie de l'opération à 0 % (E si elle est exonérée)."))
+            }
             // Motif d'exonération : BR-E-10, BR-AE-10, BR-IC-10 (K), BR-G-10, BR-O-10.
             if line.vatCategory.requiresExemptionReason,
                (line.vatExemptionReason ?? "").trimmingCharacters(in: .whitespaces).isEmpty {

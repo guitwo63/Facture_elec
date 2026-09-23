@@ -354,6 +354,13 @@ public enum VATCategory: String, Codable, CaseIterable {
         case .standard, .zeroRated: return false
         }
     }
+
+    /// Choix du menu Catégorie d'une ligne à 0 % : tous sauf S, dont le taux doit être
+    /// positif (BR-S-05). S n'y figure que pour une ligne déjà en S à 0 %, que le menu doit
+    /// pouvoir afficher jusqu'à ce qu'on la corrige.
+    public static func zeroRateChoices(current: VATCategory) -> [VATCategory] {
+        allCases.filter { $0 != .standard || current == .standard }
+    }
 }
 
 public struct InvoiceLine: Codable, Hashable, Identifiable {

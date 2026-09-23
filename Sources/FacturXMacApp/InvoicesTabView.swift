@@ -1928,13 +1928,13 @@ struct InvoiceEditorView: View {
                             if line.vatRate == 0 {
                                 HStack(spacing: 8) {
                                     HStack(spacing: 2) {
-                                        Picker("", selection: $line.vatCategory) {
-                                            ForEach(VATCategory.allCases, id: \.self) { cat in
+                                        fieldHighlight(Picker("", selection: $line.vatCategory) {
+                                            ForEach(VATCategory.zeroRateChoices(current: line.vatCategory), id: \.self) { cat in
                                                 Text("\(cat.rawValue) — \(cat.label)").tag(cat)
                                             }
                                         }
                                         .labelsHidden()
-                                        .frame(width: 210)
+                                        .frame(width: 210), forRuleIDs: line.vatCategory == .standard ? ["BR-S-05"] : [])
                                         InfoBadge(text: "BT-151 — Catégorie de TVA d'une ligne à 0 % : E = exonérée (par défaut), Z = taux zéro (rare en France), AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, O = hors champ.")
                                     }
                                     if line.vatCategory.requiresExemptionReason {
