@@ -153,7 +153,11 @@ public struct CIIXMLGenerator {
 
     private func xmlParty(_ party: InvoiceParty, role: PartyRole) -> String {
         let tag = role == .seller ? "SellerTradeParty" : "BuyerTradeParty"
-        let legalOrg = party.siren.map { siren -> String in
+        // Un SIREN ou un n° TVA vidé dans l'éditeur est enregistré "" et non nil : émis tel quel,
+        // l'identifiant vide était rejeté (BR-FR-32 pour le SIREN, BR-CO-09 pour le n° TVA), et
+        // comptait comme présent pour les règles qui l'interdisent (BR-O-02), alors que les
+        // contrôles locaux le tiennent pour absent. On n'émet donc que la valeur rognée, non vide.
+        let legalOrg = trimmedNonEmpty(party.siren).map { siren -> String in
             """
         <ram:SpecifiedLegalOrganization>
           <ram:ID schemeID="\(party.legalSchemeID)">\(escape(siren))</ram:ID>
@@ -185,7 +189,7 @@ public struct CIIXMLGenerator {
 
         let contact = xmlContact(party)
 
-        let taxReg = party.vatNumber.map { vat -> String in
+        let taxReg = trimmedNonEmpty(party.vatNumber).map { vat -> String in
             """
         <ram:SpecifiedTaxRegistration>
           <ram:ID schemeID="VA">\(escape(vat))</ram:ID>
