@@ -354,6 +354,13 @@ public enum VATCategory: String, Codable, CaseIterable {
         case .standard, .zeroRated: return false
         }
     }
+
+    /// Choix du menu Catégorie d'une ligne à 0 % : tous sauf S, dont le taux doit être
+    /// positif (BR-S-05). S n'y figure que pour une ligne déjà en S à 0 %, que le menu doit
+    /// pouvoir afficher jusqu'à ce qu'on la corrige.
+    public static func zeroRateChoices(current: VATCategory) -> [VATCategory] {
+        allCases.filter { $0 != .standard || current == .standard }
+    }
 }
 
 public struct InvoiceLine: Codable, Hashable, Identifiable {
@@ -389,6 +396,9 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
         self.unit = unit
         self.unitPrice = unitPrice
         self.vatRate = vatRate
+        // Sans catégorie explicite, déduite du taux comme avant l'existence des catégories
+        // (0 % → Z), à l'image de `init(from:)` qui relit ainsi les anciennes lignes, émises
+        // en Z. Les éditeurs passent par `setVATRate(_:)`, qui met une ligne à 0 % en E.
         self.vatCategory = vatCategory ?? (vatRate == 0 ? .zeroRated : .standard)
         self.vatExemptionReason = vatExemptionReason
         self.orderReference = orderReference
@@ -422,6 +432,37 @@ public struct InvoiceLine: Codable, Hashable, Identifiable {
 
     public var lineTotal: Double {
         (quantity * unitPrice).rounded(toPlaces: 2)
+    }
+
+    /// Taux choisi par l'utilisateur dans un éditeur (sélecteur de TVA, saisie libre), la
+    /// catégorie (BT-151) suivant : un taux non nul repasse en S et perd son motif
+    /// d'exonération ; une ligne qui passe à 0 % devient exonérée (E), le cas courant en France
+    /// (art. 261, 293 B du CGI…), et son motif (BT-120) reste à saisir : l'export est bloqué
+    /// tant qu'il manque (BR-E-10). Z, AE, K, G et O se choisissent ensuite dans le menu
+    /// Catégorie. Jusqu'au 2026-09-23, 0 % donnait Z « Taux zéro », rare en France, sous le
+    /// libellé « 0 % — Exonéré ». Sans effet quand le taux ne change pas : resélectionner 0 %
+    /// garde la catégorie déjà choisie (K, AE…).
+    public mutating func setVATRate(_ newRate: Double) {
+        guard newRate != vatRate else { return }
+        vatRate = newRate
+        if newRate == 0 {
+            vatCategory = .exempt
+        } else {
+            vatCategory = .standard
+            vatExemptionReason = nil
+        }
+    }
+
+    /// Ligne vide de « Ajouter une ligne » : elle reprend le taux de la précédente (20 % sans
+    /// ligne), sa catégorie et son motif d'exonération. Avec le taux seul, la ligne qui suivait
+    /// une ligne exonérée tombait en Z (déduite du taux), et le motif, contrôlé ligne par ligne
+    /// (BR-E-10…), était à retaper. Le motif n'est repris que pour une catégorie qui l'exige :
+    /// ailleurs, ce serait un reliquat.
+    public static func blank(after previous: InvoiceLine?) -> InvoiceLine {
+        guard let previous else { return InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: 20) }
+        return InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: previous.vatRate,
+                           vatCategory: previous.vatCategory,
+                           vatExemptionReason: previous.vatCategory.requiresExemptionReason ? previous.vatExemptionReason : nil)
     }
 }
 
@@ -459,13 +500,18 @@ public struct VATBreakdownEntry: Hashable, Identifiable {
     /// puis dans l'ordre de `VATCategory.allCases` (celui du sélecteur de catégorie). Sans ce
     /// second critère, deux catégories au même taux sortaient dans l'ordre d'itération d'un
     /// dictionnaire, qui change d'un lancement de l'app à l'autre (écran, PDF et XML).
+    ///
+    /// Le motif d'exonération (BT-120) n'est retenu que pour une catégorie qui l'exige :
+    /// BR-S-10 et BR-Z-10 l'interdisent en S et en Z. Or une ligne passée d'E à Z dans le menu
+    /// Catégorie garde son motif (le champ disparaît, pas la valeur) : il partait dans le XML,
+    /// rejeté par la PDP (vérifié le 2026-09-23 contre le Schematron EN16931).
     static func breakdown(of lines: [InvoiceLine]) -> [VATBreakdownEntry] {
         var basisByKey: [Key: Double] = [:]
         var reasonByKey: [Key: String] = [:]
         for line in lines {
             let key = Key(rate: line.vatRate, category: line.vatCategory)
             basisByKey[key, default: 0] += line.lineTotal
-            if reasonByKey[key] == nil,
+            if reasonByKey[key] == nil, line.vatCategory.requiresExemptionReason,
                let reason = line.vatExemptionReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
                 reasonByKey[key] = reason
             }

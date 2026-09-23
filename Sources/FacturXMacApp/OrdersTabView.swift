@@ -921,8 +921,8 @@ struct OrderEditorView: View {
                                     InfoBadge(text: "Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
-                                    VATRatePicker(rate: $line.vatRate)
-                                    InfoBadge(text: "Taux de TVA appliqué (%). Catégorie et motif d'exonération réglables ci-dessous pour un taux à 0 %.")
+                                    VATRatePicker(rate: $line.editedVATRate)
+                                    InfoBadge(text: "Taux de TVA appliqué (%). À 0 %, la ligne est exonérée (catégorie E) : indiquez le motif d'exonération ci-dessous, ou choisissez une autre catégorie.")
                                 }
                                 Text(String(format: "%.2f", line.lineTotal))
                                     .monospacedDigit().frame(width: 80, alignment: .trailing)
@@ -934,21 +934,17 @@ struct OrderEditorView: View {
                                     Image(systemName: "minus.circle")
                                 }
                             }
-                            .onChange(of: line.vatRate) { newRate in
-                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
-                                if newRate != 0 { line.vatExemptionReason = nil }
-                            }
                             if line.vatRate == 0 {
                                 HStack(spacing: 8) {
                                     HStack(spacing: 2) {
                                         Picker("", selection: $line.vatCategory) {
-                                            ForEach(VATCategory.allCases, id: \.self) { cat in
+                                            ForEach(VATCategory.zeroRateChoices(current: line.vatCategory), id: \.self) { cat in
                                                 Text("\(cat.rawValue) — \(cat.label)").tag(cat)
                                             }
                                         }
                                         .labelsHidden()
                                         .frame(width: 210)
-                                        InfoBadge(text: "Catégorie de TVA : S = normal, Z = taux zéro, AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, E = exonérée, O = hors champ.")
+                                        InfoBadge(text: "Catégorie de TVA d'une ligne à 0 % : E = exonérée (par défaut), Z = taux zéro (rare en France), AE = autoliquidation, K = livraison intracommunautaire, G = exportation hors UE, O = hors champ.")
                                     }
                                     if line.vatCategory.requiresExemptionReason {
                                         HStack(spacing: 2) {
@@ -962,7 +958,7 @@ struct OrderEditorView: View {
                             }
                         }
                         Button {
-                            order.lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: order.lines.last?.vatRate ?? 20))
+                            order.lines.append(.blank(after: order.lines.last))
                         } label: { Label("Ajouter une ligne", systemImage: "plus") }
                     }.padding(8)
                 }.lockable(fieldLocked)

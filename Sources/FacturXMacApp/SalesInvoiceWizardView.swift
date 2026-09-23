@@ -153,17 +153,10 @@ struct SalesInvoiceWizardView: View {
                         TextField("Désignation", text: $line.name)
                         TextField("Qté", value: $line.quantity, format: .number).frame(width: 60)
                         TextField("Prix U. HT", value: $line.unitPrice, format: .number).frame(width: 90)
-                        VATRatePicker(rate: $line.vatRate)
-                            .onChange(of: line.vatRate) { newRate in
-                                // Catégorie de TVA (BT-151) tenue cohérente avec le taux : cet assistant
-                                // minimal n'offre pas de sélection fine (autoliquidation, export…), donc
-                                // ne propose que standard/zéro-rated — affiner ensuite dans la fiche facture
-                                // complète si besoin. Sans ce recalage, changer le taux ici pouvait laisser
-                                // une catégorie "zéro-rated" sur une ligne repassée à taux plein (ou l'inverse),
-                                // rejeté par le validateur EN16931 (BR-Z-05/BR-Z-09).
-                                line.vatCategory = newRate == 0 ? .zeroRated : .standard
-                                if newRate != 0 { line.vatExemptionReason = nil }
-                            }
+                        // Catégorie de TVA (BT-151) tenue cohérente avec le taux par `editedVATRate` :
+                        // S, ou E à 0 %. Cet assistant minimal n'offre pas de sélection fine
+                        // (autoliquidation, export…), à affiner ensuite dans la fiche facture.
+                        VATRatePicker(rate: $line.editedVATRate)
                         Text(String(format: "%.2f", line.lineTotal))
                             .font(.caption).foregroundStyle(.secondary)
                             .frame(width: 60, alignment: .trailing)
@@ -173,9 +166,14 @@ struct SalesInvoiceWizardView: View {
                             .buttonStyle(.borderless)
                             .disabled(lines.count <= 1)
                     }
+                    // Ligne à 0 %, donc exonérée : sans son motif, la facture créée resterait
+                    // bloquée à l'export (BR-E-10) jusqu'à ce qu'on le saisisse dans la fiche.
+                    if line.vatCategory.requiresExemptionReason {
+                        TextField("Motif d'exonération (BT-120)", text: Binding($line.vatExemptionReason, replacingNilWith: ""))
+                    }
                 }
                 Button {
-                    lines.append(InvoiceLine(name: "", quantity: 1, unitPrice: 0, vatRate: lines.last?.vatRate ?? 20))
+                    lines.append(.blank(after: lines.last))
                 } label: { Label("Ajouter une ligne", systemImage: "plus") }
 
                 HStack {

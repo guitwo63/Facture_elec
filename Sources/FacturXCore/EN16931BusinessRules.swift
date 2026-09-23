@@ -138,7 +138,8 @@ public enum EN16931BusinessRules {
                 message: "BR-FR-09 : Le SIRET de l'émetteur doit comporter 14 chiffres et être valide (clé Luhn)."))
         }
         let sellerVAT = (invoice.seller.vatNumber ?? "").trimmingCharacters(in: .whitespaces)
-        let hasStandardRatedLine = invoice.lines.contains { $0.vatRate > 0 }
+        // Sur la catégorie, comme le Schematron : une ligne S à 0 % (BR-S-05) compte aussi.
+        let hasStandardRatedLine = invoice.lines.contains { $0.vatCategory == .standard }
         if hasStandardRatedLine && sellerVAT.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-S-02", severity: .error,
                 message: "BR-S-02 : Une ligne à TVA standard (BT-151 = S) oblige l'émetteur à avoir un n° TVA (BT-31)."))
@@ -151,6 +152,12 @@ public enum EN16931BusinessRules {
         if hasExemptLine && sellerVAT.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-E-02", severity: .error,
                 message: "BR-E-02 : Une ligne exonérée de TVA (BT-151 = E) oblige l'émetteur à avoir un n° TVA (BT-31)."))
+        }
+        // Idem pour la catégorie Taux zéro : rejet BR-Z-02 de la PDP que l'app ne signalait pas
+        // (confirmé sur l'API SUPER PDP le 2026-09-23).
+        if invoice.lines.contains(where: { $0.vatCategory == .zeroRated }) && sellerVAT.isEmpty {
+            results.append(BusinessRuleResult(ruleId: "BR-Z-02", severity: .error,
+                message: "BR-Z-02 : Une ligne à taux zéro (BT-151 = Z) oblige l'émetteur à avoir un n° TVA (BT-31)."))
         }
         // Catégorie « Hors champ de TVA » (BT-151 = O) : règles du Schematron EN16931, absentes
         // du Schematron EXTENDED. Une telle facture ne porte aucun n° TVA (BR-O-02) ni aucune
@@ -357,10 +364,11 @@ public enum EN16931BusinessRules {
                 results.append(BusinessRuleResult(ruleId: "BR-FR-16", severity: .warning,
                     message: "BR-FR-16 : \(label) — un taux de TVA négatif (BT-152) ne fait pas partie des taux admis en France ; vérifiez la catégorie de TVA (BT-151)."))
             }
-            // Contrôle interne : simple rappel, un taux nul en catégorie Z est conforme.
+            // Contrôle interne : simple rappel, un taux nul en catégorie Z est conforme, mais rare
+            // en France, où une ligne à 0 % est le plus souvent exonérée (E, motif obligatoire).
             if line.vatRate == 0 && line.vatCategory == .zeroRated {
                 results.append(BusinessRuleResult(ruleId: "BT-152-ZERO", severity: .warning,
-                    message: "BT-152 : \(label) — taux nul en catégorie Z (BT-151) : vérifiez qu'il s'agit bien d'une exonération et non d'un oubli de taux."))
+                    message: "BT-152 : \(label) — taux nul en catégorie Z « Taux zéro » (BT-151), rare en France. Opération exonérée : choisissez la catégorie E « Exonérée » et indiquez son motif (BT-120). Opération taxable : vérifiez que le taux n'a pas été oublié."))
             }
             // Toute catégorie autre que "Standard" (Z, AE, K, G, E, O) implique un taux à 0 — sinon
             // le sous-total de TVA calculé pour ce groupe (BG-23) est non nul alors que sa catégorie
@@ -371,6 +379,12 @@ public enum EN16931BusinessRules {
                 let ruleId = "BR-\(rulePrefix(line.vatCategory))-05"
                 results.append(BusinessRuleResult(ruleId: ruleId, severity: .error,
                     message: "\(ruleId) : \(label) — catégorie « \(line.vatCategory.label) » (BT-151=\(line.vatCategory.rawValue)) incompatible avec un taux non nul (BT-152=\(line.vatRate)) ; changez la catégorie ou repassez le taux à 0."))
+            }
+            // Réciproque pour S : taux strictement positif. Cas d'une ligne à 0 % mise en
+            // « Taux normal » dans le menu Catégorie, que la PDP rejetait (vérifié le 2026-09-23).
+            if line.vatCategory == .standard && line.vatRate <= 0 {
+                results.append(BusinessRuleResult(ruleId: "BR-S-05", severity: .error,
+                    message: "BR-S-05 : \(label) — catégorie « \(VATCategory.standard.label) » (BT-151=S) avec un taux nul ou négatif (BT-152) ; indiquez le taux, ou choisissez la catégorie de l'opération à 0 % (E si elle est exonérée)."))
             }
             // Motif d'exonération : BR-E-10, BR-AE-10, BR-IC-10 (K), BR-G-10, BR-O-10.
             if line.vatCategory.requiresExemptionReason,
