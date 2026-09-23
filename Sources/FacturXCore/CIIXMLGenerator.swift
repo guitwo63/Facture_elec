@@ -234,9 +234,11 @@ public struct CIIXMLGenerator {
 """
     }
 
+    /// Retours à la ligne compris : `normalize-space`, qui décide pour les Schematron si un
+    /// élément est vide, les traite comme des espaces.
     private func trimmedNonEmpty(_ s: String?) -> String? {
         guard let s = s else { return nil }
-        let t = s.trimmingCharacters(in: .whitespaces)
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
     }
 
@@ -309,10 +311,14 @@ public struct CIIXMLGenerator {
 """
     }
 
+    /// Une note vide ou faite d'espaces n'est pas écrite : `<ram:Content>   </ram:Content>` est un
+    /// élément vide pour PEPPOL-EN16931-R008, et SUPER PDP répond alors is_valid=false (vérifié
+    /// le 2026-09-23 sur une note libre et une mention PMT). Le texte est écrit sans ses espaces
+    /// de début et de fin, comme sur le PDF.
     private func notesXML(_ invoice: Invoice) -> String {
         var notes: [String] = []
 
-        if let custom = invoice.notes, !custom.isEmpty {
+        if let custom = trimmedNonEmpty(invoice.notes) {
             notes.append("""
     <ram:IncludedNote>
       <ram:Content>\(escape(custom))</ram:Content>
@@ -320,26 +326,26 @@ public struct CIIXMLGenerator {
 """)
         }
 
-        if !invoice.legalNotePMT.isEmpty {
+        if let pmt = trimmedNonEmpty(invoice.legalNotePMT) {
             notes.append("""
     <ram:IncludedNote>
-      <ram:Content>\(escape(invoice.legalNotePMT))</ram:Content>
+      <ram:Content>\(escape(pmt))</ram:Content>
       <ram:SubjectCode>PMT</ram:SubjectCode>
     </ram:IncludedNote>
 """)
         }
-        if !invoice.legalNotePMD.isEmpty {
+        if let pmd = trimmedNonEmpty(invoice.legalNotePMD) {
             notes.append("""
     <ram:IncludedNote>
-      <ram:Content>\(escape(invoice.legalNotePMD))</ram:Content>
+      <ram:Content>\(escape(pmd))</ram:Content>
       <ram:SubjectCode>PMD</ram:SubjectCode>
     </ram:IncludedNote>
 """)
         }
-        if !invoice.legalNoteAAB.isEmpty {
+        if let aab = trimmedNonEmpty(invoice.legalNoteAAB) {
             notes.append("""
     <ram:IncludedNote>
-      <ram:Content>\(escape(invoice.legalNoteAAB))</ram:Content>
+      <ram:Content>\(escape(aab))</ram:Content>
       <ram:SubjectCode>AAB</ram:SubjectCode>
     </ram:IncludedNote>
 """)

@@ -94,16 +94,6 @@ public struct FacturXValidator {
             }
         }
 
-        if invoice.legalNotePMT.trimmingCharacters(in: .whitespaces).isEmpty {
-            warnings.append("La mention sur les frais de recouvrement (note avec SubjectCode PMT) est obligatoire en France (BR-FR-05).")
-        }
-        if invoice.legalNotePMD.trimmingCharacters(in: .whitespaces).isEmpty {
-            warnings.append("La mention sur les pénalités de retard (note avec SubjectCode PMD) est obligatoire en France (BR-FR-05).")
-        }
-        if invoice.legalNoteAAB.trimmingCharacters(in: .whitespaces).isEmpty {
-            warnings.append("La mention sur l'escompte (note avec SubjectCode AAB) est obligatoire en France (BR-FR-05).")
-        }
-
         if let iban = invoice.paymentIBAN, !iban.trimmingCharacters(in: .whitespaces).isEmpty {
             if !IBANValidator.isValid(iban) {
                 let cleaned = IBANValidator.normalize(iban)
