@@ -29,6 +29,8 @@ public struct CIIXMLGenerator {
 \(buyerReferenceXML(invoice))\(seller)\(buyer)\(purchaseOrderXML(invoice))\(contractXML(invoice))\(tenderXML(invoice))\(projectRef.isEmpty ? "" : projectRef)
         </ram:ApplicableHeaderTradeAgreement>
 """
+        // Le XSD impose l'avis d'expédition (BT-16) AVANT l'avis de réception (BT-15) : l'ordre
+        // inverse, utilisé jusqu'ici, rendait le XML invalide dès que les deux étaient saisis.
         let delivery = """
         <ram:ApplicableHeaderTradeDelivery>
           <ram:ActualDeliverySupplyChainEvent>
@@ -36,7 +38,7 @@ public struct CIIXMLGenerator {
               <udt:DateTimeString format="102">\(issue)</udt:DateTimeString>
             </ram:OccurrenceDateTime>
           </ram:ActualDeliverySupplyChainEvent>
-\(receivingAdviceXML(invoice))\(despatchAdviceXML(invoice))
+\(despatchAdviceXML(invoice))\(receivingAdviceXML(invoice))
         </ram:ApplicableHeaderTradeDelivery>
 """
         let settlement = xmlSettlement(invoice, issue: issue, due: due)
@@ -78,34 +80,40 @@ public struct CIIXMLGenerator {
         let desc = line.description.map { """
             <ram:Description>\(escape($0))</ram:Description>
 """ } ?? ""
-        let globalID = line.optionalFields.first(where: { $0.tagName == "ram:GlobalID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
-        let globalIDXML = globalID.map { f in
-            let v = escape(f.value.trimmingCharacters(in: .whitespaces))
-            return """
-            <ram:GlobalID schemeID="0160">\(v)</ram:GlobalID>
-"""
-        } ?? ""
-        let orderField = line.optionalFields.first(where: { $0.tagName == "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
-        let contractField = line.optionalFields.first(where: { $0.tagName == "ram:ContractReferencedDocument/ram:IssuerAssignedID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty })
-        var lineRefs = ""
-        if let of = orderField {
-            lineRefs += """
-            <ram:BuyerOrderReferencedDocument>
-              <ram:IssuerAssignedID>\(escape(of.value.trimmingCharacters(in: .whitespaces)))</ram:IssuerAssignedID>
-            </ram:BuyerOrderReferencedDocument>
+        // Identifiants de l'article, dans l'ordre du XSD (TradeProductType) : GTIN (BT-157,
+        // dont le schemeID est exigé par BR-64), vendeur (BT-155), acheteur (BT-156).
+        var productIDs = ""
+        if let v = optionalValue(line.optionalFields, "ram:GlobalID") {
+            productIDs += """
+            <ram:GlobalID schemeID="0160">\(escape(v))</ram:GlobalID>
 """
         }
-        if let cf = contractField {
+        if let v = optionalValue(line.optionalFields, "ram:SellerAssignedID") {
+            productIDs += """
+            <ram:SellerAssignedID>\(escape(v))</ram:SellerAssignedID>
+"""
+        }
+        if let v = optionalValue(line.optionalFields, "ram:BuyerAssignedID") {
+            productIDs += """
+            <ram:BuyerAssignedID>\(escape(v))</ram:BuyerAssignedID>
+"""
+        }
+        // BT-132 : au niveau de la ligne, le profil EN16931 n'admet dans la référence de
+        // commande que le numéro de ligne (LineID) — ni IssuerAssignedID (signalé hors profil
+        // par le Schematron) ni ContractReferencedDocument (rejeté par le XSD), que les
+        // anciennes balises de ligne émettaient.
+        var lineRefs = ""
+        if let v = optionalValue(line.optionalFields, "ram:BuyerOrderReferencedDocument/ram:LineID") {
             lineRefs += """
-            <ram:ContractReferencedDocument>
-              <ram:IssuerAssignedID>\(escape(cf.value.trimmingCharacters(in: .whitespaces)))</ram:IssuerAssignedID>
-            </ram:ContractReferencedDocument>
+            <ram:BuyerOrderReferencedDocument>
+              <ram:LineID>\(escape(v))</ram:LineID>
+            </ram:BuyerOrderReferencedDocument>
 """
         }
         return """
         <ram:IncludedSupplyChainTradeLineItem>
           <ram:AssociatedDocumentLineDocument><ram:LineID>\(lineID)</ram:LineID></ram:AssociatedDocumentLineDocument>
-          <ram:SpecifiedTradeProduct>\(globalIDXML.isEmpty ? "" : globalIDXML)
+          <ram:SpecifiedTradeProduct>\(productIDs.isEmpty ? "" : productIDs)
             <ram:Name>\(escape(line.name))</ram:Name>\(desc.isEmpty ? "" : desc)
           </ram:SpecifiedTradeProduct>
           <ram:SpecifiedLineTradeAgreement>\(lineRefs.isEmpty ? "" : lineRefs)
@@ -222,6 +230,10 @@ public struct CIIXMLGenerator {
         return t.isEmpty ? nil : t
     }
 
+    private func optionalValue(_ fields: [OptionalField], _ tagName: String) -> String? {
+        trimmedNonEmpty(fields.first(where: { $0.tagName == tagName && trimmedNonEmpty($0.value) != nil })?.value)
+    }
+
     private func buyerReferenceXML(_ invoice: Invoice) -> String {
         guard let ref = invoice.buyerReference, !ref.isEmpty else { return "" }
         return """
@@ -245,12 +257,15 @@ public struct CIIXMLGenerator {
       </ram:ContractReferencedDocument>
 """
     }
+    /// BT-17 (appel d'offres ou lot) : `AdditionalReferencedDocument` de code type 50, placé
+    /// après le contrat et avant le projet comme l'impose le XSD.
     private func tenderXML(_ invoice: Invoice) -> String {
         guard let ref = invoice.tenderRef, !ref.isEmpty else { return "" }
         return """
-      <ram:TendererReferencedDocument>
+      <ram:AdditionalReferencedDocument>
         <ram:IssuerAssignedID>\(escape(ref))</ram:IssuerAssignedID>
-      </ram:TendererReferencedDocument>
+        <ram:TypeCode>50</ram:TypeCode>
+      </ram:AdditionalReferencedDocument>
 """
     }
     private func receivingAdviceXML(_ invoice: Invoice) -> String {
@@ -335,7 +350,9 @@ public struct CIIXMLGenerator {
         let taxTotal = String(format: "%.2f", invoice.taxTotal)
         let grand = String(format: "%.2f", invoice.grandTotal)
         let duePay = String(format: "%.2f", invoice.netToPay)
-        let prepaidLine = invoice.prepaidAmount > 0
+        // En cadre « déjà payée » (B2/S2/M2), BR-FR-CO-09 compare BT-113 au total TTC : il
+        // doit être présent même à zéro (facture d'un montant nul), sinon la règle échoue.
+        let prepaidLine = invoice.prepaidAmount > 0 || invoice.billingMode.isAlreadyPaid
             ? "        <ram:TotalPrepaidAmount>\(String(format: "%.2f", invoice.prepaidAmount))</ram:TotalPrepaidAmount>\n"
             : ""
 
@@ -444,12 +461,14 @@ public struct CIIXMLGenerator {
             .joined(separator: "\n")
     }
 
+    /// BT-11 : la syntaxe CII d'EN16931 ne porte que l'identifiant du projet, mais le XSD
+    /// exige aussi un nom — rempli avec la valeur conventionnelle « Project reference ».
     private func projectReferenceXML(_ invoice: Invoice) -> String {
-        guard let field = invoice.optionalFields.first(where: { $0.tagName == "ram:SpecifiedProcuringProject/ram:ID" && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }) else { return "" }
-        let v = escape(field.value.trimmingCharacters(in: .whitespaces))
+        guard let v = optionalValue(invoice.optionalFields, "ram:SpecifiedProcuringProject/ram:ID") else { return "" }
         return """
       <ram:SpecifiedProcuringProject>
-        <ram:ID>\(v)</ram:ID>
+        <ram:ID>\(escape(v))</ram:ID>
+        <ram:Name>Project reference</ram:Name>
       </ram:SpecifiedProcuringProject>
 """
     }

@@ -49,7 +49,12 @@ final class CIIXMLParserTests: XCTestCase {
             purchaseOrderRef: "BC-2026-100",
             lines: [
                 InvoiceLine(name: "Prestation de conseil", quantity: 2, unit: "DAY", unitPrice: 600, vatRate: 20,
-                            optionalFields: [OptionalField(tagName: "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID", value: "LIGNE-BC-1")]),
+                            optionalFields: [
+                                OptionalField(tagName: "ram:GlobalID", value: "3017620422003"),
+                                OptionalField(tagName: "ram:SellerAssignedID", value: "ART-V-12"),
+                                OptionalField(tagName: "ram:BuyerAssignedID", value: "ART-A-34"),
+                                OptionalField(tagName: "ram:BuyerOrderReferencedDocument/ram:LineID", value: "10"),
+                            ]),
                 InvoiceLine(name: "Export hors UE", quantity: 1, unit: "C62", unitPrice: 300, vatRate: 0, vatCategory: .export, vatExemptionReason: "Exportation hors UE — art. 262 I du CGI")
             ],
             paymentIBAN: "FR7630006000011234567890189",
@@ -118,8 +123,10 @@ final class CIIXMLParserTests: XCTestCase {
         XCTAssertEqual(parsed.lines[0].unit, original.lines[0].unit)
         XCTAssertEqual(parsed.lines[0].unitPrice, original.lines[0].unitPrice, accuracy: 0.0001)
         XCTAssertEqual(parsed.lines[0].vatRate, original.lines[0].vatRate, accuracy: 0.0001)
-        XCTAssertEqual(parsed.lines[0].optionalFields.first?.tagName, "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID")
-        XCTAssertEqual(parsed.lines[0].optionalFields.first?.value, "LIGNE-BC-1")
+        XCTAssertEqual(
+            Dictionary(uniqueKeysWithValues: parsed.lines[0].optionalFields.map { ($0.tagName, $0.value) }),
+            Dictionary(uniqueKeysWithValues: original.lines[0].optionalFields.map { ($0.tagName, $0.value) })
+        )
 
         XCTAssertEqual(parsed.lines[1].vatCategory, .export)
         XCTAssertEqual(parsed.lines[1].vatExemptionReason, original.lines[1].vatExemptionReason)

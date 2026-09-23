@@ -995,7 +995,7 @@ struct OptionalFieldsSection: View {
     }
 
     private func helpFor(tagName: String) -> String {
-        OptionalFieldCatalogue.template(forTag: tagName, location: location)?.help ?? "Balise libre (non emise dans le XML CII)."
+        OptionalFieldCatalogue.help(forTag: tagName, location: location)
     }
 
     var body: some View {
@@ -1660,12 +1660,12 @@ struct InvoiceEditorView: View {
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
-                                            Text("Mode facturation (BT-23)").font(.caption)
-                                            InfoBadge(text: "BT-23 — Mode de facturation (B/S/M). Requis pour le cycle de vie PDP.")
+                                            Text("Cadre de facturation (BT-23)").font(.caption)
+                                            InfoBadge(text: "BT-23 — Cadre de facturation. Lettre : B = biens, S = services, M = facture double (biens et services non accessoires l'un de l'autre). Chiffre : 1 = dépôt d'une facture, 2 = facture déjà payée (montant déjà payé = total TTC, échéance = date du paiement), 4 = facture définitive après acompte (interdit sur un acompte), 3/5/6 = sous-traitance ou cotraitance, 7 = TVA déjà collectée. Les cadres 8 (multi-vendeurs) et 9 (bidirectionnel) ne sont pas proposés : ils exigent des lignes de regroupement que l'application ne produit pas.")
                                         }
-                                        Picker("", selection: $invoice.billingMode) {
-                                            ForEach(BillingMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                                        }.labelsHidden().frame(width: 320)
+                                        fieldHighlight(Picker("", selection: $invoice.billingMode) {
+                                            ForEach(BillingMode.selectableCases(current: invoice.billingMode), id: \.self) { Text($0.label).tag($0) }
+                                        }.labelsHidden().frame(width: 320), forRuleIDs: ["BR-FR-CO-08", "BR-FR-CO-09", "BR-FR-MV-02", "BR-FR-BD-02"])
                                     }
                                 }
                                 HStack(spacing: 6) {
@@ -1754,13 +1754,13 @@ struct InvoiceEditorView: View {
                                         }
                                     }
                                 }
-                                if invoice.type.isDeposit || invoice.type.isFinalSettlement {
+                                if invoice.type.isDeposit || invoice.type.isFinalSettlement || invoice.billingMode.isAlreadyPaid {
                                     HStack(spacing: 3) {
-                                        Text("Acompte déjà payé").font(.caption)
-                                        TextField("0,00", value: $invoice.prepaidAmount, format: .number)
-                                            .frame(width: 120).textFieldStyle(.roundedBorder)
+                                        Text(invoice.prepaidAmountLabel).font(.caption)
+                                        fieldHighlight(TextField("0,00", value: $invoice.prepaidAmount, format: .number)
+                                            .frame(width: 120).textFieldStyle(.roundedBorder), forRuleIDs: ["BR-FR-CO-09"])
                                         Text(invoice.currency).font(.caption).foregroundStyle(.secondary)
-                                        InfoBadge(text: "BT-105 — Montant des acomptes déjà payés (PrepaidAmount). Sert au calcul du net à payer sur une facture de solde.")
+                                        InfoBadge(text: "BT-113 — Montant déjà payé (TotalPrepaidAmount), déduit du total TTC pour obtenir le net à payer : acomptes déjà réglés sur une facture de solde, ou totalité du total TTC en cadre « facture déjà payée » (B2/S2/M2).")
                                     }
                                 }
                                 companyScopePicker
@@ -1774,7 +1774,7 @@ struct InvoiceEditorView: View {
                                 }
                                 row("Total TTC", invoice.grandTotal, bold: true)
                                 if invoice.prepaidAmount > 0 {
-                                    row("Acompte déjà payé", -invoice.prepaidAmount)
+                                    row(invoice.prepaidAmountLabel, -invoice.prepaidAmount)
                                     row("Net à payer", invoice.netToPay, bold: true)
                                 }
                                 }
@@ -1813,7 +1813,7 @@ struct InvoiceEditorView: View {
                                 HStack(spacing: 2) {
                                     TextField("Commande", text: Binding($line.orderReference, replacingNilWith: ""))
                                         .frame(width: 140)
-                                    InfoBadge(text: "BT-132 — Référence de commande liée à la ligne.")
+                                    InfoBadge(text: "Commande d'origine de la ligne — usage interne (rattachement aux commandes, exports), non transmise dans le XML Factur-X. Pour le numéro de ligne de commande normé, utilisez le champ optionnel BT-132.")
                                 }
                                 HStack(spacing: 2) {
                                     fieldHighlight(DoubleField("Qté", value: $line.quantity, format: .number), forRuleIDs: ["BR-16"])

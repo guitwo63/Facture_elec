@@ -124,6 +124,33 @@ final class DepositAndFinalSettlementTests: XCTestCase {
         XCTAssertFalse(final.isOverdue, "une facture de solde fraîchement créée ne doit jamais paraître déjà en retard")
     }
 
+    // MARK: - Cadre de facturation (BT-23) de l'acompte et du solde
+
+    func testNewDepositNeverKeepsAFinalAfterDepositFramework() {
+        let store = InvoiceStore()
+        let p = party("Client")
+        let source = Invoice(number: store.nextNumber(), seller: p, buyer: p,
+                              lines: [InvoiceLine(name: "X", quantity: 1, unitPrice: 100, vatRate: 20)], billingMode: .s4)
+
+        let deposit = store.newDeposit(from: source)
+
+        XCTAssertEqual(deposit.billingMode, .s1, "S4 sur un acompte (386) est rejeté par BR-FR-CO-08")
+        XCTAssertFalse(EN16931BusinessRules.evaluate(invoice: deposit).contains { $0.ruleId == "BR-FR-CO-08" })
+    }
+
+    func testNewFinalSettlementIsAFinalInvoiceAfterDeposit() {
+        let store = InvoiceStore()
+        let p = party("Client")
+        let source = Invoice(number: store.nextNumber(), seller: p, buyer: p,
+                              lines: [InvoiceLine(name: "X", quantity: 1, unitPrice: 100, vatRate: 20)], billingMode: .m1)
+        let deposit = store.newDeposit(from: source)
+
+        let final = store.newFinalSettlement(from: source, deposits: [deposit])
+
+        XCTAssertEqual(deposit.billingMode, .m1)
+        XCTAssertEqual(final.billingMode, .m4, "la facture définitive après acompte est en cadre 4 (spécifications externes DGFiP)")
+    }
+
     // MARK: - InvoiceTypeCode.allowsDepositCreation
 
     func testAllowsDepositCreationOnlyForCommercialAndCorrection() {

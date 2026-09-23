@@ -14,13 +14,13 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `invoice.dueDate` | `ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime` | BT-9 | BR-9 | avertissement |
 | `invoice.currency` | `ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode` | BT-5 | BR-5 | erreur |
 | `invoice.profile` | `ram:GuidelineSpecifiedDocumentContextParameter/ram:ID` | BT-24 | BR-PROFIL | avertissement |
-| `invoice.billingMode` | `ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID` | BT-23 | — | — |
+| `invoice.billingMode` | `ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID` | BT-23 | BR-FR-CO-08, BR-FR-CO-09, BR-FR-MV-02, BR-FR-BD-02 | erreur |
 | `invoice.buyerReference` | `ram:BuyerReference` | BT-10 | — | — |
 | `invoice.purchaseOrderRef` | `ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID` | BT-13 | — | — |
 | `invoice.contractRef` | `ram:ContractReferencedDocument/ram:IssuerAssignedID` | BT-12 | — | — |
-| `invoice.tenderRef` | `ram:TendererReferencedDocument/ram:IssuerAssignedID` | BT-17 | — | — |
-| `invoice.receivingAdviceRef` | `ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID` | BT-18 | — | — |
-| `invoice.despatchAdviceRef` | `ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID` | BT-19 | — | — |
+| `invoice.tenderRef` | `ram:AdditionalReferencedDocument/ram:IssuerAssignedID` + `ram:TypeCode` = `50` | BT-17 | — | — |
+| `invoice.receivingAdviceRef` | `ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID` | BT-15 | — | — |
+| `invoice.despatchAdviceRef` | `ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID` | BT-16 | — | — |
 | `invoice.precedingInvoiceRef` | `ram:ApplicableHeaderTradeSettlement/.../ram:IssuerAssignedID` (invoiceReferencedXML) | BT-25 | BR-FR-CO-05 | erreur |
 | `invoice.precedingInvoiceDate` | `ram:ApplicableHeaderTradeSettlement/.../ram:FormattedIssueDateTime` | BT-26 | BR-FR-CO-05 | erreur |
 | `invoice.notes` | `ram:IncludedNote/ram:Content` (sans SubjectCode) | BT-22 | — | — |
@@ -69,7 +69,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` | BT-151 | BR-FR-06 | avertissement (négatif) |
 | `line.vatCategory` (déduit du taux) | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | — | — |
 | `line.lineTotal` | `ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount` | BT-149 | BR-27 | erreur |
-| `line.orderReference` | `ram:BuyerOrderReferencedDocument` (niveau ligne) | BT-132 | — | — |
+| `line.orderReference` | — (usage interne : rattachement aux commandes, exports ; non émis) | — | — | — |
 
 ## Totaux (SpecifiedTradeSettlementHeaderMonetarySummation)
 
@@ -120,6 +120,10 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | BR-FR-05 | mentions légales (BT-21) | avertissement | Mentions PMT/PMD/AAB obligatoires FR |
 | BR-FR-06 | taux TVA (BT-151) | avertissement | Taux négatif inhabituel |
 | BR-FR-CO-05 | facture antérieure (BT-25/26) | erreur | Référence + date obligatoires |
+| BR-FR-CO-08 | cadre de facturation (BT-23) | erreur | Cadre 4 (définitive après acompte) interdit sur un acompte (386) |
+| BR-FR-CO-09 | cadre de facturation (BT-23) | erreur / avertissement | Cadre 2 (déjà payée) : montant payé (BT-113) = total TTC, net à payer nul ; rappel : échéance = date du paiement |
+| BR-FR-MV-02 / BR-FR-BD-02 | cadre de facturation (BT-23) | erreur | Cadres 8 (multi-vendeurs) / 9 (bidirectionnel) : lignes GROUP non produites par l'app |
+| BT-157-GTIN | identifiant normalisé de l'article (BT-157) | avertissement | Valeur qui n'est pas un GTIN (émise avec le schéma 0160) — contrôle interne |
 | BR-PROFIL | profil (BT-24) | avertissement | Profil limité ; EN 16931 recommandé |
 
 ## Notes d'implémentation
@@ -131,18 +135,36 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 - Les totaux (lineTotal, taxTotal, grandTotal, netToPay) sont calculés, non saisis ; leurs règles (BR-12/13/53/CO-16) ne sont pas mappées à un champ d'encadré.
 
 
+## Cadre de facturation (BT-23)
+
+`BillingMode` : la lettre donne la nature de la facture — **B** = biens, **S** = services, **M** = facture double (biens et services non accessoires l'un de l'autre) — et le chiffre le cadre : **1** = dépôt d'une facture, **2** = facture déjà payée, **4** = facture définitive après acompte, **3** = sous-traitance avec paiement direct (commande publique), **5** / **6** = dépôt par un sous-traitant / un cotraitant, **7** = TVA déjà collectée, **8** = facture multi-vendeurs, **9** = facture bidirectionnelle. Libellés d'après le dossier de spécifications externes DGFiP (cas d'usage, v2.3) ; le Schematron France CTC admet ces 20 codes (BR-FR-08).
+
+Contraintes du Schematron France CTC, reprises dans `EN16931BusinessRules` (bloquantes à l'export et au dépôt SUPER PDP) :
+- **Cadre 2** (B2/S2/M2) — BR-FR-CO-09 : montant déjà payé (BT-113) = total TTC (BT-112), net à payer (BT-115) = 0, échéance (BT-9) = date du paiement (seule sa présence est vérifiable : rappel en avertissement). Le champ « Montant déjà payé » s'affiche dans l'éditeur dès qu'un cadre 2 est choisi, et `TotalPrepaidAmount` est toujours émis dans ce cadre (même à 0).
+- **Cadre 4** (B4/S4/M4) — BR-FR-CO-08 : interdit sur une facture d'acompte (386). `InvoiceStore.newDeposit` ramène un cadre 4 au cadre 1 de même nature ; `newFinalSettlement` passe un cadre 1 au cadre 4 (la facture de solde est la facture définitive après acompte).
+- **Cadres 8 et 9** — BR-FR-MV-* / BR-FR-BD-* : exigent des lignes de regroupement par vendeur (sous-type `GROUP`) que le générateur ne produit pas. Plus proposés à la saisie (`BillingMode.selectableCases`) ; une facture existante qui les porte reste affichée, mais son export est bloqué.
+
 ## Champs optionnels EN 16931 (catalogue + champs libres)
 
-La section condensee "Champs optionnels" (entete + ligne) permet de saisir des champs optionnels du schema EN 16931 non couverts par les champs dedies. Chaque entree couple un nom de balise CII et une valeur. Les champs du catalogue prdefini sont emis dans le CII a leur position conforme ; les champs libres sont stockes et affiches mais non emis dans le XML (emission best-effort a venir).
+La section condensée « Champs optionnels » (en-tête + ligne) permet de saisir des champs optionnels du schéma EN 16931 non couverts par les champs dédiés. Chaque entrée couple un nom de balise CII et une valeur. Les champs du catalogue prédéfini (`OptionalFieldCatalogue`) sont émis dans le CII à leur position conforme ; les champs libres sont stockés et affichés mais non émis dans le XML.
 
-| Champ optionnel | Balise CII | BT/BG | Position CII | Emission |
+| Champ optionnel | Clé (`tagName`) | BT | Émission CII | Remarque |
 |---|---|---|---|---|
-| Ref. projet | `ram:SpecifiedProcuringProject/ram:ID` | BT-11 | `ApplicableHeaderTradeAgreement/SpecifiedProcuringProject/ID` | catalogue (conforme) |
-| ID produit vendeur | `ram:GlobalID` (schemeID=0160) | BT-155 | `IncludedSupplyChainTradeLineItem/SpecifiedTradeProduct/GlobalID` | catalogue (conforme, schemeID requis) |
-| Ref. contrat ligne | `ram:ContractReferencedDocument/ram:IssuerAssignedID` | BT-133 | `SpecifiedLineTradeAgreement/ContractReferencedDocument/IssuerAssignedID` | catalogue (avertissement CII-SR-110) |
-| Ref. commande ligne | `ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID` | BT-134 | `SpecifiedLineTradeAgreement/BuyerOrderReferencedDocument/IssuerAssignedID` | catalogue (avertissement CII-SR-108) |
+| Réf. acheteur | `ram:BuyerReference` | BT-10 | `ApplicableHeaderTradeAgreement/BuyerReference` | |
+| Réf. projet | `ram:SpecifiedProcuringProject/ram:ID` | BT-11 | `.../SpecifiedProcuringProject/ID` + `Name` | `Name` obligatoire au XSD : valeur conventionnelle « Project reference » |
+| Réf. contrat | `ram:ContractReferencedDocument/ram:IssuerAssignedID` | BT-12 | `.../ContractReferencedDocument/IssuerAssignedID` | |
+| Réf. bon de réception | `ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID` | BT-15 | `ApplicableHeaderTradeDelivery/ReceivingAdviceReferencedDocument` | émis après l'avis d'expédition (ordre du XSD) |
+| Réf. bon de livraison | `ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID` | BT-16 | `ApplicableHeaderTradeDelivery/DespatchAdviceReferencedDocument` | |
+| Réf. appel d'offres ou lot | `ram:AdditionalReferencedDocument/ram:IssuerAssignedID` | BT-17 | `.../AdditionalReferencedDocument` (`IssuerAssignedID` + `TypeCode` 50) | ancienne clé `ram:TendererReferencedDocument/...` migrée au décodage |
+| N° ligne de commande | `ram:BuyerOrderReferencedDocument/ram:LineID` | BT-132 | `SpecifiedLineTradeAgreement/BuyerOrderReferencedDocument/LineID` | le n° de commande lui-même est le BT-13 (en-tête) |
+| Réf. article vendeur | `ram:SellerAssignedID` | BT-155 | `SpecifiedTradeProduct/SellerAssignedID` | |
+| Réf. article acheteur | `ram:BuyerAssignedID` | BT-156 | `SpecifiedTradeProduct/BuyerAssignedID` | n'était jamais émis avant le 2026-09-23 |
+| Code GTIN (EAN) | `ram:GlobalID` | BT-157 | `SpecifiedTradeProduct/GlobalID` (`schemeID="0160"`) | schemeID exigé par BR-64 ; avertissement BT-157-GTIN si la valeur n'est pas un GTIN |
 
-**Notes d'implementation** :
-- Les champs optionnels sont persistes sur `Invoice.optionalFields` et `InvoiceLine.optionalFields` (tableaux `OptionalField`, `Codable`, migration via `decodeIfPresent` -> `[]`).
-- `GlobalID` emet automatiquement `schemeID="0160"` (GTIN) car le schematron CII-SR-046 exige cet attribut (erreur fatale sinon).
-- Les champs libres (balise non reconnue du catalogue) sont stockes et affiches mais ne sont pas injectes dans le XML pour ne pas risquer de casser la conformite.
+**Balises de ligne retirées** (`OptionalFieldCatalogue.retiredLineTags`) : `ram:ContractReferencedDocument/ram:IssuerAssignedID` (ex-« Réf. contrat ligne », rejeté par le XSD : pas de contrat par ligne en EN 16931) et `ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID` (ex-« Réf. commande ligne », signalé hors profil par le Schematron EN16931). Les valeurs déjà saisies sont conservées et affichées, avec une aide qui l'explique, mais ne sont plus émises.
+
+**Notes d'implémentation** :
+- Les champs optionnels sont persistés sur `Invoice.optionalFields` et `InvoiceLine.optionalFields` (tableaux `OptionalField`, `Codable`, migration via `decodeIfPresent` -> `[]`).
+- Ordre d'émission : celui des séquences du XSD (ex. `GlobalID`, `SellerAssignedID`, `BuyerAssignedID` avant `Name` ; avis d'expédition avant avis de réception ; `AdditionalReferencedDocument` entre le contrat et le projet), indépendamment de l'ordre de saisie. `OptionalFieldsConformanceTests` le vérifie.
+- Les champs libres (balise non reconnue du catalogue) sont stockés et affichés mais ne sont pas injectés dans le XML pour ne pas risquer de casser la conformité.
+- **Vérification (2026-09-23)** : chaque champ du catalogue, seul puis tous ensemble, et chaque cadre de facturation, contre le XSD Factur-X 1.09 EN16931 (`facturx.xml_check_xsd`) et les Schematron EN16931 (`Factur-X_1.09_EN16931.xsl`) et France CTC (`BR-FR-Flux2-Schematron-CII.xslt`), exécutés avec `saxonche`. Attention en relisant un rapport SVRL : le Schematron EN16931 de Factur-X ne pose quasiment jamais `flag="fatal"` (424 assertions sur 427 n'ont aucun flag) et signale les éléments hors profil par des `svrl:successful-report` — ne retenir que `flag="fatal"` masquerait toutes ses erreurs.

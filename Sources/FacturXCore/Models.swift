@@ -1,5 +1,14 @@
 import Foundation
 
+/// Cadre de facturation (BT-23) de la réforme française. La lettre donne la nature de la
+/// facture — B = biens, S = services, M = facture double (biens et services qui ne sont pas
+/// accessoires l'un de l'autre) — et le chiffre le cadre : 1 = dépôt d'une facture,
+/// 2 = facture déjà payée, 4 = facture définitive après acompte, 3/5/6 = sous-traitance et
+/// cotraitance, 7 = TVA déjà collectée (opération déjà transmise en e-reporting),
+/// 8 = facture multi-vendeurs, 9 = facture bidirectionnelle. Libellés repris du dossier de
+/// spécifications externes DGFiP (cas d'usage, v2.3) et du Schematron France CTC, qui admet
+/// ces 20 codes (BR-FR-08) — les anciens libellés (« Facturation papier », « Portail
+/// public », « Dématérialisation ») ne correspondaient à rien de tout cela.
 public enum BillingMode: String, Codable, CaseIterable {
     case b1 = "B1", s1 = "S1", m1 = "M1"
     case b2 = "B2", s2 = "S2", m2 = "M2"
@@ -12,27 +21,68 @@ public enum BillingMode: String, Codable, CaseIterable {
 
     public var label: String {
         switch self {
-        case .b1: return "Facturation papier (B1)"
-        case .s1: return "Portail public de facturation (S1)"
-        case .m1: return "Dématérialisation (M1)"
-        case .b2: return "Facturation papier (B2)"
-        case .s2: return "Portail public (S2)"
-        case .m2: return "Dématérialisation (M2)"
-        case .s3: return "Portail public (S3)"
-        case .b4: return "Facturation papier (B4)"
-        case .s4: return "Portail public (S4)"
-        case .m4: return "Dématérialisation (M4)"
-        case .s5: return "Portail public (S5)"
-        case .s6: return "Portail public (S6)"
-        case .b7: return "Facturation papier (B7)"
-        case .s7: return "Portail public (S7)"
-        case .b8: return "Facturation papier (B8)"
-        case .s8: return "Portail public (S8)"
-        case .m8: return "Dématérialisation (M8)"
-        case .b9: return "Facturation papier (B9)"
-        case .s9: return "Portail public (S9)"
-        case .m9: return "Dématérialisation (M9)"
+        case .b1: return "Biens : dépôt d'une facture (B1)"
+        case .s1: return "Services : dépôt d'une facture (S1)"
+        case .m1: return "Double : dépôt d'une facture (M1)"
+        case .b2: return "Biens : facture déjà payée (B2)"
+        case .s2: return "Services : facture déjà payée (S2)"
+        case .m2: return "Double : facture déjà payée (M2)"
+        case .s3: return "Services : sous-traitance, paiement direct (S3)"
+        case .b4: return "Biens : définitive après acompte (B4)"
+        case .s4: return "Services : définitive après acompte (S4)"
+        case .m4: return "Double : définitive après acompte (M4)"
+        case .s5: return "Services : dépôt par un sous-traitant (S5)"
+        case .s6: return "Services : dépôt par un cotraitant (S6)"
+        case .b7: return "Biens : TVA déjà collectée (B7)"
+        case .s7: return "Services : TVA déjà collectée (S7)"
+        case .b8: return "Biens : facture multi-vendeurs (B8)"
+        case .s8: return "Services : facture multi-vendeurs (S8)"
+        case .m8: return "Double : facture multi-vendeurs (M8)"
+        case .b9: return "Biens : facture bidirectionnelle (B9)"
+        case .s9: return "Services : facture bidirectionnelle (S9)"
+        case .m9: return "Double : facture bidirectionnelle (M9)"
         }
+    }
+
+    /// B2/S2/M2 — BR-FR-CO-09 : le montant déjà payé (BT-113) doit égaler le total TTC
+    /// (BT-112), le net à payer (BT-115) être nul et l'échéance (BT-9) être la date du paiement.
+    public var isAlreadyPaid: Bool {
+        self == .b2 || self == .s2 || self == .m2
+    }
+
+    /// B4/S4/M4 — BR-FR-CO-08 : interdit sur une facture d'acompte (386).
+    public var isFinalAfterDeposit: Bool {
+        self == .b4 || self == .s4 || self == .m4
+    }
+
+    /// Cadres 8 et 9 : le Schematron France CTC (BR-FR-MV-*, BR-FR-BD-*) exige des lignes de
+    /// regroupement par vendeur (sous-type GROUP) que `CIIXMLGenerator` ne produit pas — un XML
+    /// émis avec l'un de ces cadres serait toujours rejeté.
+    public var requiresGroupLines: Bool {
+        rawValue.hasSuffix("8") || rawValue.hasSuffix("9")
+    }
+
+    /// Cadres proposés à la saisie : tous sauf 8 et 9 (voir `requiresGroupLines`). `current`
+    /// y est ajouté s'il en fait partie (facture plus ancienne ou reçue), pour que le
+    /// sélecteur affiche toujours la valeur réellement enregistrée.
+    public static func selectableCases(current: BillingMode? = nil) -> [BillingMode] {
+        allCases.filter { !$0.requiresGroupLines || $0 == current }
+    }
+
+    /// Cadre d'une facture d'acompte créée depuis une facture de ce cadre : jamais 4
+    /// (BR-FR-CO-08), la même nature en cadre 1 à la place.
+    public var forDeposit: BillingMode {
+        isFinalAfterDeposit ? withFramework("1") : self
+    }
+
+    /// Cadre d'une facture de solde, qui EST la facture définitive après acompte : la même
+    /// nature en cadre 4 quand la facture d'origine est en cadre 1, inchangé sinon.
+    public var forFinalSettlement: BillingMode {
+        rawValue.hasSuffix("1") ? withFramework("4") : self
+    }
+
+    private func withFramework(_ digit: String) -> BillingMode {
+        BillingMode(rawValue: String(rawValue.prefix(1)) + digit) ?? self
     }
 }
 
@@ -220,26 +270,51 @@ public struct OptionalFieldTemplate: Identifiable, Hashable {
     }
 }
 
+/// Champs optionnels proposés à la saisie, tous émis par `CIIXMLGenerator`. Chaque entrée a
+/// été vérifiée (2026-09-23), seule puis toutes ensemble, contre le XSD Factur-X 1.09
+/// EN16931 et les Schematron EN16931 et France CTC : les numéros BT sont ceux de la norme
+/// EN 16931, et les balises celles de sa syntaxe CII pour ce profil.
 public enum OptionalFieldCatalogue {
     public static let header: [OptionalFieldTemplate] = [
-        OptionalFieldTemplate("BT-10", "Ref. acheteur", "ram:BuyerReference", .header, "BT-10 - Reference acheteur (BuyerReference). Reference de routage/traitement attribuee par l'acheteur (ex. Leitweg-ID), distincte du numero de commande."),
-        OptionalFieldTemplate("BT-11", "Ref. projet", "ram:SpecifiedProcuringProject/ram:ID", .header, "BT-11 - Reference du projet d'achat (SpecifiedProcuringProject/ID)."),
-        OptionalFieldTemplate("BT-17", "Ref. contrat", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .header, "BT-17 - Reference du contrat."),
-        OptionalFieldTemplate("BT-18", "Ref. appel d'offres", "ram:TendererReferencedDocument/ram:IssuerAssignedID", .header, "BT-18 - Reference de l'appel d'offres."),
-        OptionalFieldTemplate("BT-19", "Ref. bon de reception", "ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-19 - Reference de l'avis de reception."),
-        OptionalFieldTemplate("BT-20", "Ref. bon de livraison", "ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-20 - Reference de l'avis d'expedition."),
+        OptionalFieldTemplate("BT-10", "Réf. acheteur", "ram:BuyerReference", .header, "BT-10 - Référence acheteur (BuyerReference). Référence de routage/traitement attribuée par l'acheteur (ex. Leitweg-ID), distincte du numéro de commande (BT-13)."),
+        OptionalFieldTemplate("BT-11", "Réf. projet", "ram:SpecifiedProcuringProject/ram:ID", .header, "BT-11 - Référence du projet (SpecifiedProcuringProject/ID). Le nom de projet, obligatoire en CII, est émis avec la valeur conventionnelle « Project reference »."),
+        OptionalFieldTemplate("BT-12", "Réf. contrat", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .header, "BT-12 - Référence du contrat (ContractReferencedDocument)."),
+        OptionalFieldTemplate("BT-15", "Réf. bon de réception", "ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-15 - Référence de l'avis de réception (ReceivingAdviceReferencedDocument)."),
+        OptionalFieldTemplate("BT-16", "Réf. bon de livraison", "ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", .header, "BT-16 - Référence de l'avis d'expédition (DespatchAdviceReferencedDocument)."),
+        OptionalFieldTemplate("BT-17", "Réf. appel d'offres ou lot", "ram:AdditionalReferencedDocument/ram:IssuerAssignedID", .header, "BT-17 - Référence de l'appel d'offres ou du lot (AdditionalReferencedDocument, code type 50)."),
     ]
     public static let line: [OptionalFieldTemplate] = [
-        OptionalFieldTemplate("BT-133", "Ref. contrat ligne", "ram:ContractReferencedDocument/ram:IssuerAssignedID", .line, "BT-133 - Reference de contrat au niveau de la ligne."),
-        OptionalFieldTemplate("BT-134", "Ref. commande ligne", "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID", .line, "BT-134 - Reference de commande au niveau de la ligne."),
-        OptionalFieldTemplate("BT-155", "ID produit vendeur", "ram:GlobalID", .line, "BT-155 - Identifiant produit (GlobalID) attribue par le vendeur. schemeID GTIN 0160 ajoute automatiquement."),
-        OptionalFieldTemplate("BT-156", "ID produit acheteur", "ram:BuyerAssignedID", .line, "BT-156 - Identifiant produit attribue par l'acheteur (BuyerAssignedID)."),
+        OptionalFieldTemplate("BT-132", "N° ligne de commande", "ram:BuyerOrderReferencedDocument/ram:LineID", .line, "BT-132 - Numéro de la ligne concernée dans la commande de l'acheteur. Le numéro de la commande elle-même est le BT-13, en en-tête."),
+        OptionalFieldTemplate("BT-155", "Réf. article vendeur", "ram:SellerAssignedID", .line, "BT-155 - Identifiant de l'article attribué par le vendeur (SellerAssignedID)."),
+        OptionalFieldTemplate("BT-156", "Réf. article acheteur", "ram:BuyerAssignedID", .line, "BT-156 - Identifiant de l'article attribué par l'acheteur (BuyerAssignedID)."),
+        OptionalFieldTemplate("BT-157", "Code GTIN (EAN)", "ram:GlobalID", .line, "BT-157 - Identifiant normalisé de l'article (GlobalID), émis avec le schéma 0160 (GTIN) : code GTIN/EAN de 8, 12, 13 ou 14 chiffres. Pour une référence interne, utiliser le BT-155."),
     ]
+
+    /// Balises de ligne proposées par des versions antérieures, retirées parce qu'elles
+    /// rendaient le XML non conforme au profil EN16931. Les valeurs déjà saisies restent
+    /// enregistrées et affichées, mais ne sont plus émises dans le XML.
+    public static let retiredLineTags: [String: String] = [
+        "ram:ContractReferencedDocument/ram:IssuerAssignedID": "Ancien champ « Réf. contrat ligne » : le profil EN 16931 n'a pas de référence de contrat par ligne (XML rejeté par le XSD). Valeur conservée pour mémoire, non émise dans le XML ; utiliser la référence de contrat d'en-tête (BT-12).",
+        "ram:BuyerOrderReferencedDocument/ram:IssuerAssignedID": "Ancien champ « Réf. commande ligne » : le profil EN 16931 n'admet, au niveau de la ligne, que le numéro de ligne de commande (BT-132). Valeur conservée pour mémoire, non émise dans le XML.",
+    ]
+
     public static func templates(for location: OptionalFieldLocation) -> [OptionalFieldTemplate] {
         location == .header ? header : line
     }
     public static func template(forTag tagName: String, location: OptionalFieldLocation) -> OptionalFieldTemplate? {
         templates(for: location).first(where: { $0.tagName == tagName })
+    }
+
+    /// Aide affichée pour une balise : celle du catalogue, sinon l'explication d'une balise
+    /// retirée, sinon le rappel qu'une balise libre n'est pas émise.
+    public static func help(forTag tagName: String, location: OptionalFieldLocation) -> String {
+        if let template = template(forTag: tagName, location: location) {
+            return template.help
+        }
+        if location == .line, let note = retiredLineTags[tagName] {
+            return note
+        }
+        return "Balise libre (non émise dans le XML CII)."
     }
 }
 
@@ -819,9 +894,13 @@ public struct Invoice: Codable, Hashable, Identifiable {
         get { referenceField("ram:ContractReferencedDocument/ram:IssuerAssignedID") }
         set { setReferenceField("ram:ContractReferencedDocument/ram:IssuerAssignedID", newValue) }
     }
+    /// BT-17 : en syntaxe CII EN16931, un `AdditionalReferencedDocument` de code type 50 —
+    /// `TendererReferencedDocument`, utilisé jusqu'ici, n'existe pas dans ce profil (XML
+    /// rejeté par le XSD). Les factures enregistrées avec l'ancienne balise sont migrées au
+    /// décodage (voir `init(from:)`).
     public var tenderRef: String? {
-        get { referenceField("ram:TendererReferencedDocument/ram:IssuerAssignedID") }
-        set { setReferenceField("ram:TendererReferencedDocument/ram:IssuerAssignedID", newValue) }
+        get { referenceField("ram:AdditionalReferencedDocument/ram:IssuerAssignedID") }
+        set { setReferenceField("ram:AdditionalReferencedDocument/ram:IssuerAssignedID", newValue) }
     }
     public var receivingAdviceRef: String? {
         get { referenceField("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID") }
@@ -898,7 +977,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         linkedSettlementRef = try c.decodeIfPresent(String.self, forKey: .linkedSettlementRef)
         migrateReference("ram:BuyerReference", legacyBuyerReference)
         migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
-        migrateReference("ram:TendererReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))
+        renameReferenceTag(from: "ram:TendererReferencedDocument/ram:IssuerAssignedID", to: "ram:AdditionalReferencedDocument/ram:IssuerAssignedID")
+        migrateReference("ram:AdditionalReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .tenderRef))
         migrateReference("ram:ReceivingAdviceReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .receivingAdviceRef))
         migrateReference("ram:DespatchAdviceReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .despatchAdviceRef))
     }
@@ -909,8 +989,23 @@ public struct Invoice: Codable, Hashable, Identifiable {
         optionalFields.append(OptionalField(tagName: tagName, value: value))
     }
 
+    /// Même donnée, balise corrigée : le champ garde sa valeur et sa place dans la liste.
+    /// Sans effet si la nouvelle balise est déjà renseignée (l'ancienne reste alors telle
+    /// quelle, en balise libre non émise, plutôt que d'écraser l'une par l'autre).
+    private mutating func renameReferenceTag(from oldTag: String, to newTag: String) {
+        guard !optionalFields.contains(where: { $0.tagName == newTag }),
+              let idx = optionalFields.firstIndex(where: { $0.tagName == oldTag }) else { return }
+        optionalFields[idx].tagName = newTag
+    }
+
     public var netToPay: Double {
         (grandTotal - prepaidAmount).rounded(toPlaces: 2)
+    }
+
+    /// Libellé du montant déjà payé (BT-113) sur l'écran et le PDF : un acompte déduit d'une
+    /// facture de solde, ou la totalité de la facture en cadre « déjà payée » (B2/S2/M2).
+    public var prepaidAmountLabel: String {
+        billingMode.isAlreadyPaid ? "Montant déjà payé" : "Acompte déjà payé"
     }
 
     /// Aucun champ dédié : l'échéance est simplement dépassée et la facture non réglée.

@@ -280,6 +280,7 @@ public final class InvoiceStore: ObservableObject {
         deposit.linkedSettlementRef = nil
         deposit.notes = "Facture d'acompte"
         deposit.prepaidAmount = 0
+        deposit.billingMode = invoice.billingMode.forDeposit
         return deposit
     }
 
@@ -296,6 +297,7 @@ public final class InvoiceStore: ObservableObject {
         final.linkedSettlementRef = nil
         final.prepaidAmount = deposits.reduce(0) { $0 + $1.grandTotal }.rounded(toPlaces: 2)
         final.notes = "Facture de solde"
+        final.billingMode = invoice.billingMode.forFinalSettlement
         return final
     }
 
