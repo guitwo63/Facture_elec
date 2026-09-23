@@ -130,6 +130,18 @@ final class ScannedDocumentParserTests: XCTestCase {
         XCTAssertEqual(lines[1].unitPrice, 15.00, accuracy: 0.001)
     }
 
+    /// Prix unitaire gardé à 4 décimales (sa précision dans le XML) : arrondi au centime,
+    /// comme l'écriture `((montant / qté) * 100).rounded() / 100` le laissait croire, le total
+    /// de la ligne ne vaudrait plus le montant lu (0,08 € × 12 = 0,96 €).
+    func testExtractLineItemsKeepsTheScannedAmountWhenDividingByTheQuantity() {
+        let lines = ScannedDocumentParser.extractLineItems(from: "12 x Vis inox 1,00\n3 x Licence annuelle 100,00")
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0].unitPrice, 0.0833, accuracy: 0.000_01)
+        XCTAssertEqual(lines[0].lineTotal, 1.00, accuracy: 0.001)
+        XCTAssertEqual(lines[1].unitPrice, 33.3333, accuracy: 0.000_01)
+        XCTAssertEqual(lines[1].lineTotal, 100.00, accuracy: 0.001)
+    }
+
     func testExtractLineItemsExcludesTotalAndTaxLines() {
         let text = """
         Prestation 100,00

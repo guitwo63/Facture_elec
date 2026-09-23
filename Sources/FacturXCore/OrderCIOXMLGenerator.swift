@@ -306,8 +306,10 @@ public struct OrderCIOXMLGenerator {
 """
     }
 
+    /// « 20 » pour un taux entier, « 5.50 » sinon. Même correctif que `CIIXMLGenerator` :
+    /// `rate.rounded()` arrondissait à 2 décimales, et 5,5 % était émis « 6 ».
     private func formatRate(_ rate: Double) -> String {
-        if rate == rate.rounded() {
+        if rate.truncatingRemainder(dividingBy: 1) == 0 {
             return String(format: "%.0f", rate)
         }
         return String(format: "%.2f", rate)
