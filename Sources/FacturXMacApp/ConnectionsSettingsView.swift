@@ -9,7 +9,6 @@ struct ConnectionsSettingsView: View {
     @EnvironmentObject var smtpSettings: SMTPSettings
     @EnvironmentObject var appEnv: AppEnvironment
     @EnvironmentObject var auth: AuthStore
-    @EnvironmentObject var directory: PartyDirectory
     @State private var dinumExpanded = false
     @State private var pisteExpanded = false
     @State private var superPDPExpanded = true
@@ -24,21 +23,15 @@ struct ConnectionsSettingsView: View {
     @State private var smtpTestMessage: String?
     @State private var smtpTesting = false
     /// Société dont on édite/teste les identifiants — commune aux 4 services ci-dessous
-    /// (configurer une société touche typiquement ses 4 services d'affilée). `nil` = société
-    /// principale si une est désignée, sinon le réglage global par défaut — même principe que
-    /// `ValueTablesView.tableSocietyID`.
+    /// (configurer une société touche typiquement ses 4 services d'affilée). `nil` = "Toutes" :
+    /// le réglage global lui-même, affiché, enregistré ET testé tel quel — même principe que
+    /// `ValueTablesView.tableSocietyID`. Les boutons de test lisent donc les bindings
+    /// `active…CredentialsBinding`, jamais `credentials(for: nil)`, qui résout sur la société
+    /// principale.
     @State private var connectionsSocietyID: UUID?
 
-    private var noSelectionConnectionsLabel: String {
-        guard let principaleID = directory.principaleSocieteID,
-              let principale = directory.entries.first(where: { $0.id == principaleID }) else {
-            return "Toutes (réglage par défaut)"
-        }
-        return "Société principale : \(principale.displayName)"
-    }
-
     /// Identifiants SUPER PDP en cours d'édition : ceux de la société sélectionnée (créés à
-    /// la volée à partir du réglage hérité si elle n'a pas encore de surcharge propre), ou
+    /// la volée à partir du réglage par défaut si elle n'a pas encore de surcharge propre), ou
     /// le réglage global si "Toutes" est sélectionné. Écrire dedans met à jour la bonne
     /// cible chez `superPDPSettings` — même principe qu'`activeNumberingFormatBinding`.
     private var activeSuperPDPCredentialsBinding: Binding<SuperPDPCredentials> {
@@ -101,7 +94,7 @@ struct ConnectionsSettingsView: View {
                     HStack(spacing: 6) {
                         Text("Société").font(.caption).foregroundStyle(.secondary)
                         Picker("Société", selection: $connectionsSocietyID) {
-                            Text(noSelectionConnectionsLabel).tag(UUID?.none)
+                            Text("Toutes (réglage par défaut)").tag(UUID?.none)
                             ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
                                 Text(s.displayName).tag(UUID?.some(s.id))
                             }
@@ -135,13 +128,13 @@ struct ConnectionsSettingsView: View {
                         if let cid = connectionsSocietyID {
                             if chorusSettings.credentialsBySociety[cid] == nil {
                                 HStack(spacing: 6) {
-                                    Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                    Text("Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
                                     Button("Personnaliser pour cette société") {
                                         chorusSettings.setOverride(chorusSettings.credentials(for: cid), companyID: cid)
                                     }.buttonStyle(.link).font(.caption2)
                                 }
                             } else {
-                                Button("Revenir au réglage hérité", role: .destructive) {
+                                Button("Revenir au réglage par défaut", role: .destructive) {
                                     chorusSettings.removeOverride(companyID: cid)
                                 }.buttonStyle(.link).font(.caption2)
                             }
@@ -188,7 +181,7 @@ struct ConnectionsSettingsView: View {
                             Button {
                                 testing = true
                                 testMessage = nil
-                                let creds = chorusSettings.credentials(for: connectionsSocietyID)
+                                let creds = activeChorusProCredentialsBinding.wrappedValue
                                 Task {
                                     do {
                                         let service = ChorusProService()
@@ -201,7 +194,7 @@ struct ConnectionsSettingsView: View {
                                 }
                             } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
                                 .buttonStyle(.bordered)
-                                .disabled(testing || !chorusSettings.credentials(for: connectionsSocietyID).isConfigured)
+                                .disabled(testing || !activeChorusProCredentialsBinding.wrappedValue.isConfigured)
                             Spacer()
                         }
                         if let m = testMessage {
@@ -229,13 +222,13 @@ struct ConnectionsSettingsView: View {
                         if let cid = connectionsSocietyID {
                             if superPDPSettings.credentialsBySociety[cid] == nil {
                                 HStack(spacing: 6) {
-                                    Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                    Text("Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
                                     Button("Personnaliser pour cette société") {
                                         superPDPSettings.setOverride(superPDPSettings.credentials(for: cid), companyID: cid)
                                     }.buttonStyle(.link).font(.caption2)
                                 }
                             } else {
-                                Button("Revenir au réglage hérité", role: .destructive) {
+                                Button("Revenir au réglage par défaut", role: .destructive) {
                                     superPDPSettings.removeOverride(companyID: cid)
                                 }.buttonStyle(.link).font(.caption2)
                             }
@@ -291,7 +284,7 @@ struct ConnectionsSettingsView: View {
                             Button {
                                 superPDPTesting = true
                                 superPDPTestMessage = nil
-                                let creds = superPDPSettings.credentials(for: connectionsSocietyID)
+                                let creds = activeSuperPDPCredentialsBinding.wrappedValue
                                 Task {
                                     do {
                                         let service = SuperPDPService()
@@ -304,11 +297,11 @@ struct ConnectionsSettingsView: View {
                                 }
                             } label: { Label("Tester la connexion", systemImage: "antenna.radiowaves.left.and.right") }
                                 .buttonStyle(.bordered)
-                                .disabled(superPDPTesting || !superPDPSettings.credentials(for: connectionsSocietyID).isConfigured)
+                                .disabled(superPDPTesting || !activeSuperPDPCredentialsBinding.wrappedValue.isConfigured)
                             Button {
                                 pdpSessionChecking = true
                                 pdpSessionMessage = nil
-                                let creds = superPDPSettings.credentials(for: connectionsSocietyID)
+                                let creds = activeSuperPDPCredentialsBinding.wrappedValue
                                 Task {
                                     do {
                                         let service = SuperPDPService()
@@ -331,7 +324,7 @@ struct ConnectionsSettingsView: View {
                                 }
                             }
                             .buttonStyle(.bordered)
-                            .disabled(pdpSessionChecking || !superPDPSettings.credentials(for: connectionsSocietyID).isConfigured)
+                            .disabled(pdpSessionChecking || !activeSuperPDPCredentialsBinding.wrappedValue.isConfigured)
                             .help("Vérifier l'autorisation de la session OAuth (diagnostic des erreurs 403)")
                             Spacer()
                         }
@@ -360,13 +353,13 @@ struct ConnectionsSettingsView: View {
                         if let cid = connectionsSocietyID {
                             if smtpSettings.credentialsBySociety[cid] == nil {
                                 HStack(spacing: 6) {
-                                    Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                    Text("Utilise actuellement le réglage par défaut.").font(.caption2).foregroundStyle(.secondary)
                                     Button("Personnaliser pour cette société") {
                                         smtpSettings.setOverride(smtpSettings.credentials(for: cid), companyID: cid)
                                     }.buttonStyle(.link).font(.caption2)
                                 }
                             } else {
-                                Button("Revenir au réglage hérité", role: .destructive) {
+                                Button("Revenir au réglage par défaut", role: .destructive) {
                                     smtpSettings.removeOverride(companyID: cid)
                                 }.buttonStyle(.link).font(.caption2)
                             }
@@ -416,7 +409,7 @@ struct ConnectionsSettingsView: View {
                                 Button {
                                     smtpTesting = true
                                     smtpTestMessage = nil
-                                    let creds = smtpSettings.credentials(for: connectionsSocietyID)
+                                    let creds = activeSMTPCredentialsBinding.wrappedValue
                                     let recipient = auth.currentUser?.username ?? creds.fromAddress
                                     Task {
                                         do {
@@ -440,7 +433,7 @@ struct ConnectionsSettingsView: View {
                                     }
                                 }
                                 .buttonStyle(.bordered)
-                                .disabled(smtpTesting || !smtpSettings.credentials(for: connectionsSocietyID).isConfigured)
+                                .disabled(smtpTesting || !activeSMTPCredentialsBinding.wrappedValue.isConfigured)
                                 Spacer()
                             }
                             if let m = smtpTestMessage {

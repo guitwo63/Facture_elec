@@ -157,8 +157,8 @@ struct SocietiesAdminView: View {
                         }
                         .buttonStyle(.borderless)
                         .help(e.isPrincipale
-                            ? "Société principale — sert de repli pour les réglages par société non personnalisés. Cliquer pour retirer."
-                            : "Définir comme société principale")
+                            ? "Société principale — ses réglages s'appliquent à ce qui n'est rattaché à aucune société (tiers sans société, anciens documents). Les autres sociétés sans personnalisation propre suivent le réglage par défaut. Cliquer pour retirer."
+                            : "Définir comme société principale : ses réglages s'appliqueront à ce qui n'est rattaché à aucune société")
                     }
                     .width(min: 60, ideal: 70)
                     TableColumn("Nom") { e in
@@ -249,13 +249,12 @@ struct SocietiesAdminView: View {
 struct EmailTemplatesAdminView: View {
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @EnvironmentObject var auth: AuthStore
-    @EnvironmentObject var directory: PartyDirectory
     /// String et non EmailTemplateKind : Table exige que `selection` corresponde au
     /// type de `id` (String, via EmailTemplateKind.rawValue), pas au type de la ligne.
     @State private var selectedKind: String?
     @State private var editingKind: EmailTemplateKind?
-    /// Société dont on édite/consulte les surcharges — `nil` = société principale (ou le
-    /// réglage global si aucune n'est désignée). Même principe que `ValueTablesView`.
+    /// Société dont on édite/consulte les surcharges — `nil` = "Toutes" : le réglage global
+    /// lui-même, affiché ET enregistré tel quel. Même principe que `ValueTablesView.tableSocietyID`.
     @State private var societyID: UUID?
 
     /// Pré-sélectionne le picker société — voir `ValueTablesView.init(initialSocietyID:)`,
@@ -264,22 +263,8 @@ struct EmailTemplatesAdminView: View {
         _societyID = State(initialValue: initialSocietyID)
     }
 
-    private var noSelectionLabel: String {
-        guard let principaleID = directory.principaleSocieteID,
-              let principale = directory.entries.first(where: { $0.id == principaleID }) else {
-            return "Toutes (réglage par défaut)"
-        }
-        return "Société principale : \(principale.displayName)"
-    }
-
-    private func overrideState(for kind: EmailTemplateKind) -> SocietyOverrideState {
-        guard let cid = societyID else { return .none }
-        if emailTemplateStore.templatesBySociety[cid]?.contains(where: { $0.kind == kind }) == true { return .customized }
-        if let principaleID = directory.principaleSocieteID, principaleID != cid,
-           emailTemplateStore.templatesBySociety[principaleID]?.contains(where: { $0.kind == kind }) == true {
-            return .inheritedFromPrincipale
-        }
-        return .none
+    private func isCustomized(_ kind: EmailTemplateKind) -> Bool {
+        societyID.map { cid in emailTemplateStore.templatesBySociety[cid]?.contains(where: { $0.kind == kind }) == true } ?? false
     }
 
     var body: some View {
@@ -303,7 +288,7 @@ struct EmailTemplatesAdminView: View {
                     HStack(spacing: 6) {
                         Text("Société").font(.caption).foregroundStyle(.secondary)
                         Picker("Société", selection: $societyID) {
-                            Text(noSelectionLabel).tag(UUID?.none)
+                            Text("Toutes (réglage par défaut)").tag(UUID?.none)
                             ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
                                 Text(s.displayName).tag(UUID?.some(s.id))
                             }
@@ -321,9 +306,9 @@ struct EmailTemplatesAdminView: View {
                     }
                     TableColumn("Activé") { kind in
                         Toggle("", isOn: Binding(
-                            get: { emailTemplateStore.template(for: kind, companyID: societyID).enabled },
+                            get: { emailTemplateStore.editedTemplate(for: kind, societyID: societyID).enabled },
                             set: { newValue in
-                                var t = emailTemplateStore.template(for: kind, companyID: societyID)
+                                var t = emailTemplateStore.editedTemplate(for: kind, societyID: societyID)
                                 t.enabled = newValue
                                 if let cid = societyID {
                                     emailTemplateStore.setOverride(t, companyID: cid)
@@ -337,11 +322,11 @@ struct EmailTemplatesAdminView: View {
                     }
                     .width(60)
                     TableColumn("Sujet") { kind in
-                        Text(kind.hasEditableContent ? emailTemplateStore.template(for: kind, companyID: societyID).subject : "3 modèles selon le niveau d'urgence")
+                        Text(kind.hasEditableContent ? emailTemplateStore.editedTemplate(for: kind, societyID: societyID).subject : "3 modèles selon le niveau d'urgence")
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     TableColumn("") { kind in
-                        SocietyOverrideBadge(state: overrideState(for: kind)) {
+                        SocietyOverrideBadge(isCustomized: isCustomized(kind)) {
                             if let cid = societyID {
                                 emailTemplateStore.removeOverride(kind: kind, companyID: cid)
                             }
@@ -374,10 +359,20 @@ struct EmailTemplatesAdminView: View {
     }
 }
 
+private extension EmailTemplateStore {
+    /// Modèle affiché puis enregistré dans Réglages pour le choix de société `societyID` :
+    /// la résolution de cette société, ou le réglage global lui-même pour "Toutes" (`nil`).
+    /// Jamais `template(for:companyID: nil)`, qui résout sur la société principale alors que
+    /// "Toutes" enregistre dans le réglage global.
+    func editedTemplate(for kind: EmailTemplateKind, societyID: UUID?) -> EmailTemplate {
+        societyID.map { template(for: kind, companyID: $0) } ?? template(for: kind)
+    }
+}
+
 struct EmailTemplateEditorSheet: View {
     let kind: EmailTemplateKind
-    /// `nil` = édite le réglage global (ou celui de la société principale à l'affichage,
-    /// mais l'écriture cible toujours le global quand `nil` — voir `EmailTemplatesAdminView`).
+    /// `nil` = édite le réglage global lui-même (affichage et enregistrement) — voir
+    /// `EmailTemplatesAdminView`.
     var societyID: UUID?
     @EnvironmentObject var emailTemplateStore: EmailTemplateStore
     @Environment(\.dismiss) private var dismiss
@@ -437,7 +432,7 @@ struct EmailTemplateEditorSheet: View {
             HStack {
                 Spacer()
                 Button("Enregistrer") {
-                    var t = emailTemplateStore.template(for: kind, companyID: societyID)
+                    var t = emailTemplateStore.editedTemplate(for: kind, societyID: societyID)
                     t.subject = subject
                     t.body = emailBody
                     if let cid = societyID {
@@ -453,7 +448,7 @@ struct EmailTemplateEditorSheet: View {
         }
         .frame(width: 560, height: 520)
         .onAppear {
-            let t = emailTemplateStore.template(for: kind, companyID: societyID)
+            let t = emailTemplateStore.editedTemplate(for: kind, societyID: societyID)
             subject = t.subject
             emailBody = t.body
         }
@@ -593,7 +588,7 @@ struct ApplicationSettingsView: View {
                         let societies = auth.visibleSocieties(for: auth.currentUser)
                         if !societies.isEmpty {
                             Picker("Société", selection: $numberingCompanyID) {
-                                Text(noSelectionNumberingLabel).tag(UUID?.none)
+                                Text("Toutes (format par défaut)").tag(UUID?.none)
                                 ForEach(societies) { c in
                                     Text(c.displayName).tag(UUID?.some(c.id))
                                 }
@@ -601,9 +596,9 @@ struct ApplicationSettingsView: View {
                             if let cid = numberingCompanyID {
                                 if store.numberFormatOverrides[cid] == nil {
                                     HStack(spacing: 6) {
-                                        Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
                                         Button("Personnaliser pour cette société") {
-                                            store.numberFormatOverrides[cid] = store.numberingFormat(for: nil)
+                                            store.numberFormatOverrides[cid] = store.numberingFormat(for: cid)
                                             store.save()
                                         }.buttonStyle(.link).font(.caption2)
                                     }
@@ -633,7 +628,7 @@ struct ApplicationSettingsView: View {
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                            Text(store.previewNextNumber(companyID: numberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
+                            Text(store.previewNextNumber(companyID: numberingCompanyID ?? previewCompanyID(), format: activeNumberingFormatBinding.wrappedValue)).monospaced().font(.caption.bold())
                             Spacer()
                         }
                     }.padding(8)
@@ -649,7 +644,7 @@ struct ApplicationSettingsView: View {
                         let societies = auth.visibleSocieties(for: auth.currentUser)
                         if !societies.isEmpty {
                             Picker("Société", selection: $orderNumberingCompanyID) {
-                                Text(noSelectionNumberingLabel).tag(UUID?.none)
+                                Text("Toutes (format par défaut)").tag(UUID?.none)
                                 ForEach(societies) { c in
                                     Text(c.displayName).tag(UUID?.some(c.id))
                                 }
@@ -657,9 +652,9 @@ struct ApplicationSettingsView: View {
                             if let cid = orderNumberingCompanyID {
                                 if orderStore.numberFormatOverrides[cid] == nil {
                                     HStack(spacing: 6) {
-                                        Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
                                         Button("Personnaliser pour cette société") {
-                                            orderStore.numberFormatOverrides[cid] = orderStore.numberingFormat(for: nil)
+                                            orderStore.numberFormatOverrides[cid] = orderStore.numberingFormat(for: cid)
                                             orderStore.save()
                                         }.buttonStyle(.link).font(.caption2)
                                     }
@@ -689,7 +684,7 @@ struct ApplicationSettingsView: View {
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                            Text(orderStore.previewNextNumber(companyID: orderNumberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
+                            Text(orderStore.previewNextNumber(companyID: orderNumberingCompanyID ?? previewCompanyID(), format: activeOrderNumberingFormatBinding.wrappedValue)).monospaced().font(.caption.bold())
                             Spacer()
                         }
                     }.padding(8)
@@ -705,7 +700,7 @@ struct ApplicationSettingsView: View {
                         let societies = auth.visibleSocieties(for: auth.currentUser)
                         if !societies.isEmpty {
                             Picker("Société", selection: $quoteNumberingCompanyID) {
-                                Text(noSelectionNumberingLabel).tag(UUID?.none)
+                                Text("Toutes (format par défaut)").tag(UUID?.none)
                                 ForEach(societies) { c in
                                     Text(c.displayName).tag(UUID?.some(c.id))
                                 }
@@ -713,9 +708,9 @@ struct ApplicationSettingsView: View {
                             if let cid = quoteNumberingCompanyID {
                                 if quoteStore.numberFormatOverrides[cid] == nil {
                                     HStack(spacing: 6) {
-                                        Text(directory.principaleSocieteID != nil && cid != directory.principaleSocieteID ? "Hérite actuellement de la société principale." : "Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
+                                        Text("Utilise actuellement le format par défaut.").font(.caption2).foregroundStyle(.secondary)
                                         Button("Personnaliser pour cette société") {
-                                            quoteStore.numberFormatOverrides[cid] = quoteStore.numberingFormat(for: nil)
+                                            quoteStore.numberFormatOverrides[cid] = quoteStore.numberingFormat(for: cid)
                                             quoteStore.save()
                                         }.buttonStyle(.link).font(.caption2)
                                     }
@@ -745,7 +740,7 @@ struct ApplicationSettingsView: View {
                         Divider()
                         HStack {
                             Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                            Text(quoteStore.previewNextNumber(companyID: quoteNumberingCompanyID ?? previewCompanyID())).monospaced().font(.caption.bold())
+                            Text(quoteStore.previewNextNumber(companyID: quoteNumberingCompanyID ?? previewCompanyID(), format: activeQuoteNumberingFormatBinding.wrappedValue)).monospaced().font(.caption.bold())
                             Spacer()
                         }
                     }.padding(8)
@@ -793,25 +788,16 @@ struct ApplicationSettingsView: View {
         return nil
     }
 
-    /// Libellé de l'option "pas de société sélectionnée" des 3 pickers de numérotation —
-    /// voir `ValueTablesView.noSelectionLabel`, même principe.
-    private var noSelectionNumberingLabel: String {
-        guard let principaleID = directory.principaleSocieteID,
-              let principale = directory.entries.first(where: { $0.id == principaleID }) else {
-            return "Toutes (format par défaut)"
-        }
-        return "Société principale : \(principale.displayName)"
-    }
-
-
-    /// Le format en cours d'édition : celui de la société sélectionnée (créé à la volée à
-    /// partir du défaut si elle n'a pas encore de réglage propre), ou le format par défaut
-    /// si "Toutes" est sélectionné. Écrire dedans met à jour la bonne cible chez `store`.
+    /// Le format en cours d'édition : celui qu'utilise la société sélectionnée (le sien, ou le
+    /// format par défaut tant qu'elle n'en a pas — créé à la volée à la première modification),
+    /// ou le format par défaut lui-même si "Toutes" est sélectionné. Jamais
+    /// `numberingFormat(for: nil)`, qui résout sur la société principale. Écrire dedans met à
+    /// jour la bonne cible chez `store`.
     private var activeNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
         Binding(
             get: {
-                guard let cid = numberingCompanyID else { return store.numberingFormat(for: nil) }
-                return store.numberFormatOverrides[cid] ?? store.numberingFormat(for: nil)
+                guard let cid = numberingCompanyID else { return store.defaultNumberingFormat }
+                return store.numberingFormat(for: cid)
             },
             set: { newValue in
                 if let cid = numberingCompanyID {
@@ -830,8 +816,8 @@ struct ApplicationSettingsView: View {
     private var activeOrderNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
         Binding(
             get: {
-                guard let cid = orderNumberingCompanyID else { return orderStore.numberingFormat(for: nil) }
-                return orderStore.numberFormatOverrides[cid] ?? orderStore.numberingFormat(for: nil)
+                guard let cid = orderNumberingCompanyID else { return orderStore.defaultNumberingFormat }
+                return orderStore.numberingFormat(for: cid)
             },
             set: { newValue in
                 if let cid = orderNumberingCompanyID {
@@ -850,8 +836,8 @@ struct ApplicationSettingsView: View {
     private var activeQuoteNumberingFormatBinding: Binding<InvoiceNumberingFormat> {
         Binding(
             get: {
-                guard let cid = quoteNumberingCompanyID else { return quoteStore.numberingFormat(for: nil) }
-                return quoteStore.numberFormatOverrides[cid] ?? quoteStore.numberingFormat(for: nil)
+                guard let cid = quoteNumberingCompanyID else { return quoteStore.defaultNumberingFormat }
+                return quoteStore.numberingFormat(for: cid)
             },
             set: { newValue in
                 if let cid = quoteNumberingCompanyID {
@@ -919,21 +905,21 @@ struct ConfigureSocieteView: View {
                                     title: "Factures",
                                     format: store.numberingFormat(for: cid),
                                     isOverridden: store.numberFormatOverrides[cid] != nil,
-                                    onCustomize: { store.numberFormatOverrides[cid] = store.numberingFormat(for: nil); store.save() },
+                                    onCustomize: { store.numberFormatOverrides[cid] = store.numberingFormat(for: cid); store.save() },
                                     onRevert: { store.numberFormatOverrides.removeValue(forKey: cid); store.save() }
                                 )
                                 numberingSummaryRow(
                                     title: "Commandes",
                                     format: orderStore.numberingFormat(for: cid),
                                     isOverridden: orderStore.numberFormatOverrides[cid] != nil,
-                                    onCustomize: { orderStore.numberFormatOverrides[cid] = orderStore.numberingFormat(for: nil); orderStore.save() },
+                                    onCustomize: { orderStore.numberFormatOverrides[cid] = orderStore.numberingFormat(for: cid); orderStore.save() },
                                     onRevert: { orderStore.numberFormatOverrides.removeValue(forKey: cid); orderStore.save() }
                                 )
                                 numberingSummaryRow(
                                     title: "Devis",
                                     format: quoteStore.numberingFormat(for: cid),
                                     isOverridden: quoteStore.numberFormatOverrides[cid] != nil,
-                                    onCustomize: { quoteStore.numberFormatOverrides[cid] = quoteStore.numberingFormat(for: nil); quoteStore.save() },
+                                    onCustomize: { quoteStore.numberFormatOverrides[cid] = quoteStore.numberingFormat(for: cid); quoteStore.save() },
                                     onRevert: { quoteStore.numberFormatOverrides.removeValue(forKey: cid); quoteStore.save() }
                                 )
                                 Text("Détail complet (préfixe, année, numéro de début, séparateur) dans Réglages > Application.")
@@ -970,7 +956,7 @@ struct ConfigureSocieteView: View {
             Text("\(format.prefix)\(format.includeYear ? "-AAAA" : "")-0001").monospaced().font(.caption).foregroundStyle(.secondary)
             Spacer()
             if isOverridden {
-                Button("Revenir au réglage hérité", role: .destructive, action: onRevert).buttonStyle(.link).font(.caption2)
+                Button("Revenir au format par défaut", role: .destructive, action: onRevert).buttonStyle(.link).font(.caption2)
             } else {
                 Button("Personnaliser pour cette société", action: onCustomize).buttonStyle(.link).font(.caption2)
             }

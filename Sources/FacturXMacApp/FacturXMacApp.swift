@@ -1179,13 +1179,6 @@ struct ConnectionStatusView: View {
 
 
 
-/// Badge affiché sur une ligne de table de réglages quand une société est sélectionnée et
-/// que cette ligne a une surcharge propre à elle — clic pour revenir au réglage par défaut.
-/// État d'une ligne de table de valeurs vis-à-vis de la société actuellement sélectionnée
-/// (`ValueTablesView.tableSocietyID`) — voir `ValueTablesView.overrideState(hasOwnOverride:hasPrincipaleOverride:)`.
-
-
-
 /// Choisir une société d'abord, puis revoir tous ses réglages personnalisables en une seule
 /// fois — en complément des sélecteurs déjà présents écran par écran (Tables, Application),
 /// pas à leur place (F.3 du chantier "Réglages par société"). Réutilise les vues déjà

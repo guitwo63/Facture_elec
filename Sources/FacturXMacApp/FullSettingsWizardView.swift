@@ -228,7 +228,9 @@ struct FullSettingsWizardView: View {
             Divider()
             HStack {
                 Text("Aperçu : ").font(.caption).foregroundStyle(.secondary)
-                Text(invoiceStore.previewNextNumber()).monospaced().font(.callout.bold())
+                // Le format par défaut édité ci-dessus, pas `previewNextNumber()` seul qui
+                // résoudrait sur le format de la société principale.
+                Text(invoiceStore.previewNextNumber(format: invoiceStore.defaultNumberingFormat)).monospaced().font(.callout.bold())
             }
         }
     }

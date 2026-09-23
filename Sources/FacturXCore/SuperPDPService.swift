@@ -1150,8 +1150,8 @@ public final class SuperPDPSettings: ObservableObject {
         }
     }
 
-    /// Identifiants effectifs pour une société : les siens s'ils existent, sinon ceux de la
-    /// société principale, sinon le réglage global (`credentials`). `companyID == nil`
+    /// Identifiants effectifs pour une société : les siens s'ils existent, sinon le réglage
+    /// global (`credentials`) — jamais ceux de la société principale. `companyID == nil`
     /// résout sur la société principale si une a été désignée (voir
     /// `PartyDirectory.principaleSocieteID`), sinon le réglage global — jamais de
     /// régression pour un appelant qui ne passe rien.
@@ -1167,7 +1167,7 @@ public final class SuperPDPSettings: ObservableObject {
         save()
     }
 
-    /// Revient au réglage hérité (société principale, ou global) pour cette société.
+    /// Revient au réglage global pour cette société.
     public func removeOverride(companyID: UUID) {
         credentialsBySociety.removeValue(forKey: companyID)
         save()

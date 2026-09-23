@@ -199,7 +199,8 @@ public final class EmailTemplateStore: ObservableObject {
     }
 
     /// Variante par société : la surcharge de `companyID` pour ce type si elle existe, sinon
-    /// celle de la société principale, sinon le réglage global.
+    /// le réglage global — jamais celle de la société principale, sauf pour
+    /// `companyID == nil` (voir `templatesBySociety`).
     public func template(for kind: EmailTemplateKind, companyID: UUID?) -> EmailTemplate {
         let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
         if let effectiveID,
@@ -238,7 +239,7 @@ public final class EmailTemplateStore: ObservableObject {
         save()
     }
 
-    /// Revient au réglage hérité (société principale, ou global) pour ce modèle sur cette société.
+    /// Revient au réglage global pour ce modèle sur cette société.
     public func removeOverride(kind: EmailTemplateKind, companyID: UUID) {
         templatesBySociety[companyID]?.removeAll { $0.kind == kind }
         if templatesBySociety[companyID]?.isEmpty == true {

@@ -82,20 +82,13 @@ struct ValueTablesView: View {
     @EnvironmentObject var auth: AuthStore
     @State private var selectedTable: ValueTable = .orderStatuses
     /// Société dont on édite/consulte les surcharges — commune à toutes les tables
-    /// modifiables (pas besoin de re-choisir en changeant de table). `nil` = "Toutes"
-    /// (réglage global) — voir la doc de chaque store pour la résolution.
+    /// modifiables (pas besoin de re-choisir en changeant de table). `nil` = "Toutes" : le
+    /// réglage global lui-même, affiché ET enregistré tel quel. Ne jamais l'afficher via
+    /// `list(for: nil)`/`override(for:companyID: nil)`, qui résolvent sur la société
+    /// principale : une modification enregistrée dans le global semblait alors disparaître.
+    /// Une société sélectionnée affiche sa résolution réelle (ses surcharges sur le global,
+    /// sans héritage de la société principale).
     @State private var tableSocietyID: UUID?
-
-    /// Libellé de l'option "pas de société sélectionnée" du picker — nomme la société
-    /// principale quand une a été désignée (voir `PartyDirectory.principaleSocieteID`) plutôt
-    /// que de parler d'un défaut anonyme.
-    private var noSelectionLabel: String {
-        guard let principaleID = directory.principaleSocieteID,
-              let principale = directory.entries.first(where: { $0.id == principaleID }) else {
-            return "Toutes (réglage par défaut)"
-        }
-        return "Société principale : \(principale.displayName)"
-    }
     @State private var editingPDPStatusCode: PDPEventCodeOverride?
     @State private var creatingPDPStatusCode = false
     @State private var searchQuery = ""
@@ -129,16 +122,15 @@ struct ValueTablesView: View {
                 HStack(spacing: 6) {
                     Text("Société").font(.caption).foregroundStyle(.secondary)
                     Picker("Société", selection: $tableSocietyID) {
-                        Text(noSelectionLabel).tag(UUID?.none)
+                        Text("Toutes (réglage par défaut)").tag(UUID?.none)
                         ForEach(auth.visibleSocieties(for: auth.currentUser)) { s in
                             Text(s.displayName).tag(UUID?.some(s.id))
                         }
                     }
                     .labelsHidden()
                     .frame(width: 260)
-                    InfoBadge(text: directory.principaleSocieteID == nil
-                        ? "Personnalisez une valeur pour cette société uniquement — les autres sociétés gardent le réglage par défaut. « Toutes » édite ce réglage par défaut lui-même."
-                        : "Personnalisez une valeur pour cette société uniquement — les autres sociétés sans personnalisation propre héritent de la société principale.")
+                    InfoBadge(text: "Personnalisez une valeur pour cette société uniquement — les autres sociétés gardent le réglage par défaut. « Toutes » édite ce réglage par défaut lui-même."
+                        + (directory.principaleSocieteID == nil ? "" : " Ce qui n'est rattaché à aucune société (tiers sans société, anciens documents) suit la société principale."))
                     Spacer()
                 }
                 .padding(.horizontal, 10).padding(.bottom, 8)
@@ -211,7 +203,7 @@ struct ValueTablesView: View {
             }
         }
         .sheet(item: $editingKind) { kind in
-            KindColorEditorSheet(kind: kind, hex: kindColors.hexColor(for: kind, companyID: tableSocietyID)) { newHex in
+            KindColorEditorSheet(kind: kind, hex: displayedHexColor(for: kind)) { newHex in
                 if let cid = tableSocietyID {
                     kindColors.setOverride(hexColor: newHex, for: kind, companyID: cid)
                 } else {
@@ -296,29 +288,16 @@ struct ValueTablesView: View {
     private var filteredAuditActionLabels: [AuditActionLabel] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         let resolved = actionLabelStore.overrides
-            .map { AuditActionLabel(id: $0.id, label: actionLabelStore.label(for: $0.id, companyID: tableSocietyID)) }
+            .map { global in
+                tableSocietyID.map { AuditActionLabel(id: global.id, label: actionLabelStore.label(for: global.id, companyID: $0)) } ?? global
+            }
             .sorted { $0.label < $1.label }
         guard !q.isEmpty else { return resolved }
         return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
 
-    /// Calcule l'état d'une ligne pour le badge — voir `SocietyOverrideState`.
-    /// `hasOwnOverride` : cette ligne est-elle personnalisée pour `tableSocietyID` ?
-    /// `hasPrincipaleOverride` : l'est-elle pour la société principale (si elle existe) ?
-    private func overrideState(hasOwnOverride: Bool, hasPrincipaleOverride: (UUID) -> Bool) -> SocietyOverrideState {
-        guard let cid = tableSocietyID else { return .none }
-        if hasOwnOverride { return .customized }
-        if let principaleID = directory.principaleSocieteID, principaleID != cid, hasPrincipaleOverride(principaleID) {
-            return .inheritedFromPrincipale
-        }
-        return .none
-    }
-
-    private func auditActionLabelOverrideState(_ id: String) -> SocietyOverrideState {
-        overrideState(
-            hasOwnOverride: tableSocietyID.flatMap { actionLabelStore.overridesBySociety[$0]?.contains { $0.id == id } } ?? false,
-            hasPrincipaleOverride: { pid in actionLabelStore.overridesBySociety[pid]?.contains { $0.id == id } ?? false }
-        )
+    private func isAuditActionLabelCustomized(_ id: String) -> Bool {
+        tableSocietyID.flatMap { actionLabelStore.overridesBySociety[$0]?.contains { $0.id == id } } ?? false
     }
 
     private var auditActionLabelsPanel: some View {
@@ -354,7 +333,7 @@ struct ValueTablesView: View {
                                 }
                             ))
                             .textFieldStyle(.roundedBorder)
-                            SocietyOverrideBadge(state: auditActionLabelOverrideState(item.id)) {
+                            SocietyOverrideBadge(isCustomized: isAuditActionLabelCustomized(item.id)) {
                                 if let cid = tableSocietyID {
                                     actionLabelStore.removeOverride(id: item.id, companyID: cid)
                                 }
@@ -371,18 +350,15 @@ struct ValueTablesView: View {
     private var filteredPDPStatusCodes: [PDPEventCodeOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
         let resolved = superPDPStatusCodeStore.overrides
-            .map { superPDPStatusCodeStore.override(for: $0.id, companyID: tableSocietyID) ?? $0 }
+            .map { global in tableSocietyID.flatMap { superPDPStatusCodeStore.override(for: global.id, companyID: $0) } ?? global }
             .sorted { $0.id < $1.id }
         guard !q.isEmpty else { return resolved }
         return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
 
-    private func pdpStatusCodeOverrideState(_ id: String) -> SocietyOverrideState {
+    private func isPDPStatusCodeCustomized(_ id: String) -> Bool {
         let normalized = id.lowercased()
-        return overrideState(
-            hasOwnOverride: tableSocietyID.flatMap { superPDPStatusCodeStore.overridesBySociety[$0]?.contains { $0.id.lowercased() == normalized } } ?? false,
-            hasPrincipaleOverride: { pid in superPDPStatusCodeStore.overridesBySociety[pid]?.contains { $0.id.lowercased() == normalized } ?? false }
-        )
+        return tableSocietyID.flatMap { superPDPStatusCodeStore.overridesBySociety[$0]?.contains { $0.id.lowercased() == normalized } } ?? false
     }
 
     /// Table de paramétrage des codes d'événement SUPER PDP (fr:2XX) : libellé français et
@@ -436,7 +412,7 @@ struct ValueTablesView: View {
                 Text("informatif seulement").font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
-            SocietyOverrideBadge(state: pdpStatusCodeOverrideState(item.id)) {
+            SocietyOverrideBadge(isCustomized: isPDPStatusCodeCustomized(item.id)) {
                 if let cid = tableSocietyID {
                     superPDPStatusCodeStore.removeOverride(id: item.id, companyID: cid)
                 }
@@ -520,10 +496,7 @@ struct ValueTablesView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                SocietyOverrideBadge(state: overrideState(
-                    hasOwnOverride: tableSocietyID.flatMap { cid in invoiceStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false,
-                    hasPrincipaleOverride: { pid in invoiceStatusStore.overridesBySociety[pid]?.contains { $0.id == override.id } ?? false }
-                )) {
+                SocietyOverrideBadge(isCustomized: tableSocietyID.flatMap { cid in invoiceStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false) {
                     if let status = InvoiceStatus(rawValue: override.id), let cid = tableSocietyID {
                         invoiceStatusStore.removeOverride(for: status, companyID: cid)
                     }
@@ -585,7 +558,9 @@ struct ValueTablesView: View {
 
     private var filteredInvoiceStatuses: [InvoiceStatusOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let resolved = InvoiceStatus.allCases.map { invoiceStatusStore.override(for: $0, companyID: tableSocietyID) }
+        let resolved = InvoiceStatus.allCases.map { status in
+            tableSocietyID.map { invoiceStatusStore.override(for: status, companyID: $0) } ?? invoiceStatusStore.override(for: status)
+        }
         guard !q.isEmpty else { return resolved }
         return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
     }
@@ -651,10 +626,7 @@ struct ValueTablesView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                SocietyOverrideBadge(state: overrideState(
-                    hasOwnOverride: tableSocietyID.flatMap { cid in purchaseInvoiceStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false,
-                    hasPrincipaleOverride: { pid in purchaseInvoiceStatusStore.overridesBySociety[pid]?.contains { $0.id == override.id } ?? false }
-                )) {
+                SocietyOverrideBadge(isCustomized: tableSocietyID.flatMap { cid in purchaseInvoiceStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false) {
                     if let status = PurchaseInvoiceStatus(rawValue: override.id), let cid = tableSocietyID {
                         purchaseInvoiceStatusStore.removeOverride(for: status, companyID: cid)
                     }
@@ -684,7 +656,9 @@ struct ValueTablesView: View {
 
     private var filteredPurchaseInvoiceStatuses: [PurchaseInvoiceStatusOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let resolved = PurchaseInvoiceStatus.allCases.map { purchaseInvoiceStatusStore.override(for: $0, companyID: tableSocietyID) }
+        let resolved = PurchaseInvoiceStatus.allCases.map { status in
+            tableSocietyID.map { purchaseInvoiceStatusStore.override(for: status, companyID: $0) } ?? purchaseInvoiceStatusStore.override(for: status)
+        }
         guard !q.isEmpty else { return resolved }
         return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.reformCode ?? "").lowercased().contains(q) }
     }
@@ -743,10 +717,7 @@ struct ValueTablesView: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                SocietyOverrideBadge(state: overrideState(
-                    hasOwnOverride: tableSocietyID.flatMap { cid in statusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false,
-                    hasPrincipaleOverride: { pid in statusStore.overridesBySociety[pid]?.contains { $0.id == override.id } ?? false }
-                )) {
+                SocietyOverrideBadge(isCustomized: tableSocietyID.flatMap { cid in statusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false) {
                     // Manipulation directe (pas de removeOverride(for:companyID:) générique côté
                     // OrderStatusStore) : cette table mélange statuts standard (enum OrderStatus)
                     // et statuts personnalisés (id "custom-…", hors enum) — il faut fonctionner
@@ -824,10 +795,7 @@ struct ValueTablesView: View {
                     .foregroundStyle(Color(hex: override.hexColor))
                 Text(override.label).font(.body)
                 Spacer()
-                SocietyOverrideBadge(state: overrideState(
-                    hasOwnOverride: tableSocietyID.flatMap { cid in quoteStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false,
-                    hasPrincipaleOverride: { pid in quoteStatusStore.overridesBySociety[pid]?.contains { $0.id == override.id } ?? false }
-                )) {
+                SocietyOverrideBadge(isCustomized: tableSocietyID.flatMap { cid in quoteStatusStore.overridesBySociety[cid]?.contains { $0.id == override.id } } ?? false) {
                     if let status = QuoteStatus(rawValue: override.id), let cid = tableSocietyID {
                         quoteStatusStore.removeOverride(for: status, companyID: cid)
                     }
@@ -857,7 +825,9 @@ struct ValueTablesView: View {
 
     private var filteredQuoteStatuses: [QuoteStatusOverride] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let resolved = QuoteStatus.allCases.map { quoteStatusStore.override(for: $0, companyID: tableSocietyID) }
+        let resolved = QuoteStatus.allCases.map { status in
+            tableSocietyID.map { quoteStatusStore.override(for: status, companyID: $0) } ?? quoteStatusStore.override(for: status)
+        }
         guard !q.isEmpty else { return resolved }
         return resolved.filter { $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) }
     }
@@ -876,16 +846,13 @@ struct ValueTablesView: View {
 
     private var filteredPaymentTerms: [PaymentTermsPreset] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let resolved = paymentTermsStore.list(for: tableSocietyID)
+        let resolved = tableSocietyID.map { paymentTermsStore.list(for: $0) } ?? paymentTermsStore.presets
         guard !q.isEmpty else { return resolved }
         return resolved.filter { $0.label.lowercased().contains(q) || $0.text.lowercased().contains(q) }
     }
 
-    private func paymentTermOverrideState(_ id: String) -> SocietyOverrideState {
-        overrideState(
-            hasOwnOverride: tableSocietyID.flatMap { paymentTermsStore.presetsBySociety[$0]?.contains { $0.id == id } } ?? false,
-            hasPrincipaleOverride: { pid in paymentTermsStore.presetsBySociety[pid]?.contains { $0.id == id } ?? false }
-        )
+    private func isPaymentTermCustomized(_ id: String) -> Bool {
+        tableSocietyID.flatMap { paymentTermsStore.presetsBySociety[$0]?.contains { $0.id == id } } ?? false
     }
 
     private var paymentTermsPanel: some View {
@@ -922,7 +889,7 @@ struct ValueTablesView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            SocietyOverrideBadge(state: paymentTermOverrideState(preset.id)) {
+                            SocietyOverrideBadge(isCustomized: isPaymentTermCustomized(preset.id)) {
                                 if let cid = tableSocietyID {
                                     paymentTermsStore.removeOverride(id: preset.id, companyID: cid)
                                 }
@@ -967,10 +934,7 @@ struct ValueTablesView: View {
                             Circle().fill(Color(hex: tag.hexColor)).frame(width: 14, height: 14)
                             Text(tag.name).font(.body)
                             Spacer()
-                            SocietyOverrideBadge(state: overrideState(
-                                hasOwnOverride: tableSocietyID.flatMap { cid in tagStore.tagsBySociety[cid]?.contains { $0.id == tag.id } } ?? false,
-                                hasPrincipaleOverride: { pid in tagStore.tagsBySociety[pid]?.contains { $0.id == tag.id } ?? false }
-                            )) {
+                            SocietyOverrideBadge(isCustomized: tableSocietyID.flatMap { cid in tagStore.tagsBySociety[cid]?.contains { $0.id == tag.id } } ?? false) {
                                 if let cid = tableSocietyID {
                                     tagStore.removeOverride(id: tag.id, companyID: cid)
                                 }
@@ -1021,9 +985,13 @@ struct ValueTablesView: View {
 
     private var filteredTags: [PartyTag] {
         let q = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let source = tagStore.list(for: tableSocietyID)
+        let source = tableSocietyID.map { tagStore.list(for: $0) } ?? tagStore.tags
         guard !q.isEmpty else { return source }
         return source.filter { $0.name.lowercased().contains(q) }
+    }
+
+    private func displayedHexColor(for kind: DirectoryEntryKind) -> String {
+        tableSocietyID.map { kindColors.hexColor(for: kind, companyID: $0) } ?? kindColors.hexColor(for: kind)
     }
 
     private var kindColorsPanel: some View {
@@ -1038,14 +1006,11 @@ struct ValueTablesView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(DirectoryEntryKind.selectable, id: \.self) { kind in
                         HStack(spacing: 10) {
-                            Circle().fill(Color(hex: kindColors.hexColor(for: kind, companyID: tableSocietyID))).frame(width: 14, height: 14)
+                            Circle().fill(Color(hex: displayedHexColor(for: kind))).frame(width: 14, height: 14)
                             Text(kind.label).font(.body)
-                            Text(kindColors.hexColor(for: kind, companyID: tableSocietyID)).font(.caption).foregroundStyle(.secondary).monospaced()
+                            Text(displayedHexColor(for: kind)).font(.caption).foregroundStyle(.secondary).monospaced()
                             Spacer()
-                            SocietyOverrideBadge(state: overrideState(
-                hasOwnOverride: tableSocietyID.flatMap { cid in kindColors.colorsBySociety[cid]?[kind] != nil } ?? false,
-                hasPrincipaleOverride: { pid in kindColors.colorsBySociety[pid]?[kind] != nil }
-            )) {
+                            SocietyOverrideBadge(isCustomized: tableSocietyID.flatMap { cid in kindColors.colorsBySociety[cid]?[kind] != nil } ?? false) {
                                 if let cid = tableSocietyID {
                                     kindColors.removeOverride(for: kind, companyID: cid)
                                 }

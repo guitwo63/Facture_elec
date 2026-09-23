@@ -129,13 +129,20 @@ public final class InvoiceStore: ObservableObject {
         }
     }
 
-    /// Format effectif pour une société : son réglage propre s'il existe, sinon celui de la
-    /// société principale, sinon le format par défaut. `companyID == nil` résout sur la
-    /// société principale si une a été désignée (voir `PartyDirectory.principaleSocieteID`).
+    /// Le format par défaut lui-même (« Toutes » dans Réglages > Application), sans aucune
+    /// surcharge par société — pas même celle de la société principale.
+    public var defaultNumberingFormat: InvoiceNumberingFormat {
+        InvoiceNumberingFormat(prefix: numberPrefix, includeYear: numberIncludeYear, start: numberStart, useSeparator: numberUseSeparator)
+    }
+
+    /// Format effectif pour une société : son réglage propre s'il existe, sinon le format par
+    /// défaut — une société n'hérite jamais du format de la société principale. Seul
+    /// `companyID == nil` (document sans société) résout sur la société principale si une a
+    /// été désignée (voir `PartyDirectory.principaleSocieteID`).
     public func numberingFormat(for companyID: UUID?) -> InvoiceNumberingFormat {
         let effectiveID = companyID ?? PartyDirectory.shared.principaleSocieteID
         if let effectiveID, let override = numberFormatOverrides[effectiveID] { return override }
-        return InvoiceNumberingFormat(prefix: numberPrefix, includeYear: numberIncludeYear, start: numberStart, useSeparator: numberUseSeparator)
+        return defaultNumberingFormat
     }
 
     public func resolveDefaultSeller(from directory: PartyDirectory) -> InvoiceParty? {
@@ -301,8 +308,7 @@ public final class InvoiceStore: ObservableObject {
         return final
     }
 
-    private func headKey(prefix: String, companyID: UUID?) -> String {
-        let format = numberingFormat(for: companyID)
+    private func headKey(prefix: String, format: InvoiceNumberingFormat) -> String {
         let sep = format.useSeparator ? "-" : ""
         let year = String(Calendar.current.component(.year, from: Date()))
         var built: [String] = []
@@ -333,8 +339,8 @@ public final class InvoiceStore: ObservableObject {
     /// inutilisé. Évite aussi le doublon que produisait l'ancien calcul par simple compte
     /// (numéro de départ + nombre de factures existantes) quand une facture de numéro plus
     /// élevé restait présente après suppression.
-    private func nextSequence(headKey: String, companyID: UUID?) -> Int {
-        let paddedStart = max(1, numberingFormat(for: companyID).start)
+    private func nextSequence(headKey: String, companyID: UUID?, start: Int) -> Int {
+        let paddedStart = max(1, start)
         let matching = invoices.filter { $0.number.hasPrefix(headKey) && matchesScope($0, companyID: companyID) }
         let usedSeqs = Set(matching.compactMap { Int($0.number.dropFirst(headKey.count)) })
         var candidate = paddedStart
@@ -343,14 +349,19 @@ public final class InvoiceStore: ObservableObject {
     }
 
     public func nextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
-        let headKey = self.headKey(prefix: prefix, companyID: companyID)
-        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
+        let format = numberingFormat(for: companyID)
+        let headKey = self.headKey(prefix: prefix, format: format)
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID, start: format.start))
         return headKey + chrono
     }
 
-    public func previewNextNumber(prefix: String = "", companyID: UUID? = nil) -> String {
-        let headKey = self.headKey(prefix: prefix, companyID: companyID)
-        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID))
+    /// `format` : prévisualise ce format précis plutôt que le format effectif de `companyID`
+    /// — Réglages > Application montre ainsi le format par défaut qu'il affiche, alors que
+    /// `companyID == nil` résoudrait sur la société principale.
+    public func previewNextNumber(prefix: String = "", companyID: UUID? = nil, format: InvoiceNumberingFormat? = nil) -> String {
+        let resolved = format ?? numberingFormat(for: companyID)
+        let headKey = self.headKey(prefix: prefix, format: resolved)
+        let chrono = String(format: "%04d", nextSequence(headKey: headKey, companyID: companyID, start: resolved.start))
         return headKey + chrono
     }
 
