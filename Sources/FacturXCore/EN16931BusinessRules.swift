@@ -141,6 +141,7 @@ public enum EN16931BusinessRules {
         }
         results += sellerSirenRules(invoice.seller, context: context)
         results += electronicAddressRules(invoice.seller, bt: "BT-34", label: "de l'émetteur")
+        results += endpointSchemeRules(invoice.seller, bt: "BT-34", label: "de l'émetteur", context: context)
         if let sellerSiret = invoice.seller.siret?.trimmingCharacters(in: .whitespaces), !sellerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.seller.siret) {
             results.append(BusinessRuleResult(ruleId: "BR-FR-09", severity: .warning,
@@ -207,14 +208,16 @@ public enum EN16931BusinessRules {
         }
         // BR-FR-32 (France CTC, fatale : tout identifiant légal de schéma 0002 a 9 chiffres)
         // plutôt que BR-FR-11, qui ne vaut qu'en présence d'une note BAR = B2B, que l'application
-        // n'émet pas. Un identifiant d'un autre schéma (n° d'entreprise belge 0208…) n'est pas un
-        // SIREN : la règle ne le vise pas.
+        // n'émet pas (elle n'en tire qu'un avertissement, sans SIREN : `b2bBuyerRules`). Un
+        // identifiant d'un autre schéma (n° d'entreprise belge 0208…) n'est pas un SIREN : la règle
+        // ne le vise pas.
         if let buyerSiren = CIIXMLGenerator.xmlSiren(invoice.buyer.siren), invoice.buyer.legalSchemeID == "0002" {
             results += sirenFormatRules(buyerSiren, ruleId: "BR-FR-32", bt: "BT-47", party: "du destinataire")
         }
         results += electronicAddressRules(invoice.buyer, bt: "BT-49", label: "du destinataire")
+        results += endpointSchemeRules(invoice.buyer, bt: "BT-49", label: "du destinataire", context: context)
         if context == .issued {
-            results += buyerDirectorySchemeRules(invoice.buyer)
+            results += b2bBuyerRules(invoice.buyer)
         }
         if let buyerSiret = invoice.buyer.siret?.trimmingCharacters(in: .whitespaces), !buyerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.buyer.siret) {
@@ -525,24 +528,57 @@ public enum EN16931BusinessRules {
             message: "BR-FR-23 : \(address) est émise sous le schéma 0225 (annuaire), qui n'admet que les lettres sans accent, les chiffres et « - », « _ », « . » (ni espace, ni « @ », ni « : »…) : la PDP rejetterait la facture ; \(remedy).")]
     }
 
-    /// BR-FR-21 (Schematron France CTC, fatale) : sur une facture entre entreprises françaises (note
-    /// BAR = B2B), l'adresse électronique du destinataire (BT-49) est une adresse de l'annuaire, sous
-    /// le schéma 0225, qui commence par son SIREN. Le Schematron ne l'applique qu'avec cette note, que
-    /// l'application n'émet pas ; la plateforme, elle, reconnaît une facture entre assujettis
-    /// français. L'application ne distingue pas un client professionnel d'un particulier ou d'un
-    /// client hors du e-invoicing, à qui une adresse e-mail convient : simple avertissement, sur une
-    /// facture émise, pour un destinataire établi en France à SIREN (schéma 0002, 9 chiffres ; un
-    /// SIREN mal formé relève de BR-FR-32) dont l'adresse émise (`CIIXMLGenerator.xmlEndpoint`) n'est
-    /// pas en 0225. Même avertissement qu'ARVERNX-SaaS (décision de Guillaume du 2026-09-24).
-    private static func buyerDirectorySchemeRules(_ buyer: InvoiceParty) -> [BusinessRuleResult] {
-        guard buyer.country.trimmingCharacters(in: .whitespaces).uppercased() == "FR",
-              buyer.legalSchemeID == "0002",
-              let siren = CIIXMLGenerator.xmlSiren(buyer.siren), SireneValidator.isWellFormedSiren(siren),
-              let endpoint = CIIXMLGenerator.xmlEndpoint(buyer),
-              endpoint.schemeID != ElectronicAddressValidator.directoryScheme else { return [] }
+    /// BR-FR-11 et BR-FR-21 (Schematron France CTC, fatales) : sur une facture entre entreprises
+    /// françaises (note BAR = B2B), le SIREN du destinataire (BT-47) est obligatoire, et son adresse
+    /// électronique (BT-49) est une adresse de l'annuaire, sous le schéma 0225, qui commence par ce
+    /// SIREN. Le Schematron ne les applique qu'avec cette note, que l'application n'émet pas ; la
+    /// plateforme, elle, reconnaît une facture entre assujettis français. Contrôles d'émission, pour
+    /// un destinataire établi en France, comme dans ARVERNX-SaaS (`_b2b_buyer_rules`, décisions de
+    /// Guillaume du 2026-09-24). L'application ne distingue pas un client professionnel d'un
+    /// particulier ou d'un client hors du e-invoicing, d'où les gravités :
+    /// - sans SIREN : avertissement BR-FR-11 ; bloquer interdirait toute facture à un particulier ;
+    /// - adresse émise (`CIIXMLGenerator.xmlEndpoint`) sous 0225 qui ne désigne pas le SIREN (schéma
+    ///   0002, 9 chiffres ; un SIREN mal formé relève de BR-FR-32) : erreur BR-FR-21, l'annuaire
+    ///   enverrait la facture à une autre entreprise. La forme attendue est celle d'ARVERNX, « SIREN »
+    ///   ou « SIREN_… » (`ElectronicAddressValidator.designatesSiren`), plus stricte que le Schematron ;
+    /// - adresse sous un autre schéma (EM, 9957…) : avertissement BR-FR-21 ; elle convient à un client
+    ///   hors du e-invoicing.
+    /// L'application n'émet pas d'autofacture (389…), que BR-FR-21 exempte.
+    private static func b2bBuyerRules(_ buyer: InvoiceParty) -> [BusinessRuleResult] {
+        guard buyer.country.trimmingCharacters(in: .whitespaces).uppercased() == "FR" else { return [] }
+        guard let siren = CIIXMLGenerator.xmlSiren(buyer.siren) else {
+            return [BusinessRuleResult(ruleId: "BR-FR-11", severity: .warning,
+                message: "BR-FR-11 : Le destinataire est établi en France sans SIREN (BT-47). Si c'est une entreprise assujettie à la TVA, son SIREN est obligatoire et la PDP rejetterait la facture ; pour un particulier, ignorez cet avertissement.")]
+        }
+        guard buyer.legalSchemeID == "0002", SireneValidator.isWellFormedSiren(siren),
+              let endpoint = CIIXMLGenerator.xmlEndpoint(buyer) else { return [] }
+        if endpoint.schemeID == ElectronicAddressValidator.directoryScheme {
+            // Sans adresse saisie, le générateur émet le SIREN : il se désigne lui-même.
+            guard !ElectronicAddressValidator.designatesSiren(endpoint.id, siren: siren) else { return [] }
+            return [BusinessRuleResult(ruleId: "BR-FR-21", severity: .error,
+                message: "BR-FR-21 : L'adresse électronique du destinataire (BT-49) « \(endpoint.id) » ne désigne pas son SIREN \(siren) : dans l'annuaire (schéma 0225), elle doit être « \(siren) » ou commencer par « \(siren)_ ». La facture partirait chez un autre destinataire ou serait rejetée par la PDP ; corrigez l'adresse ou le SIREN, ou videz l'adresse pour émettre le SIREN.")]
+        }
         let scheme = NormRefs.endpointSchemes.first { $0.code == endpoint.schemeID }?.label ?? endpoint.schemeID
         return [BusinessRuleResult(ruleId: "BR-FR-21", severity: .warning,
             message: "BR-FR-21 : L'adresse électronique du destinataire (BT-49) est sous le schéma « \(scheme) » : entre entreprises françaises assujetties, la PDP exige une adresse de l'annuaire (schéma 0225, « \(siren) » ou « \(siren)_… »). Videz l'adresse pour émettre le SIREN, sauf si le destinataire est hors du e-invoicing (particulier, organisme non assujetti…).")]
+    }
+
+    /// BR-CL-25 (Schematron EN16931, sans identifiant ; fatale en EXTENDED-CTC-FR) : le schéma de
+    /// l'adresse électronique émise (BT-34-1, BT-49-1), tel que le générateur l'écrit
+    /// (`CIIXMLGenerator.xmlEndpoint` : vide, « FR:SIRENE » et « 0183 » deviennent 0225), est un code
+    /// de la liste EAS (`EASCodeList`). Le sélecteur n'en propose que d'admis : un autre schéma vient
+    /// d'un import CSV, d'un XML reçu ou d'une ancienne fiche. Sur une facture reçue, c'est le schéma
+    /// du fournisseur : rien à corriger chez nous, d'où un avertissement, comme pour BR-CL-23
+    /// (décision de Guillaume du 2026-09-24 ; ARVERNX-SaaS en fait une erreur dans les deux cas).
+    private static func endpointSchemeRules(_ party: InvoiceParty, bt: String, label: String, context: EN16931RuleContext) -> [BusinessRuleResult] {
+        guard let endpoint = CIIXMLGenerator.xmlEndpoint(party), !EASCodeList.contains(endpoint.schemeID) else { return [] }
+        let refused = "BR-CL-25 : Le schéma « \(endpoint.schemeID) » de l'adresse électronique \(label) (\(bt)-1) n'est pas dans la liste EAS"
+        guard context == .issued else {
+            return [BusinessRuleResult(ruleId: "BR-CL-25", severity: .warning, message: refused + ".")]
+        }
+        let offered = NormRefs.endpointSchemes.map { "« \($0.label) »" }.joined(separator: ", ")
+        return [BusinessRuleResult(ruleId: "BR-CL-25", severity: .error,
+            message: refused + " : la PDP rejetterait la facture ; choisissez l'un des schémas proposés (\(offered)), sur la facture ou dans la fiche de l'annuaire.")]
     }
 
     /// "20260923" (date du XML) → "23/09/2026", pour la citer telle quelle dans un message.

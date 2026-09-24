@@ -1325,9 +1325,11 @@ struct InvoiceEditorView: View {
     }
 
     /// Règles qui entourent de rouge une partie : les siennes, plus BR-FR-23 quand c'est son
-    /// adresse électronique qui est refusée (la règle vise l'émetteur comme le destinataire).
+    /// adresse électronique qui est refusée, et BR-CL-25 quand c'est son schéma (ces règles visent
+    /// l'émetteur comme le destinataire).
     private func partyRuleIDs(_ ids: [String], _ party: InvoiceParty) -> [String] {
-        party.hasAdmittedElectronicAddress ? ids : ids + ["BR-FR-23"]
+        (party.hasAdmittedElectronicAddress ? ids : ids + ["BR-FR-23"])
+            + (party.hasAdmittedEndpointScheme ? [] : ["BR-CL-25"])
     }
 
     var body: some View {
@@ -1943,7 +1945,7 @@ struct InvoiceEditorView: View {
                         PartySection(party: $invoice.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.red, lineWidth: partyRuleIDs(["BR-07", "BR-11", "BR-FR-12", "BR-FR-32"], invoice.buyer).contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
+                        .stroke(Color.red, lineWidth: partyRuleIDs(["BR-07", "BR-11", "BR-FR-12", "BR-FR-21", "BR-FR-32"], invoice.buyer).contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                 }
 
                 GroupBox("Lignes") {
