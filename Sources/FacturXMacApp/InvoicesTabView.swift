@@ -1324,11 +1324,11 @@ struct InvoiceEditorView: View {
         )
     }
 
-    /// Règles qui entourent de rouge une partie : les siennes, plus BR-FR-23 quand c'est son
-    /// adresse électronique qui est refusée, et BR-CL-25 quand c'est son schéma (ces règles visent
-    /// l'émetteur comme le destinataire).
+    /// Règles qui entourent de rouge une partie : les siennes, plus BR-FR-23 et BR-FR-25 quand
+    /// c'est son adresse électronique qui est refusée, et BR-CL-25 quand c'est son schéma (ces
+    /// règles visent l'émetteur comme le destinataire).
     private func partyRuleIDs(_ ids: [String], _ party: InvoiceParty) -> [String] {
-        (party.hasAdmittedElectronicAddress ? ids : ids + ["BR-FR-23"])
+        (party.hasAdmittedElectronicAddress ? ids : ids + ["BR-FR-23", "BR-FR-25"])
             + (party.hasAdmittedEndpointScheme ? [] : ["BR-CL-25"])
     }
 

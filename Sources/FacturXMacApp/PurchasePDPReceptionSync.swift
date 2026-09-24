@@ -14,6 +14,10 @@ final class PurchasePDPReceptionEngine: ObservableObject {
 
     private var task: Task<Void, Never>?
 
+    /// Reçoit les échecs : une entrée d'audit au début d'une panne, une à son retour à la
+    /// normale, plutôt qu'une à chaque cycle (voir `SyncFailureJournal`).
+    var failureJournal = SyncFailureJournal.shared
+
     /// `defaultCredentials`/`credentialsBySociety` — voir `SuperPDPSettings.credentials`/
     /// `.credentialsBySociety`. La cadence reste pilotée par le seul réglage par défaut.
     func start(store: PurchaseInvoiceStore, defaultCredentials: @escaping () -> SuperPDPCredentials, credentialsBySociety: @escaping () -> [UUID: SuperPDPCredentials]) {
@@ -48,43 +52,61 @@ final class PurchasePDPReceptionEngine: ObservableObject {
         var totalReceived = 0
         var totalImported = 0
         var totalErrors = 0
+        var firstError: String?
+        var queriedCompanies: Set<UUID?> = []
 
         if defaultCredentials.usePDP, defaultCredentials.isConfigured {
-            let (received, imported, errors) = await receive(store: store, credentials: defaultCredentials, companyID: nil)
+            queriedCompanies.insert(nil)
+            let (received, imported, errors, error) = await receive(store: store, credentials: defaultCredentials, companyID: nil)
             totalReceived += received; totalImported += imported; totalErrors += errors
+            if firstError == nil { firstError = error }
         }
         for (companyID, credentials) in credentialsBySociety where credentials.usePDP && credentials.isConfigured {
-            let (received, imported, errors) = await receive(store: store, credentials: credentials, companyID: companyID)
+            queriedCompanies.insert(companyID)
+            let (received, imported, errors, error) = await receive(store: store, credentials: credentials, companyID: companyID)
             totalReceived += received; totalImported += imported; totalErrors += errors
+            if firstError == nil { firstError = error }
         }
+        guard !Task.isCancelled else { return }
+        failureJournal.forgetAccounts(of: .purchaseReception, except: queriedCompanies)
 
         lastRunAt = Date()
-        lastRunSummary = totalReceived == 0
-            ? "Aucune nouvelle facture reçue."
+        // Un échec de la liste s'affichait « Aucune nouvelle facture reçue. » : la panne ne se
+        // voyait nulle part ailleurs que dans le journal d'audit.
+        var summary = totalReceived == 0
+            ? (totalErrors == 0 ? "Aucune nouvelle facture reçue." : "Réception en échec.")
             : "\(totalReceived) facture(s) reçue(s), \(totalImported) importée(s)" + (totalErrors > 0 ? ", \(totalErrors) échec(s)" : "") + "."
+        if let firstError { summary += " Erreur : \(SyncFailureJournal.brief(firstError))" }
+        lastRunSummary = summary
     }
 
     /// Un seul compte SUPER PDP interrogé, les nouvelles factures reçues attribuées à
     /// `companyID` (celle dont le compte a été interrogé — `nil` pour le compte par défaut,
     /// partagé/ambigu par nature).
-    private func receive(store: PurchaseInvoiceStore, credentials: SuperPDPCredentials, companyID: UUID?) async -> (received: Int, imported: Int, errors: Int) {
+    private func receive(store: PurchaseInvoiceStore, credentials: SuperPDPCredentials, companyID: UUID?) async -> (received: Int, imported: Int, errors: Int, firstError: String?) {
         let alreadyKnownRemoteIDs = Set(store.invoices.compactMap { $0.invoice.superPDPRemoteID })
         var importedCount = 0
         var errorCount = 0
+        var firstError: String?
+        var cycle = SyncCycle(kind: .purchaseReception, companyID: companyID)
         do {
             let service = SuperPDPService()
             let submissions = try await service.listInvoices(direction: .received, credentials: credentials)
+            cycle.recordSuccess()
             let newSubmissions = submissions.filter { sub in
                 guard let rid = sub.remoteID, !rid.isEmpty else { return false }
                 return !alreadyKnownRemoteIDs.contains(rid)
             }
+            cycle.followedTargets = newSubmissions.compactMap(\.remoteID).map { SyncTarget(id: $0, code: $0) }
             for submission in newSubmissions {
                 guard let remoteID = submission.remoteID else { continue }
+                let target = SyncTarget(id: remoteID, code: remoteID)
                 do {
                     let fileData = try await service.downloadInvoice(remoteID: remoteID, credentials: credentials)
                     let parsed = try CIIXMLParser.parseDepositedFile(fileData)
                     let record = store.ingest(remoteID: remoteID, parsed: parsed, companyID: companyID)
                     importedCount += 1
+                    cycle.recordSuccess(target)
                     store.audit?.record(
                         actor: "system",
                         action: "purchase_invoice_received",
@@ -96,29 +118,23 @@ final class PurchasePDPReceptionEngine: ObservableObject {
                     )
                 } catch {
                     errorCount += 1
-                    store.audit?.record(
-                        actor: "system",
-                        action: "purchase_invoice_receive_error",
-                        target: remoteID,
-                        details: "Échec import facture d'achat (id distant \(remoteID)) : \(error.localizedDescription)",
-                        objectType: .purchaseInvoice,
-                        objectCode: remoteID,
-                        companyID: companyID
-                    )
+                    if firstError == nil { firstError = error.localizedDescription }
+                    cycle.recordFailure(error, target: target)
                 }
             }
-            return (newSubmissions.count, importedCount, errorCount)
+            close(cycle, store: store)
+            return (newSubmissions.count, importedCount, errorCount, firstError)
         } catch {
-            store.audit?.record(
-                actor: "system",
-                action: "purchase_invoice_list_error",
-                target: "",
-                details: "Échec de la liste des factures reçues sur SUPER PDP : \(error.localizedDescription)",
-                objectType: .purchaseInvoice,
-                objectCode: nil,
-                companyID: companyID
-            )
-            return (0, 0, 1)
+            cycle.recordFailure(error)
+            close(cycle, store: store)
+            return (0, 0, 1, error.localizedDescription)
         }
+    }
+
+    /// Moteur arrêté en plein cycle (bascule d'environnement) : rien n'est noté, les pannes en
+    /// cours sont déjà celles du nouvel environnement.
+    private func close(_ cycle: SyncCycle, store: PurchaseInvoiceStore) {
+        guard !Task.isCancelled else { return }
+        failureJournal.close(cycle, audit: store.audit)
     }
 }
