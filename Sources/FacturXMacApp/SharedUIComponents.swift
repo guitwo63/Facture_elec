@@ -296,52 +296,45 @@ enum QuickExport {
     }
 
     private static func exportElectronicInvoices(_ invoices: [Invoice]) -> String {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Exporter ici"
-        guard panel.runModal() == .OK, let dir = panel.url else { return "" }
-        var ok = 0
-        var failed = 0
-        var skipped = 0
-        let gen = FacturXGenerator()
-        for inv in invoices {
-            if inv.type.isInternalCreditNote {
-                skipped += 1
-                continue
-            }
-            do {
-                let data = try gen.generate(invoice: inv)
-                let name = inv.type.isCreditNote ? "avoir-\(inv.number).pdf" : "facture-\(inv.number).pdf"
-                try data.write(to: dir.appendingPathComponent(name))
-                ok += 1
-            } catch {
-                failed += 1
-            }
-        }
-        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
+        exportElectronic(ElectronicBulkExport(invoices: invoices))
     }
 
     private static func exportElectronicOrders(_ orders: [SalesOrder]) -> String {
+        exportElectronic(ElectronicBulkExport(orders: orders))
+    }
+
+    /// Les documents en erreur bloquante sont déjà écartés par `ElectronicBulkExport`, et listés
+    /// dans le message de fin : le dossier n'est demandé que s'il reste un fichier à y écrire.
+    private static func exportElectronic(_ export: ElectronicBulkExport) -> String {
+        var export = export
+        guard export.hasPendingDocuments else { return export.message }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Exporter ici"
         guard panel.runModal() == .OK, let dir = panel.url else { return "" }
-        var ok = 0
-        var failed = 0
-        let gen = OrderXGenerator()
-        for order in orders {
-            do {
-                let data = try gen.generate(order: order)
-                let name = "commande-\(order.number).pdf"
-                try data.write(to: dir.appendingPathComponent(name))
-                ok += 1
-            } catch {
-                failed += 1
-            }
+        export.write(to: dir)
+        return export.message
+    }
+}
+
+/// Compte rendu d'un export lancé depuis une liste. L'export groupé Factur-X/Order-X liste un
+/// document non exporté par ligne : au-delà de `maxHeight`, le texte défile au lieu de
+/// repousser la liste hors de l'écran. Sélectionnable, pour copier les numéros.
+struct ExportMessageText: View {
+    let message: String
+    var maxHeight: CGFloat = 120
+
+    var body: some View {
+        ScrollView {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
+        .frame(maxHeight: maxHeight)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

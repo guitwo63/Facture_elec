@@ -388,7 +388,7 @@ struct OrdersTabView: View {
                         .help("Exporte les commandes actuellement filtrées (\(filteredOrders.count))")
                 }
                 if let m = exportMessage, !m.isEmpty {
-                    Text(m).font(.caption).foregroundStyle(.secondary)
+                    ExportMessageText(message: m)
                         .onChange(of: query) { _ in exportMessage = nil }
                 }
                 HStack(spacing: 12) {
