@@ -135,15 +135,11 @@ public enum EN16931BusinessRules {
         // Le générateur déduit l'adresse électronique (BT-34) du SIREN quand elle est vide :
         // l'un ou l'autre suffit à satisfaire BR-FR-13 (« Le BT-34 est obligatoire »).
         let sellerEndpoint = (invoice.seller.endpointID ?? "").trimmingCharacters(in: .whitespaces)
-        let sellerSiren = (invoice.seller.siren ?? "").trimmingCharacters(in: .whitespaces)
-        if sellerEndpoint.isEmpty && sellerSiren.isEmpty {
+        if sellerEndpoint.isEmpty && CIIXMLGenerator.xmlSiren(invoice.seller.siren) == nil {
             results.append(BusinessRuleResult(ruleId: "BR-FR-13", severity: .error,
                 message: "BR-FR-13 : L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-34)."))
         }
-        if !sellerSiren.isEmpty && !SireneValidator.isValidSiren(invoice.seller.siren) {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-10", severity: .warning,
-                message: "BR-FR-10 : Le SIREN de l'émetteur (BT-30) doit comporter 9 chiffres et être valide (clé Luhn)."))
-        }
+        results += sellerSirenRules(invoice.seller, context: context)
         if let sellerSiret = invoice.seller.siret?.trimmingCharacters(in: .whitespaces), !sellerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.seller.siret) {
             results.append(BusinessRuleResult(ruleId: "BR-FR-09", severity: .warning,
@@ -204,16 +200,16 @@ public enum EN16931BusinessRules {
         }
         // Même déduction que pour l'émetteur : à défaut d'adresse, le BT-49 vient du SIREN (BR-FR-12).
         let buyerEndpoint = (invoice.buyer.endpointID ?? "").trimmingCharacters(in: .whitespaces)
-        let buyerSiren = (invoice.buyer.siren ?? "").trimmingCharacters(in: .whitespaces)
-        if buyerEndpoint.isEmpty && buyerSiren.isEmpty {
+        if buyerEndpoint.isEmpty && CIIXMLGenerator.xmlSiren(invoice.buyer.siren) == nil {
             results.append(BusinessRuleResult(ruleId: "BR-FR-12", severity: .error,
                 message: "BR-FR-12 : Le destinataire doit avoir un SIREN ou un identifiant électronique (BT-49)."))
         }
-        // BR-FR-32 (tout identifiant légal de schéma 0002 : 9 chiffres) plutôt que BR-FR-11,
-        // qui ne vaut qu'en présence d'une note BAR = B2B, que l'application n'émet pas.
-        if !buyerSiren.isEmpty && !SireneValidator.isValidSiren(invoice.buyer.siren) {
-            results.append(BusinessRuleResult(ruleId: "BR-FR-32", severity: .warning,
-                message: "BR-FR-32 : Le SIREN du destinataire (BT-47) doit comporter 9 chiffres et être valide (clé Luhn)."))
+        // BR-FR-32 (France CTC, fatale : tout identifiant légal de schéma 0002 a 9 chiffres)
+        // plutôt que BR-FR-11, qui ne vaut qu'en présence d'une note BAR = B2B, que l'application
+        // n'émet pas. Un identifiant d'un autre schéma (n° d'entreprise belge 0208…) n'est pas un
+        // SIREN : la règle ne le vise pas.
+        if let buyerSiren = CIIXMLGenerator.xmlSiren(invoice.buyer.siren), invoice.buyer.legalSchemeID == "0002" {
+            results += sirenFormatRules(buyerSiren, ruleId: "BR-FR-32", bt: "BT-47", party: "du destinataire")
         }
         if let buyerSiret = invoice.buyer.siret?.trimmingCharacters(in: .whitespaces), !buyerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.buyer.siret) {
@@ -464,6 +460,44 @@ public enum EN16931BusinessRules {
         case .en16931, .extended:
             return nil
         }
+    }
+
+    /// BR-FR-10 (Schematron France CTC, fatale) : le SIREN du vendeur (BT-30), émis sous le
+    /// schéma 0002, est obligatoire et fait d'exactement 9 chiffres, même quand une adresse
+    /// électronique satisfait BR-FR-13. Obligation de l'émetteur : sur une facture reçue, un
+    /// fournisseur (étranger, par exemple) peut ne pas en avoir, et il n'y a rien à corriger chez
+    /// nous ; le format d'un SIREN présent y reste contrôlé. Même règle qu'ARVERNX-SaaS (F.33,
+    /// décision du 2026-09-24).
+    private static func sellerSirenRules(_ seller: InvoiceParty, context: EN16931RuleContext) -> [BusinessRuleResult] {
+        guard let siren = CIIXMLGenerator.xmlSiren(seller.siren) else {
+            guard context == .issued else { return [] }
+            return [BusinessRuleResult(ruleId: "BR-FR-10", severity: .error,
+                message: "BR-FR-10 : Le SIREN de l'émetteur (BT-30) est obligatoire, même avec un identifiant électronique (BT-34) : la PDP rejetterait la facture. Renseignez-le dans « Émetteur (vous) » et dans la fiche de la société.")]
+        }
+        // Le Schematron ne lit que l'identifiant de schéma 0002 ; un autre schéma (tiré d'un XML
+        // reçu) ne remplace pas le SIREN.
+        guard seller.legalSchemeID == "0002" else {
+            guard context == .issued else { return [] }
+            return [BusinessRuleResult(ruleId: "BR-FR-10", severity: .error,
+                message: "BR-FR-10 : L'identifiant légal de l'émetteur (BT-30) « \(siren) » est de schéma \(seller.legalSchemeID), et non un SIREN (schéma 0002) : la PDP rejetterait la facture.")]
+        }
+        return sirenFormatRules(siren, ruleId: "BR-FR-10", bt: "BT-30", party: "de l'émetteur")
+    }
+
+    /// Format d'un SIREN émis sous le schéma 0002 (BR-FR-10 pour le vendeur, BR-FR-32 pour
+    /// l'acheteur) : exactement 9 chiffres, en erreur. La clé de Luhn, que le Schematron ne
+    /// vérifie pas, n'est qu'un avertissement (contrôle interne BT-30-LUHN / BT-47-LUHN) : la PDP
+    /// accepte le SIREN, mais c'est sans doute une faute de frappe.
+    private static func sirenFormatRules(_ siren: String, ruleId: String, bt: String, party: String) -> [BusinessRuleResult] {
+        if !SireneValidator.isWellFormedSiren(siren) {
+            return [BusinessRuleResult(ruleId: ruleId, severity: .error,
+                message: "\(ruleId) : Le SIREN \(party) (\(bt)) « \(siren) » doit comporter exactement 9 chiffres, sans espace ni autre caractère : la PDP rejetterait la facture.")]
+        }
+        if !SireneValidator.luhnCheck(siren) {
+            return [BusinessRuleResult(ruleId: "\(bt)-LUHN", severity: .warning,
+                message: "\(bt) : La clé de contrôle (Luhn) du SIREN \(party) « \(siren) » est fausse ; vérifiez-le, c'est sans doute une faute de frappe.")]
+        }
+        return []
     }
 
     /// "20260923" (date du XML) → "23/09/2026", pour la citer telle quelle dans un message.
