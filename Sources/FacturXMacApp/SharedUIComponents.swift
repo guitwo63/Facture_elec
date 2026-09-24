@@ -326,12 +326,14 @@ struct RoutingAddressQuickEditor: View {
     }
 }
 
+/// Champ décimal des lignes (quantité, prix unitaire). `.decimalInput` relit la virgule comme le
+/// point : avec `.number`, « 12.5 » collé d'un tableur se lisait 12 en français, sans erreur.
 struct DoubleField: View {
     let label: String
     @Binding var value: Double
-    let format: FloatingPointFormatStyle<Double>
+    let format: DecimalInputFormatStyle
 
-    init(_ label: String, value: Binding<Double>, format: FloatingPointFormatStyle<Double>) {
+    init(_ label: String, value: Binding<Double>, format: DecimalInputFormatStyle) {
         self.label = label
         self._value = value
         self.format = format
@@ -417,7 +419,7 @@ struct VATRatePicker: View {
             .labelsHidden()
             .frame(width: 150)
             if !isStandard {
-                TextField("%", value: $rate, format: .number)
+                TextField("%", value: $rate, format: .decimalInput)
                     .frame(width: 50)
             }
         }

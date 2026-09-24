@@ -69,61 +69,6 @@ public enum ExchangeRateText {
     }
 }
 
-/// Saisie du taux de change dans l'éditeur : affiché dans la langue de l'application (« 1,146 »
-/// en français, sans séparateur de milliers, 6 décimales au plus), relu avec la virgule comme
-/// avec le point décimal. Avec le format numérique standard en français, « 1.1464 », tel que la
-/// BCE le publie, se lisait 1 sans aucune erreur.
-public struct ExchangeRateFormatStyle: ParseableFormatStyle {
-    public var locale: Locale
-
-    public init(locale: Locale = .autoupdatingCurrent) {
-        self.locale = locale
-    }
-
-    public var parseStrategy: ExchangeRateParseStrategy { ExchangeRateParseStrategy() }
-
-    public func format(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0...6)).grouping(.never).locale(locale))
-    }
-
-    public func locale(_ locale: Locale) -> ExchangeRateFormatStyle {
-        ExchangeRateFormatStyle(locale: locale)
-    }
-}
-
-public struct ExchangeRateParseStrategy: ParseStrategy {
-    public init() {}
-
-    public func parse(_ value: String) throws -> Double {
-        guard let rate = Self.number(value) else {
-            throw CocoaError(.formatting, userInfo: [NSDebugDescriptionErrorKey: "Taux de change illisible : « \(value) »"])
-        }
-        return rate
-    }
-
-    /// « 1,1464 », « 1.1464 », « 18 123,45 », « 18,123.45 » : de la virgule et du point, le dernier
-    /// est décimal et l'autre sépare les milliers, comme les espaces ; un même séparateur répété
-    /// (« 1.234.567 ») sépare les milliers. nil pour un texte qui n'est pas un nombre fini.
-    static func number(_ text: String) -> Double? {
-        var s = text.filter { !$0.isWhitespace && $0 != "'" && $0 != "’" }
-        guard !s.isEmpty else { return nil }
-        let commas = s.filter { $0 == "," }.count
-        let dots = s.filter { $0 == "." }.count
-        if commas > 0 && dots > 0 {
-            let decimal: Character = s.lastIndex(of: ",")! > s.lastIndex(of: ".")! ? "," : "."
-            s.removeAll { $0 == (decimal == "," ? "." : ",") }
-            guard s.filter({ $0 == decimal }).count == 1 else { return nil }
-            s = s.replacingOccurrences(of: String(decimal), with: ".")
-        } else if commas + dots > 1 {
-            s.removeAll { $0 == "," || $0 == "." }
-        } else {
-            s = s.replacingOccurrences(of: ",", with: ".")
-        }
-        guard let value = Double(s), value.isFinite else { return nil }
-        return value
-    }
-}
-
 /// Cours de référence quotidien de la BCE : 1 EUR = `rate` unités de `currency`, publié le jour
 /// `day`, vers 16 h (heure de Francfort) les jours ouvrés. Ce sont aussi les cours de la table
 /// « Taux de change (parités quotidiennes) » de la Banque de France, qui reprend les séries de la

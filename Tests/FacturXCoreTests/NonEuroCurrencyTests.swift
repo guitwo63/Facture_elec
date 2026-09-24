@@ -361,9 +361,10 @@ final class NonEuroCurrencyTests: XCTestCase {
 
     /// Le champ du taux relit la virgule comme le point décimal. Avec le format numérique standard
     /// en français, « 1.1464 », le cours tel que la BCE le publie, se lisait 1 sans aucune erreur
-    /// (constaté le 2026-09-24 sur une réplique du champ, en locale fr_FR) : 1 EUR = 1 USD.
+    /// (constaté le 2026-09-24 sur une réplique du champ, en locale fr_FR) : 1 EUR = 1 USD. Format
+    /// commun aux champs décimaux de l'app (`DecimalInputFormatStyle`, voir ses tests).
     func testRateEntryReadsACommaOrADotAsTheDecimalSeparator() throws {
-        let strategy = ExchangeRateParseStrategy()
+        let strategy = DecimalInputParseStrategy()
         XCTAssertEqual(try strategy.parse("1,1464"), 1.1464)
         XCTAssertEqual(try strategy.parse("1.1464"), 1.1464)
         XCTAssertEqual(try strategy.parse(" 163,25 "), 163.25)
@@ -378,12 +379,12 @@ final class NonEuroCurrencyTests: XCTestCase {
     }
 
     func testRateIsShownInTheAppLanguageWithoutThousandsSeparator() throws {
-        let french = ExchangeRateFormatStyle(locale: Locale(identifier: "fr_FR"))
+        let french = DecimalInputFormatStyle(locale: Locale(identifier: "fr_FR"))
         XCTAssertEqual(french.format(1.1464), "1,1464")
         XCTAssertEqual(french.format(18123.45), "18123,45")
         XCTAssertEqual(french.format(1.12345678), "1,123457")
         XCTAssertEqual(french.format(138), "138")
-        XCTAssertEqual(ExchangeRateFormatStyle(locale: Locale(identifier: "en_US")).format(1.1464), "1.1464")
+        XCTAssertEqual(DecimalInputFormatStyle(locale: Locale(identifier: "en_US")).format(1.1464), "1.1464")
         for rate in [1.1464, 163.25, 0.86523, 18123.45] {
             XCTAssertEqual(try french.parseStrategy.parse(french.format(rate)), rate)
         }
