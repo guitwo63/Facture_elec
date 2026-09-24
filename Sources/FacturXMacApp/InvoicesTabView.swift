@@ -1241,8 +1241,8 @@ struct InvoiceEditorView: View {
     /// `onChange(of: invoice.issueDate)` qui se déclenchait aussi au changement de facture
     /// sélectionnée. Le préréglage actif est lu avant l'écriture : après, l'échéance ne
     /// correspondrait plus à la nouvelle date et le menu afficherait « Personnalisé ». Pas de
-    /// recalcul sur une facture verrouillée : `.lockable` bloque la souris mais pas le
-    /// clavier, le DatePicker reste modifiable aux flèches.
+    /// recalcul sur une facture verrouillée, par prudence : `.lockable` tient déjà la souris
+    /// et le clavier hors du DatePicker.
     private var issueDateBinding: Binding<Date> {
         Binding(
             get: { invoice.issueDate },
