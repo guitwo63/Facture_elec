@@ -110,7 +110,8 @@ final class SirenRulesTests: XCTestCase {
         XCTAssertTrue(message(seller, "BT-30-LUHN").contains("clé"))
         XCTAssertTrue(isExportable(seller))
 
-        let buyer = invoice { $0.buyer.siren = "303265046" }
+        // L'adresse 0225 suit le SIREN : sinon elle désignerait un autre SIREN (erreur BR-FR-21).
+        let buyer = invoice { $0.buyer.siren = "303265046"; $0.buyer.endpointID = "303265046" }
         XCTAssertEqual(sirenRules(buyer), ["BT-47-LUHN warning"])
         XCTAssertTrue(isExportable(buyer))
     }
@@ -282,7 +283,7 @@ final class SirenRulesTests: XCTestCase {
              invoice { $0.seller.siren = "0123456789"; $0.seller.legalSchemeID = "0208" }, ["BR-FR-10_BT-30"]),
             ("SIREN de l'acheteur à 8 chiffres", invoice { $0.buyer.siren = "30326504" }, ["BR-FR-32-LEGALID BuyerTradeParty"]),
             ("SIREN de l'acheteur avec des espaces", invoice { $0.buyer.siren = "303 265 045" }, ["BR-FR-32-LEGALID BuyerTradeParty"]),
-            ("SIREN de l'acheteur à clé fausse", invoice { $0.buyer.siren = "303265046" }, []),
+            ("SIREN de l'acheteur à clé fausse", invoice { $0.buyer.siren = "303265046"; $0.buyer.endpointID = "303265046" }, []),
             ("acheteur sans SIREN, avec adresse", invoice { $0.buyer.siren = nil }, []),
             ("acheteur sans SIREN ni adresse", invoice { $0.buyer.siren = nil; $0.buyer.endpointID = nil }, ["BR-FR-12_BT-49"]),
             ("identifiant légal de l'acheteur de schéma 0208",

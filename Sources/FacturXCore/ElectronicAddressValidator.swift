@@ -34,6 +34,15 @@ public enum ElectronicAddressValidator {
             }
         }
     }
+
+    /// BR-FR-21 : une adresse de schéma 0225 désigne ce SIREN, c'est-à-dire qu'elle vaut « SIREN » ou
+    /// commence par « SIREN_ » (suivi d'un SIRET, d'un suffixe ou d'un code de routage). C'est la
+    /// forme d'ARVERNX-SaaS (`matches_siren`, tirée de l'Annexe A), plus stricte que le Schematron,
+    /// qui n'exige que `starts-with($endpointID, $siren)` : un SIRET seul, qui commence par le SIREN,
+    /// y passe.
+    public static func designatesSiren(_ address: String, siren: String) -> Bool {
+        address == siren || address.hasPrefix(siren + "_")
+    }
 }
 
 extension InvoiceParty {

@@ -255,10 +255,11 @@ final class ElectronicAddressSchemeTests: XCTestCase {
     }
 
     /// Pour un destinataire français à SIREN, l'application avertit exactement quand l'assertion
-    /// officielle tombe sur le XML généré, note BAR = B2B ajoutée. Écarts voulus, hors de la
-    /// décision du 2026-09-24 : un destinataire sans SIREN ou étranger n'est pas averti (le
-    /// Schematron exigerait 0225 sous la note B2B, qu'on ne suppose pas pour eux), ni une adresse
-    /// 0225 d'un autre SIREN (ARVERNX en fait une erreur).
+    /// officielle tombe sur le XML généré, note BAR = B2B ajoutée. Écart voulu, hors de la décision
+    /// du 2026-09-24 : un destinataire sans SIREN ou étranger n'est pas averti (le Schematron
+    /// exigerait 0225 sous la note B2B, qu'on ne suppose pas pour eux ; un destinataire français
+    /// sans SIREN reçoit l'avertissement BR-FR-11). Une adresse 0225 d'un autre SIREN est une
+    /// erreur, comme dans ARVERNX : `FrenchBuyerB2BRulesTests`.
     func testTheWarningMatchesTheOfficialAssertionForAFrenchBuyerWithASiren() throws {
         var cases: [(String, Invoice)] = offered.map { scheme, address in
             ("schéma \(scheme)", invoice { $0.buyer.endpointID = address; $0.buyer.endpointSchemeID = scheme })

@@ -54,11 +54,14 @@ final class ElectronicAddressRulesTests: XCTestCase {
 
     // MARK: - Adresse saisie
 
-    /// Formes de l'annuaire : SIREN, SIREN_SIRET, SIREN_suffixe, SIREN_SIRET_code de routage.
+    /// Formes de l'annuaire : SIREN, SIREN_SIRET, SIREN_suffixe, SIREN_SIRET_code de routage. Le
+    /// destinataire reçoit la même adresse sur son propre SIREN : une adresse 0225 qui ne le
+    /// désigne pas est bloquée par BR-FR-21 (`FrenchBuyerB2BRulesTests`).
     func testDirectoryAddressesOfLettersDigitsAndSeparatorsAreAdmitted() {
         for address in ["732829320", "732829320_73282932000074", "732829320_FACTURES",
                         "732829320_73282932000074_SERVICE-ACHATS.01", "abcXYZ-_.09"] {
-            let invoice = invoice { $0.seller.endpointID = address; $0.buyer.endpointID = address }
+            let buyerAddress = address.hasPrefix("732829320") ? "303265045" + address.dropFirst(9) : "303265045_" + address
+            let invoice = invoice { $0.seller.endpointID = address; $0.buyer.endpointID = buyerAddress }
             XCTAssertEqual(addressRules(invoice).map(\.message), [], address)
             XCTAssertTrue(isExportable(invoice), address)
         }
