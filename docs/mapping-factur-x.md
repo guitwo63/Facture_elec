@@ -15,6 +15,7 @@ Table de correspondance entre les champs de l'application (`Sources/FacturXCore/
 | `invoice.issueDate` | `rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString` | BT-2 | BT-2-FUTURE (contrôle interne) | avertissement (date future) |
 | `invoice.dueDate` | `ram:SpecifiedTradePaymentTerms/ram:DueDateDateTime` | BT-9 | BR-FR-CO-07 | erreur (sauf acompte 386 et cadres B2/S2/M2) |
 | `invoice.currency` | `ram:ApplicableHeaderTradeSettlement/ram:InvoiceCurrencyCode` | BT-5 | BR-05 (présence), BR-CL-04 (code ISO 4217) | erreur (code absent de la liste de référence : avertissement) |
+| `invoice.exchangeRate` (1 EUR = taux × devise ; hors euro seulement) | `ram:ApplicableHeaderTradeSettlement/ram:TaxCurrencyCode` = `EUR`, avant `InvoiceCurrencyCode`, émis seulement hors euro avec un taux positif | BT-6 | BR-FR-CO-12 ; BR-53 / FX-SCH-A-000129 (respectée à l'émission) | erreur (facture émise hors euro sans taux) |
 | `invoice.profile` | `ram:GuidelineSpecifiedDocumentContextParameter/ram:ID` | BT-24 | BR-PROFIL | erreur (MINIMUM, BASIC WL, BASIC) |
 | `invoice.billingMode` | `ram:BusinessProcessSpecifiedDocumentContextParameter/ram:ID` | BT-23 | BR-FR-CO-08, BR-FR-CO-09, BR-FR-MV-02, BR-FR-BD-02 | erreur |
 | `invoice.buyerReference` | `ram:BuyerReference` | BT-10 | — | — |
@@ -86,6 +87,7 @@ Les notes (BT-22) sont émises sans leurs espaces de début et de fin, comme sur
 | `invoice.lineTotal` (calculé) | `ram:LineTotalAmount` | BT-106 | BR-CO-10 | erreur |
 | `invoice.lineTotal` (base TVA) | `ram:TaxBasisTotalAmount` | BT-109 | — | — |
 | `invoice.taxTotal` (calculé) | `ram:TaxTotalAmount` | BT-110 | BR-CO-14 | erreur |
+| `invoice.taxTotalInEuros` (calculé : BT-110 ÷ taux, arrondi au pair) | 2ᵉ `ram:TaxTotalAmount currencyID="EUR"`, juste après celui en devise de facture ; hors euro seulement | BT-111 | BR-FR-CO-12 ; BR-DEC-15 (respectée à l'émission) | erreur (facture émise hors euro sans taux) |
 | `invoice.grandTotal` (calculé) | `ram:GrandTotalAmount` | BT-112 | BR-CO-15 | erreur |
 | `invoice.prepaidAmount` | `ram:TotalPrepaidAmount` | BT-113 | BT-113-SOLDE (facture de solde, contrôle interne) ; BR-FR-CO-09 (cadre 2) | avertissement ; erreur |
 | `invoice.netToPay` (calculé) | `ram:DuePayableAmount` | BT-115 | BR-CO-16 | — (respectée par construction, non contrôlée) |
@@ -138,6 +140,7 @@ Les notes (BT-22) sont émises sans leurs espaces de début et de fin, comme sur
 | BR-FR-CO-07 | échéance (BT-9) | erreur | Échéance antérieure à la date de facture (BT-2), au jour près dans le XML ; admise seulement pour un acompte (386) ou un cadre déjà payée (B2/S2/M2) |
 | BR-FR-CO-08 | cadre de facturation (BT-23) | erreur | Cadre 4 (définitive après acompte) interdit sur un acompte (386) |
 | BR-FR-CO-09 | cadre de facturation (BT-23) | erreur / avertissement | Cadre 2 (déjà payée) : montant payé (BT-113) = total TTC, net à payer nul ; rappel : échéance = date du paiement |
+| BR-FR-CO-12 | taux de change (BT-6, BT-111) | erreur | Facture émise hors euro (BT-5, comparée sous sa forme émise) sans taux de change positif : ni BT-6 ni BT-111 ne peuvent être émis ; facture reçue : non contrôlée |
 | BR-FR-MV-02 / BR-FR-BD-02 | cadre de facturation (BT-23) | erreur | Cadres 8 (multi-vendeurs) / 9 (bidirectionnel) : lignes GROUP non produites par l'app |
 | BT-2-FUTURE | date d'émission (BT-2) | avertissement | Date postérieure à aujourd'hui — contrôle interne |
 | BT-25-SOLDE | facture antérieure (BT-25/26) | erreur | Facture de solde (émise en 380) : référence à l'acompte obligatoire — contrôle interne |
@@ -207,6 +210,21 @@ Règles BR-IC-* du Schematron EN16931, présentes aussi dans celui d'EXTENDED (h
 Relecture (`CIIXMLParser`) : BT-80 est lu dans le livré à d'en-tête, sous le même champ optionnel. Le sous-arbre `ShipToTradeParty` est isolé : ses éléments portent les noms de ceux du vendeur et de l'acheteur, et la fermeture de son adresse faisait basculer la lecture sur l'acheteur, ce qui perdait les avis d'expédition et de réception (BT-16, BT-15) qui le suivent.
 
 **Vérification (2026-09-23)** : 14 factures, dont 12 en catégorie K (BT-80 par défaut, saisi, en minuscules, invalide, hors UE ; K + S ; profil EXTENDED ; avec avis d'expédition et de réception ; tous les champs optionnels ; n° de TVA manquant), contre le XSD Factur-X 1.09 et le Schematron du profil déclaré (EN16931 ou EXTENDED) et contre le Schematron France CTC. Avant : les 12 factures K étaient rejetées (BR-IC-12, et en plus BR-IC-02 pour deux d'entre elles) alors que l'application autorisait l'export. Après : validateurs officiels et application rendent le même verdict dans les 14 cas.
+
+## Factures hors euro (BT-6, BT-111)
+
+**BR-FR-CO-12** (Schematron France CTC, fatal) : si la devise de facture (BT-5) n'est pas EUR, la devise de comptabilité (BT-6) doit être présente et égale à EUR, et le montant de TVA en devise de comptabilité (BT-111) renseigné avec `currencyID="EUR"`. Avant ce correctif, l'application proposait 7 devises mais n'émettait que BT-5 : toute facture en USD, GBP, CHF, CAD, JPY ou CNY était rejetée par la PDP, sans erreur locale.
+
+- **Taux de change** (`Invoice.exchangeRate`), convention de la BCE : 1 EUR = taux unités de la devise. Champ « Taux de change » de l'en-tête, affiché dès que la devise n'est pas EUR. Changer de devise efface le taux (`setCurrency`), qui ne vaut que pour sa devise.
+- **BT-111** (`Invoice.taxTotalInEuros`) = total de TVA (BT-110, tel qu'écrit dans le XML) ÷ taux, arrondi au centime au pair, en décimal comme le SaaS ARVERNX (en `Double`, 1,15 ÷ 2 = 0,575 donnait 0,57 au lieu de 0,58). Une TVA nulle (export G) donne 0.00, que la règle admet.
+- **Émission** : BT-6 (`TaxCurrencyCode`) avant `InvoiceCurrencyCode` (ordre du XSD) et BT-111 juste après le `TaxTotalAmount` en devise de facture, **seulement** hors euro avec un taux positif. Jamais sur une facture en euros : BT-6 doit différer de BT-5 (FX-SCH-A-000129, BR-53), même si un taux y est resté. Une facture en euros garde un XML et un PDF identiques à l'octet et au pixel près.
+- **Règle locale BR-FR-CO-12** : erreur bloquante sur une facture émise hors euro sans taux positif (message distinct pour un taux nul ou négatif) ; champ du taux surligné. Facture reçue : non contrôlée.
+- **Bouton « Taux BCE »** (décision de l'utilisateur du 2026-09-24) : cours de référence de la BCE à la date de facture, ou du dernier jour coté dans les 14 jours qui la précèdent (au plus tard aujourd'hui). Ce sont les cours de la table « Taux de change (parités quotidiennes) » de la Banque de France, qui reprend les séries de la BCE (EXR.D.<devise>.EUR.SP00.A, « source BCE (14:15 CET) ») ; l'API Webstat de la Banque de France exige une clé, celle de la BCE (`data-api.ecb.europa.eu`, `format=csvdata`) non. 29 devises cotées au 2026-09-24 (`ECBReferenceRateService.quotedCurrencies`), dont les 6 du sélecteur ; aucun appel pour une autre devise. Réponses : 200 avec CSV ; 200 et corps vide pour une période faite d'un week-end ; 404 sans cotation. Appel au clic seulement ; le taux reste modifiable, et une modification efface le jour du cours.
+- **Documents dérivés** (même choix qu'ARVERNX) : l'avoir garde le taux de sa facture ; le duplicata, l'acompte et le solde, datés du jour, repartent sans taux (BR-FR-CO-12 les bloque jusqu'à la saisie). Le choix des acomptes d'un solde se limite à ceux de la même devise.
+- **PDF** (directive TVA, art. 230) : sous les totaux, « Total TVA en EUR: EUR x », puis « Taux de change : 1 EUR = x USD » et, pour un cours repris de la BCE, « Cours de référence BCE du jj/mm/aaaa (table Banque de France) ».
+- Non traité : la relecture (`CIIXMLParser`) ignore BT-6 et BT-111 d'une facture reçue.
+
+**Vérification (2026-09-24)** : 26 factures générées (les 6 devises avec et sans taux, EXTENDED, taux nul ou négatif, TVA nulle, arrondi au pair, multi-taux, solde avec acompte, avoir, reste de taux en euros), contre le XSD Factur-X 1.09, le Schematron du profil (EN16931 ou EXTENDED, avec EXTENDED-CTC-FR) et le Schematron France CTC : le verdict de l'application égale celui des validateurs officiels dans les 26 cas. Avant (`origin/main`) : les 7 factures hors euro mesurées (6 devises, et USD en EXTENDED) étaient exportables alors que la PDP les rejetait. `NonEuroCurrencyTests` rejoue en XQuery (`XMLDocument`) les assertions officielles sur les devises et les montants de TVA (BR-FR-CO-12, BR-53, BR-DEC-13/15, BR-CO-14/15, unicité par devise), recopiées des XSLT du paquet `factur-x`.
 
 ## Champs optionnels EN 16931 (catalogue + champs libres)
 

@@ -823,7 +823,8 @@ struct InvoicesTabView: View {
         let scope = auth.visibleInvoiceCompanyIDs(for: auth.currentUser)
         let sourceBuyerName = source.buyer.name.trimmingCharacters(in: .whitespaces).lowercased()
         var result = store.invoices.filter { inv in
-            guard inv.type.isDeposit, inv.id != source.id else { return false }
+            // Même devise : le solde déduit la somme de leurs totaux TTC (BT-113).
+            guard inv.type.isDeposit, inv.id != source.id, inv.currency == source.currency else { return false }
             if let scope = scope, let cid = inv.companyID { return scope.contains(cid) }
             if scope != nil && inv.companyID == nil { return false }
             return true
@@ -1139,6 +1140,9 @@ struct InvoiceEditorView: View {
     @State private var showPDPValidationPanel = false
     @State private var sendingReminder = false
     @State private var reminderMessage: String?
+    @State private var fetchingECBRate = false
+    /// Échec du bouton « Taux BCE » (devise non cotée, aucun cours, service injoignable).
+    @State private var ecbRateMessage: String?
     /// « Personnalisé » choisi dans le menu Conditions de paiement (voir `PaymentTermsPresetSelection`).
     @State private var paymentTermsSelection = PaymentTermsPresetSelection()
     private var isLocked: Bool { invoice.status.locksInvoice || isManuallyLocked }
@@ -1252,6 +1256,58 @@ struct InvoiceEditorView: View {
                 invoice = updated
             }
         )
+    }
+
+    /// Devise (BT-5). `setCurrency(_:)` efface le taux de change, qui ne vaut que pour la devise
+    /// pour laquelle il a été saisi.
+    private var currencyBinding: Binding<String> {
+        Binding(
+            get: { invoice.currency },
+            set: { code in
+                guard code != invoice.currency else { return }
+                invoice.setCurrency(code)
+                ecbRateMessage = nil
+            }
+        )
+    }
+
+    /// Taux de change saisi à la main : `setExchangeRate(_:)` efface le jour du cours BCE, que le
+    /// PDF n'imprime donc plus pour un taux modifié.
+    private var exchangeRateBinding: Binding<Double?> {
+        Binding(
+            get: { invoice.exchangeRate },
+            set: { rate in
+                guard rate != invoice.exchangeRate else { return }
+                invoice.setExchangeRate(rate)
+                ecbRateMessage = nil
+            }
+        )
+    }
+
+    /// Hors euro : le champ « Taux de change » (BR-FR-CO-12) s'affiche.
+    private var isForeignCurrency: Bool {
+        let code = invoice.currency.trimmingCharacters(in: .whitespaces)
+        return !code.isEmpty && code != "EUR"
+    }
+
+    /// Bouton « Taux BCE » : cours de référence de la BCE à la date de facture, ceux de la table
+    /// des parités quotidiennes de la Banque de France. La réponse n'est appliquée que si la
+    /// devise et la date de facture n'ont pas changé pendant l'appel.
+    private func fetchECBRate() {
+        let currency = invoice.currency
+        let issueDate = invoice.issueDate
+        fetchingECBRate = true
+        ecbRateMessage = nil
+        Task {
+            defer { fetchingECBRate = false }
+            do {
+                let reference = try await ECBReferenceRateService().referenceRate(currency: currency, on: issueDate)
+                guard invoice.currency == currency, invoice.issueDate == issueDate else { return }
+                invoice.applyReferenceRate(reference)
+            } catch {
+                ecbRateMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
     }
 
     /// Vrai si l'échéance est celle que calcule le préréglage affiché (jours nets /
@@ -1638,7 +1694,7 @@ struct InvoiceEditorView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-34 émetteur, BT-49 destinataire), n° TVA si applicable.").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
-                            Text("En-tête : numéro de facture, date, échéance, devise (EUR), mode de facturation (BT-23).").font(.caption)
+                            Text("En-tête : numéro de facture, date, échéance, devise (EUR ; hors euro, taux de change), mode de facturation (BT-23).").font(.caption)
                             Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
                             Text("Paiement : IBAN et BIC si virement SEPA.").font(.caption)
                         }
@@ -1701,10 +1757,13 @@ struct InvoiceEditorView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 3) {
                                             Text("Devise").font(.caption)
-                                            InfoBadge(text: "BT-5 — Code de la devise de la facture (ram:InvoiceCurrencyCode). À ne pas confondre avec la devise de comptabilisation de la TVA (BT-6, ram:TaxCurrencyCode), que l'application n'émet pas.")
+                                            InfoBadge(text: "BT-5 — Code de la devise de la facture (ram:InvoiceCurrencyCode). Hors euro, la facture porte aussi la TVA en euros (BT-111) et la devise de comptabilité EUR (BT-6), calculées avec le taux de change qui s'affiche alors sous la devise.")
                                         }
-                                        fieldHighlight(NormRefPicker("", options: NormRefs.currencies, code: $invoice.currency).labelsHidden().frame(width: 160), forRuleIDs: ["BR-05", "BR-CL-04"])
+                                        fieldHighlight(NormRefPicker("", options: NormRefs.currencies, code: currencyBinding).labelsHidden().frame(width: 160), forRuleIDs: ["BR-05", "BR-CL-04"])
                                     }
+                                }
+                                if isForeignCurrency {
+                                    exchangeRateRow
                                 }
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 2) {
@@ -1854,6 +1913,9 @@ struct InvoiceEditorView: View {
                                 if invoice.prepaidAmount > 0 {
                                     row(invoice.prepaidAmountLabel, -invoice.prepaidAmount)
                                     row("Net à payer", invoice.netToPay, bold: true)
+                                }
+                                if let taxInEuros = invoice.taxTotalInEuros {
+                                    row("Total TVA en EUR", taxInEuros, currencyCode: "EUR")
                                 }
                                 }
                                 .padding(8)
@@ -2048,13 +2110,52 @@ struct InvoiceEditorView: View {
         }
     }
 
+    /// Taux de change d'une facture hors euro (BR-FR-CO-12), saisi ou repris de la BCE. La TVA en
+    /// euros qui en découle (BT-111) s'affiche dans le récapitulatif des totaux.
+    private var exchangeRateRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                HStack(spacing: 3) {
+                    Text("Taux de change *").font(.caption).foregroundColor(.red)
+                    InfoBadge(text: "BR-FR-CO-12 — Une facture hors euro porte aussi la TVA en euros (BT-111) et la devise de comptabilité EUR (BT-6), sans quoi la PDP la rejette. Convention de la BCE : 1 EUR = taux unités de la devise. « Taux BCE » reprend le cours de référence de la BCE à la date de facture, celui de la table des parités quotidiennes de la Banque de France ; le taux reste modifiable (virgule ou point décimal). La TVA en euros est le total de TVA divisé par le taux, arrondi au centime.")
+                }
+                .fixedSize()
+                Text("1 EUR =").font(.callout).fixedSize()
+                // Virgule ou point décimal : avec le format numérique standard, « 1.1464 » collé
+                // depuis le site de la BCE se lisait 1 en français (ExchangeRateFormatStyle).
+                fieldHighlight(TextField("taux", value: exchangeRateBinding, format: ExchangeRateFormatStyle())
+                    .frame(width: 110).textFieldStyle(.roundedBorder), forRuleIDs: ["BR-FR-CO-12"])
+                Text(invoice.currency).font(.callout).fixedSize()
+                Button {
+                    fetchECBRate()
+                } label: {
+                    Label("Taux BCE", systemImage: "arrow.down.circle")
+                }
+                .fixedSize()
+                .disabled(fieldLocked || fetchingECBRate
+                          || !ECBReferenceRateService.quotedCurrencies.contains(invoice.currency.trimmingCharacters(in: .whitespaces)))
+                .help("Cours de référence de la BCE (table de la Banque de France) du jour de la date de facture, ou du dernier jour ouvré avant.")
+                if fetchingECBRate {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            if let message = ecbRateMessage {
+                Text(message).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let day = invoice.exchangeRateReferenceDate {
+                Text("Cours de référence BCE du \(ExchangeRateText.day(day)) (table Banque de France)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
     /// 320 pt : le plus long libellé de sous-total de TVA, « TVA 0% — Livraison intracommunautaire »,
     /// tient sur une ligne à côté de son montant (à 280 pt, il passait à la ligne).
-    private func row(_ label: String, _ value: Double, bold: Bool = false) -> some View {
+    private func row(_ label: String, _ value: Double, bold: Bool = false, currencyCode: String? = nil) -> some View {
         HStack {
             Text(label).font(bold ? .body.bold() : .body)
             Spacer()
-            Text(String(format: "%.2f %@", value, invoice.currency))
+            Text(String(format: "%.2f %@", value, currencyCode ?? invoice.currency))
                 .font(bold ? .body.bold() : .body)
                 .monospacedDigit()
         }.frame(width: 320)

@@ -71,7 +71,7 @@ public enum EN16931BusinessRules {
         let sellerName = invoice.seller.name.trimmingCharacters(in: .whitespaces)
         let buyerName = invoice.buyer.name.trimmingCharacters(in: .whitespaces)
         let invoiceNumber = invoice.number.trimmingCharacters(in: .whitespaces)
-        let currency = invoice.currency.trimmingCharacters(in: .whitespaces)
+        let currency = CIIXMLGenerator.xmlCurrency(invoice.currency)
 
         if invoiceNumber.isEmpty {
             results.append(BusinessRuleResult(ruleId: "BR-02", severity: .error,
@@ -110,6 +110,18 @@ public enum EN16931BusinessRules {
         } else if !knownCurrencies.contains(currency) {
             results.append(BusinessRuleResult(ruleId: "BR-CL-04", severity: .warning,
                 message: "BR-CL-04 : La devise (BT-5) « \(currency) » n'est pas dans la liste de référence ISO 4217 ; vérifiez le code."))
+        }
+        // BR-FR-CO-12 (Schematron France CTC, fatal) : hors euro, la PDP exige la devise de
+        // comptabilité EUR (BT-6) et la TVA en euros (BT-111), que le générateur émet dès qu'un
+        // taux de change positif est saisi (`Invoice.taxTotalInEuros`). La devise comparée est
+        // celle du XML, comme dans le Schematron. Sans objet sur un document reçu : la TVA en
+        // euros est celle que son émetteur a déclarée.
+        if context == .issued, !currency.isEmpty, currency != "EUR", invoice.taxTotalInEuros == nil {
+            let remedy = invoice.exchangeRate == nil
+                ? "indiquez le taux de change (1 EUR = … \(currency)) dans l'en-tête, ou reprenez le cours de la BCE avec le bouton « Taux BCE »"
+                : "le taux de change (1 EUR = … \(currency)) doit être un nombre positif"
+            results.append(BusinessRuleResult(ruleId: "BR-FR-CO-12", severity: .error,
+                message: "BR-FR-CO-12 : Facture en \(currency) (BT-5) : la PDP exige le montant de la TVA en euros (BT-111) et la devise de comptabilité EUR (BT-6) ; \(remedy)."))
         }
 
         if sellerName.isEmpty {

@@ -947,6 +947,14 @@ public struct Invoice: Codable, Hashable, Identifiable {
     /// Factur-X ni imprimé sur le PDF — sert uniquement à avertir (sans bloquer) si le même
     /// acompte est repris dans plusieurs soldes.
     public var linkedSettlementRef: String?
+    /// Taux de change d'une facture hors euro, convention de la BCE : 1 EUR = `exchangeRate`
+    /// unités de la devise de facture (BT-5). Il donne la TVA en euros (BT-111, voir
+    /// `taxTotalInEuros`) qu'exige BR-FR-CO-12. Sans objet sur une facture en euros.
+    public var exchangeRate: Double?
+    /// Jour du cours de référence de la BCE repris par le bouton « Taux BCE » (les cours de la
+    /// table des parités quotidiennes de la Banque de France), imprimé avec le taux. nil pour un
+    /// taux saisi à la main.
+    public var exchangeRateReferenceDate: Date?
 
     public init(
         id: UUID = UUID(),
@@ -980,7 +988,9 @@ public struct Invoice: Codable, Hashable, Identifiable {
         attachments: [Attachment] = [],
         internalComment: String? = nil,
         lastEmailSentAt: Date? = nil,
-        linkedSettlementRef: String? = nil
+        linkedSettlementRef: String? = nil,
+        exchangeRate: Double? = nil,
+        exchangeRateReferenceDate: Date? = nil
     ) {
         self.id = id
         self.number = number
@@ -1013,6 +1023,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         self.internalComment = internalComment
         self.lastEmailSentAt = lastEmailSentAt
         self.linkedSettlementRef = linkedSettlementRef
+        self.exchangeRate = exchangeRate
+        self.exchangeRateReferenceDate = exchangeRateReferenceDate
         self.buyerReference = buyerReference
     }
 
@@ -1084,6 +1096,7 @@ public struct Invoice: Codable, Hashable, Identifiable {
         case purchaseOrderRef, precedingInvoiceRef, precedingInvoiceDate, lines, paymentIBAN, paymentBIC, paymentTerms, notes
         case billingMode, legalNotePMT, legalNotePMD, legalNoteAAB, prepaidAmount, superPDPRemoteID, optionalFields
         case attachments, internalComment, lastEmailSentAt, linkedSettlementRef
+        case exchangeRate, exchangeRateReferenceDate
     }
 
     private enum LegacyReferenceKeys: String, CodingKey {
@@ -1125,6 +1138,8 @@ public struct Invoice: Codable, Hashable, Identifiable {
         internalComment = try c.decodeIfPresent(String.self, forKey: .internalComment)
         lastEmailSentAt = try c.decodeIfPresent(Date.self, forKey: .lastEmailSentAt)
         linkedSettlementRef = try c.decodeIfPresent(String.self, forKey: .linkedSettlementRef)
+        exchangeRate = try c.decodeIfPresent(Double.self, forKey: .exchangeRate)
+        exchangeRateReferenceDate = try c.decodeIfPresent(Date.self, forKey: .exchangeRateReferenceDate)
         migrateReference("ram:BuyerReference", legacyBuyerReference)
         migrateReference("ram:ContractReferencedDocument/ram:IssuerAssignedID", try? lc.decodeIfPresent(String.self, forKey: .contractRef))
         renameReferenceTag(from: "ram:TendererReferencedDocument/ram:IssuerAssignedID", to: "ram:AdditionalReferencedDocument/ram:IssuerAssignedID")
@@ -1183,6 +1198,24 @@ public struct Invoice: Codable, Hashable, Identifiable {
 
     public var grandTotal: Double {
         (lineTotal + taxTotal).rounded(toPlaces: 2)
+    }
+
+    /// BT-111 : le total de la TVA (BT-110, tel qu'écrit dans le XML) converti en euros au taux de
+    /// change, arrondi au centime au pair comme `rounded(toPlaces:)` et ARVERNX. Le calcul est
+    /// décimal : 1,15 USD de TVA à 2 USD pour 1 EUR font 0,575, arrondis à 0,58, alors qu'en
+    /// `Double` le quotient 0,57499… donnait 0,57. nil pour une facture en euros ou sans devise
+    /// (BR-05), ou tant qu'aucun taux positif n'est saisi : ni BT-6 ni BT-111 ne sont alors émis.
+    public var taxTotalInEuros: Double? {
+        let code = CIIXMLGenerator.xmlCurrency(currency)
+        guard !code.isEmpty, code != "EUR",
+              let rate = exchangeRate, rate.isFinite, rate > 0,
+              let tax = Decimal(string: String(format: "%.2f", taxTotal)),
+              let divisor = Decimal(string: "\(rate)") else { return nil }
+        var quotient = tax / divisor
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &quotient, 2, .bankers)
+        // Par le texte : `NSDecimalNumber.doubleValue` rend 0.27999999999999997 pour 0,28.
+        return Double("\(rounded)")
     }
 }
 
