@@ -39,7 +39,9 @@ enum PDPStatusMapper {
 /// Interroge périodiquement SUPER PDP pour les factures déposées mais pas encore à un
 /// statut terminal, et applique tout avancement reçu — même logique "jamais de
 /// rétrogradation" que le rafraîchissement manuel (`InvoiceEditorView.refreshSuperPDPStatus`),
-/// mais sans état d'UI par facture puisque rien n'est affiché pendant le cycle.
+/// mais sans état d'UI par facture puisque rien n'est affiché pendant le cycle. Un statut reçu
+/// ne repart jamais vers SUPER PDP, même si sa facture est ouverte à l'écran : seul un statut
+/// choisi par l'utilisateur part (`InvoiceEditorView.setStatusChosenByUser`).
 @MainActor
 final class PDPPeriodicSyncEngine: ObservableObject {
     @Published public private(set) var isRunning = false
