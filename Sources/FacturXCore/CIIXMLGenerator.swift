@@ -160,24 +160,10 @@ public struct CIIXMLGenerator {
 """
         } ?? ""
 
-        let endpointIDValue = trimmedNonEmpty(party.endpointID)
-        let sirenValue = Self.xmlSiren(party.siren)
-        let effectiveEndpointID = endpointIDValue ?? sirenValue
-        let effectiveSchemeID: String
-        if endpointIDValue != nil {
-            let raw = party.endpointSchemeID.trimmingCharacters(in: .whitespaces)
-            if raw.isEmpty || raw == "FR:SIRENE" || raw == "0183" {
-                effectiveSchemeID = "0225"
-            } else {
-                effectiveSchemeID = raw
-            }
-        } else {
-            effectiveSchemeID = "0225"
-        }
-        let endpoint = effectiveEndpointID.map { id -> String in
+        let endpoint = Self.xmlEndpoint(party).map { endpoint -> String in
             """
           <ram:URIUniversalCommunication>
-            <ram:URIID schemeID="\(effectiveSchemeID)">\(escape(id))</ram:URIID>
+            <ram:URIID schemeID="\(endpoint.schemeID)">\(escape(endpoint.id))</ram:URIID>
           </ram:URIUniversalCommunication>
 """
         } ?? ""
@@ -495,6 +481,20 @@ public struct CIIXMLGenerator {
     static func xmlSiren(_ siren: String?) -> String? {
         guard let value = siren?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
         return value
+    }
+
+    /// BT-34 / BT-49 : l'adresse électronique écrite dans `URIUniversalCommunication/URIID` et son
+    /// schéma (BT-34-1 / BT-49-1). L'adresse saisie, sans espaces ni retours à la ligne autour,
+    /// sous son schéma (vide, « FR:SIRENE » ou « 0183 » deviennent 0225) ; à défaut le SIREN
+    /// (`xmlSiren`) sous le schéma 0225 ; `nil` (rien d'émis) sans l'un ni l'autre.
+    /// `EN16931BusinessRules` contrôle cette même adresse (BR-FR-23), comme le Schematron France CTC.
+    static func xmlEndpoint(_ party: InvoiceParty) -> (id: String, schemeID: String)? {
+        if let entered = party.endpointID?.trimmingCharacters(in: .whitespacesAndNewlines), !entered.isEmpty {
+            let raw = party.endpointSchemeID.trimmingCharacters(in: .whitespaces)
+            let schemeID = raw.isEmpty || raw == "FR:SIRENE" || raw == "0183" ? ElectronicAddressValidator.directoryScheme : raw
+            return (entered, schemeID)
+        }
+        return xmlSiren(party.siren).map { ($0, ElectronicAddressValidator.directoryScheme) }
     }
 
     /// BT-130 : le code d'unité sans espaces autour, C62 (« unité ») pour une ligne sans unité.

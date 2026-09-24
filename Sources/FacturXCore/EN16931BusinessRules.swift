@@ -140,6 +140,7 @@ public enum EN16931BusinessRules {
                 message: "BR-FR-13 : L'émetteur doit avoir un SIREN ou un identifiant électronique (BT-34)."))
         }
         results += sellerSirenRules(invoice.seller, context: context)
+        results += electronicAddressRules(invoice.seller, bt: "BT-34", label: "de l'émetteur")
         if let sellerSiret = invoice.seller.siret?.trimmingCharacters(in: .whitespaces), !sellerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.seller.siret) {
             results.append(BusinessRuleResult(ruleId: "BR-FR-09", severity: .warning,
@@ -211,6 +212,7 @@ public enum EN16931BusinessRules {
         if let buyerSiren = CIIXMLGenerator.xmlSiren(invoice.buyer.siren), invoice.buyer.legalSchemeID == "0002" {
             results += sirenFormatRules(buyerSiren, ruleId: "BR-FR-32", bt: "BT-47", party: "du destinataire")
         }
+        results += electronicAddressRules(invoice.buyer, bt: "BT-49", label: "du destinataire")
         if let buyerSiret = invoice.buyer.siret?.trimmingCharacters(in: .whitespaces), !buyerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.buyer.siret) {
             results.append(BusinessRuleResult(ruleId: "BR-FR-09", severity: .warning,
@@ -498,6 +500,24 @@ public enum EN16931BusinessRules {
                 message: "\(bt) : La clé de contrôle (Luhn) du SIREN \(party) « \(siren) » est fausse ; vérifiez-le, c'est sans doute une faute de frappe.")]
         }
         return []
+    }
+
+    /// BR-FR-23 (Schematron France CTC, fatale) : l'adresse électronique émise sous le schéma 0225
+    /// (BT-34, BT-49) n'a que des caractères admis (`ElectronicAddressValidator`). Contrôlée telle
+    /// que le générateur l'écrit (`CIIXMLGenerator.xmlEndpoint`) : l'adresse saisie, sinon le SIREN,
+    /// que le message nomme alors. Contrôle de format, en erreur sur une facture reçue aussi, comme
+    /// celui du SIREN. Même règle qu'ARVERNX-SaaS, qui refuse aussi le « + ».
+    private static func electronicAddressRules(_ party: InvoiceParty, bt: String, label: String) -> [BusinessRuleResult] {
+        guard !party.hasAdmittedElectronicAddress, let endpoint = CIIXMLGenerator.xmlEndpoint(party) else { return [] }
+        let isEntered = !(party.endpointID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let address = isEntered
+            ? "L'adresse électronique \(label) (\(bt)) « \(endpoint.id) »"
+            : "L'adresse électronique \(label) (\(bt)), à défaut d'adresse saisie le SIREN « \(endpoint.id) »,"
+        let remedy = isEntered
+            ? "corrigez-la (le SIREN, éventuellement suivi de « _ » et d'un SIRET ou d'un suffixe), ou videz-la pour émettre le SIREN"
+            : "corrigez le SIREN"
+        return [BusinessRuleResult(ruleId: "BR-FR-23", severity: .error,
+            message: "BR-FR-23 : \(address) est émise sous le schéma 0225 (annuaire), qui n'admet que les lettres sans accent, les chiffres et « - », « _ », « . » (ni espace, ni « @ », ni « : »…) : la PDP rejetterait la facture ; \(remedy).")]
     }
 
     /// "20260923" (date du XML) → "23/09/2026", pour la citer telle quelle dans un message.
