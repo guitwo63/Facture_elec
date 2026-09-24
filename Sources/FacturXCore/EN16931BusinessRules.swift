@@ -213,6 +213,9 @@ public enum EN16931BusinessRules {
             results += sirenFormatRules(buyerSiren, ruleId: "BR-FR-32", bt: "BT-47", party: "du destinataire")
         }
         results += electronicAddressRules(invoice.buyer, bt: "BT-49", label: "du destinataire")
+        if context == .issued {
+            results += buyerDirectorySchemeRules(invoice.buyer)
+        }
         if let buyerSiret = invoice.buyer.siret?.trimmingCharacters(in: .whitespaces), !buyerSiret.isEmpty,
            !SireneValidator.isValidSiret(invoice.buyer.siret) {
             results.append(BusinessRuleResult(ruleId: "BR-FR-09", severity: .warning,
@@ -513,11 +516,33 @@ public enum EN16931BusinessRules {
         let address = isEntered
             ? "L'adresse électronique \(label) (\(bt)) « \(endpoint.id) »"
             : "L'adresse électronique \(label) (\(bt)), à défaut d'adresse saisie le SIREN « \(endpoint.id) »,"
+        // Une adresse e-mail n'a pas sa place dans l'annuaire : elle a son propre schéma, EM.
+        let emailHint = endpoint.id.contains("@") ? "pour une adresse e-mail, choisissez le schéma « E-mail (EM) » ; sinon " : ""
         let remedy = isEntered
-            ? "corrigez-la (le SIREN, éventuellement suivi de « _ » et d'un SIRET ou d'un suffixe), ou videz-la pour émettre le SIREN"
+            ? emailHint + "corrigez-la (le SIREN, éventuellement suivi de « _ » et d'un SIRET ou d'un suffixe), ou videz-la pour émettre le SIREN"
             : "corrigez le SIREN"
         return [BusinessRuleResult(ruleId: "BR-FR-23", severity: .error,
             message: "BR-FR-23 : \(address) est émise sous le schéma 0225 (annuaire), qui n'admet que les lettres sans accent, les chiffres et « - », « _ », « . » (ni espace, ni « @ », ni « : »…) : la PDP rejetterait la facture ; \(remedy).")]
+    }
+
+    /// BR-FR-21 (Schematron France CTC, fatale) : sur une facture entre entreprises françaises (note
+    /// BAR = B2B), l'adresse électronique du destinataire (BT-49) est une adresse de l'annuaire, sous
+    /// le schéma 0225, qui commence par son SIREN. Le Schematron ne l'applique qu'avec cette note, que
+    /// l'application n'émet pas ; la plateforme, elle, reconnaît une facture entre assujettis
+    /// français. L'application ne distingue pas un client professionnel d'un particulier ou d'un
+    /// client hors du e-invoicing, à qui une adresse e-mail convient : simple avertissement, sur une
+    /// facture émise, pour un destinataire établi en France à SIREN (schéma 0002, 9 chiffres ; un
+    /// SIREN mal formé relève de BR-FR-32) dont l'adresse émise (`CIIXMLGenerator.xmlEndpoint`) n'est
+    /// pas en 0225. Même avertissement qu'ARVERNX-SaaS (décision de Guillaume du 2026-09-24).
+    private static func buyerDirectorySchemeRules(_ buyer: InvoiceParty) -> [BusinessRuleResult] {
+        guard buyer.country.trimmingCharacters(in: .whitespaces).uppercased() == "FR",
+              buyer.legalSchemeID == "0002",
+              let siren = CIIXMLGenerator.xmlSiren(buyer.siren), SireneValidator.isWellFormedSiren(siren),
+              let endpoint = CIIXMLGenerator.xmlEndpoint(buyer),
+              endpoint.schemeID != ElectronicAddressValidator.directoryScheme else { return [] }
+        let scheme = NormRefs.endpointSchemes.first { $0.code == endpoint.schemeID }?.label ?? endpoint.schemeID
+        return [BusinessRuleResult(ruleId: "BR-FR-21", severity: .warning,
+            message: "BR-FR-21 : L'adresse électronique du destinataire (BT-49) est sous le schéma « \(scheme) » : entre entreprises françaises assujetties, la PDP exige une adresse de l'annuaire (schéma 0225, « \(siren) » ou « \(siren)_… »). Videz l'adresse pour émettre le SIREN, sauf si le destinataire est hors du e-invoicing (particulier, organisme non assujetti…).")]
     }
 
     /// "20260923" (date du XML) → "23/09/2026", pour la citer telle quelle dans un message.
