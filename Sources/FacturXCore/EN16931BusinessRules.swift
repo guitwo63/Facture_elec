@@ -505,24 +505,41 @@ public enum EN16931BusinessRules {
         return []
     }
 
-    /// BR-FR-23 (Schematron France CTC, fatale) : l'adresse électronique émise sous le schéma 0225
-    /// (BT-34, BT-49) n'a que des caractères admis (`ElectronicAddressValidator`). Contrôlée telle
-    /// que le générateur l'écrit (`CIIXMLGenerator.xmlEndpoint`) : l'adresse saisie, sinon le SIREN,
-    /// que le message nomme alors. Contrôle de format, en erreur sur une facture reçue aussi, comme
-    /// celui du SIREN. Même règle qu'ARVERNX-SaaS, qui refuse aussi le « + ».
+    /// Adresse électronique émise (BT-34, BT-49), contrôlée telle que le générateur l'écrit
+    /// (`CIIXMLGenerator.xmlEndpoint`) : l'adresse saisie, sinon le SIREN, que les messages nomment
+    /// alors. Contrôles de format, en erreur sur une facture reçue aussi, comme celui du SIREN.
+    /// Mêmes règles qu'ARVERNX-SaaS (Schematron France CTC, fatales) :
+    /// - BR-FR-23 : sous le schéma 0225, que des caractères admis (`ElectronicAddressValidator`) ;
+    ///   le « + » est refusé, comme dans ARVERNX-SaaS ;
+    /// - BR-FR-25 : 125 caractères au plus, quel que soit le schéma, comptés comme `string-length`
+    ///   (`ElectronicAddressValidator.xmlLength`).
     private static func electronicAddressRules(_ party: InvoiceParty, bt: String, label: String) -> [BusinessRuleResult] {
-        guard !party.hasAdmittedElectronicAddress, let endpoint = CIIXMLGenerator.xmlEndpoint(party) else { return [] }
+        guard let endpoint = CIIXMLGenerator.xmlEndpoint(party) else { return [] }
         let isEntered = !(party.endpointID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let address = isEntered
-            ? "L'adresse électronique \(label) (\(bt)) « \(endpoint.id) »"
-            : "L'adresse électronique \(label) (\(bt)), à défaut d'adresse saisie le SIREN « \(endpoint.id) »,"
-        // Une adresse e-mail n'a pas sa place dans l'annuaire : elle a son propre schéma, EM.
-        let emailHint = endpoint.id.contains("@") ? "pour une adresse e-mail, choisissez le schéma « E-mail (EM) » ; sinon " : ""
-        let remedy = isEntered
-            ? emailHint + "corrigez-la (le SIREN, éventuellement suivi de « _ » et d'un SIRET ou d'un suffixe), ou videz-la pour émettre le SIREN"
-            : "corrigez le SIREN"
-        return [BusinessRuleResult(ruleId: "BR-FR-23", severity: .error,
-            message: "BR-FR-23 : \(address) est émise sous le schéma 0225 (annuaire), qui n'admet que les lettres sans accent, les chiffres et « - », « _ », « . » (ni espace, ni « @ », ni « : »…) : la PDP rejetterait la facture ; \(remedy).")]
+        var results: [BusinessRuleResult] = []
+        if endpoint.schemeID == ElectronicAddressValidator.directoryScheme,
+           !ElectronicAddressValidator.isWellFormedDirectoryAddress(endpoint.id) {
+            let address = isEntered
+                ? "L'adresse électronique \(label) (\(bt)) « \(endpoint.id) »"
+                : "L'adresse électronique \(label) (\(bt)), à défaut d'adresse saisie le SIREN « \(endpoint.id) »,"
+            // Une adresse e-mail n'a pas sa place dans l'annuaire : elle a son propre schéma, EM.
+            let emailHint = endpoint.id.contains("@") ? "pour une adresse e-mail, choisissez le schéma « E-mail (EM) » ; sinon " : ""
+            let remedy = isEntered
+                ? emailHint + "corrigez-la (le SIREN, éventuellement suivi de « _ » et d'un SIRET ou d'un suffixe), ou videz-la pour émettre le SIREN"
+                : "corrigez le SIREN"
+            results.append(BusinessRuleResult(ruleId: "BR-FR-23", severity: .error,
+                message: "BR-FR-23 : \(address) est émise sous le schéma 0225 (annuaire), qui n'admet que les lettres sans accent, les chiffres et « - », « _ », « . » (ni espace, ni « @ », ni « : »…) : la PDP rejetterait la facture ; \(remedy)."))
+        }
+        let length = ElectronicAddressValidator.xmlLength(endpoint.id)
+        if length > ElectronicAddressValidator.maxLength {
+            let address = isEntered
+                ? "L'adresse électronique \(label) (\(bt))"
+                : "L'adresse électronique \(label) (\(bt)), à défaut d'adresse saisie le SIREN,"
+            let remedy = isEntered ? "raccourcissez-la, ou videz-la pour émettre le SIREN" : "corrigez le SIREN"
+            results.append(BusinessRuleResult(ruleId: "BR-FR-25", severity: .error,
+                message: "BR-FR-25 : \(address) compte \(length) caractères, au-delà des \(ElectronicAddressValidator.maxLength) admis : la PDP rejetterait la facture ; \(remedy)."))
+        }
+        return results
     }
 
     /// BR-FR-21 (Schematron France CTC, fatale) : sur une facture entre entreprises françaises (note
