@@ -37,10 +37,16 @@ extension View {
     /// Bloque l'édition d'une section sans en griser le contenu : un liseré en
     /// pointillés signale la zone en lecture seule (le bandeau au-dessus indique
     /// déjà l'état verrouillé), les données restent pleinement lisibles.
+    ///
+    /// `allowsHitTesting` arrête la souris, pas le clavier : Tab amenait le focus dans
+    /// un champ de la section, et la frappe le modifiait. `LockedSectionFocusGuard`
+    /// tient le focus clavier hors de la section. `.disabled` bloquerait les deux, mais
+    /// grise les champs.
     @ViewBuilder
     func lockable(_ locked: Bool) -> some View {
         self
             .allowsHitTesting(!locked)
+            .background(LockedSectionFocusGuard(isLocked: locked))
             .overlay {
                 if locked {
                     RoundedRectangle(cornerRadius: 8)
@@ -48,6 +54,112 @@ extension View {
                         .foregroundStyle(.secondary.opacity(0.5))
                 }
             }
+    }
+}
+
+/// Tient le focus clavier hors d'une section verrouillée par `lockable(_:)`.
+///
+/// Posée en fond de la section, sa vue AppKit en couvre le cadre. Elle observe le premier
+/// répondeur de la fenêtre. S'il arrive dans ce cadre, elle le déplace aussitôt, avant
+/// toute frappe :
+/// - après Tab ou Maj-Tab, vers le champ suivant (ou précédent) hors des sections
+///   verrouillées ;
+/// - sinon (focus donné par programme, section verrouillée pendant une saisie), vers la
+///   fenêtre : plus aucun champ n'a le focus.
+/// Repris aussi tôt, le champ n'écrit rien dans son binding. Sans cette garde, un simple
+/// Tab à travers une facture verrouillée la réenregistrait (`upsert`, journal d'audit),
+/// sans aucune frappe.
+private struct LockedSectionFocusGuard: NSViewRepresentable {
+    let isLocked: Bool
+
+    func makeNSView(context: Context) -> LockedSectionFocusGuardView {
+        LockedSectionFocusGuardView()
+    }
+
+    func updateNSView(_ view: LockedSectionFocusGuardView, context: Context) {
+        view.isLocked = isLocked
+    }
+}
+
+private final class LockedSectionFocusGuardView: NSView {
+    private static let tabKeyCode: UInt16 = 48 // kVK_Tab
+
+    var isLocked = false {
+        didSet {
+            guard isLocked, !oldValue else { return }
+            // Verrouillée pendant une saisie : le champ perd le focus après la mise à jour
+            // SwiftUI en cours, pendant laquelle son binding ne doit pas être écrit.
+            DispatchQueue.main.async { [weak self] in self?.moveFocusOutIfInside() }
+        }
+    }
+
+    private var firstResponderObservation: NSKeyValueObservation?
+
+    /// Transparente à la souris, déjà arrêtée par `allowsHitTesting`.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        firstResponderObservation = window?.observe(\.firstResponder) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.moveFocusOutIfInside() }
+        }
+    }
+
+    private func moveFocusOutIfInside() {
+        guard isLocked, let window, let focused = Self.focusedView(in: window), covers(focused) else { return }
+        guard let event = NSApp.currentEvent, event.type == .keyDown, event.keyCode == Self.tabKeyCode,
+              event.window === window else {
+            window.makeFirstResponder(nil)
+            return
+        }
+        // Un Tab peut enjamber plusieurs sections verrouillées d'affilée.
+        let backward = event.modifierFlags.contains(.shift)
+        let lockedSections = Self.lockedGuards(in: window)
+        var last = focused
+        var visited: Set<ObjectIdentifier> = [ObjectIdentifier(focused)]
+        while let next = backward ? last.previousValidKeyView : last.nextValidKeyView,
+              visited.insert(ObjectIdentifier(next)).inserted {
+            if !lockedSections.contains(where: { $0.covers(next) }) {
+                // Le chemin d'un Tab ordinaire, depuis le dernier champ verrouillé.
+                if backward { window.selectKeyView(preceding: last) } else { window.selectKeyView(following: last) }
+                return
+            }
+            last = next
+        }
+        window.makeFirstResponder(nil)
+    }
+
+    /// Les contrôles SwiftUI ne sont pas des sous-vues de cette vue : l'appartenance à la
+    /// section se juge à leur centre, dans le repère de la fenêtre. Une vue qui contient la
+    /// section (la vue hôte SwiftUI, une vue de défilement) n'en fait jamais partie. Un texte
+    /// multiligne (`TextEditor`) peut dépasser la section : c'est sa vue de défilement qui y
+    /// est placée.
+    private func covers(_ view: NSView) -> Bool {
+        let placed = (view as? NSTextView)?.enclosingScrollView ?? view
+        guard placed.window === window, !isDescendant(of: placed) else { return false }
+        let frame = placed.convert(placed.bounds, to: nil)
+        return convert(bounds, to: nil).contains(NSPoint(x: frame.midX, y: frame.midY))
+    }
+
+    /// En saisie, le premier répondeur est l'éditeur de champ partagé de la fenêtre, dont le
+    /// délégué est le champ lui-même.
+    private static func focusedView(in window: NSWindow) -> NSView? {
+        if let editor = window.firstResponder as? NSText, editor.isFieldEditor {
+            return editor.delegate as? NSView
+        }
+        return window.firstResponder as? NSView
+    }
+
+    private static func lockedGuards(in window: NSWindow) -> [LockedSectionFocusGuardView] {
+        var guards: [LockedSectionFocusGuardView] = []
+        var pending = window.contentView.map { [$0] } ?? []
+        while let view = pending.popLast() {
+            if let lockGuard = view as? LockedSectionFocusGuardView, lockGuard.isLocked {
+                guards.append(lockGuard)
+            }
+            pending.append(contentsOf: view.subviews)
+        }
+        return guards
     }
 }
 
