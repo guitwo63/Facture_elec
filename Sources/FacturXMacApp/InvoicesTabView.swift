@@ -2122,8 +2122,8 @@ struct InvoiceEditorView: View {
                 .fixedSize()
                 Text("1 EUR =").font(.callout).fixedSize()
                 // Virgule ou point décimal : avec le format numérique standard, « 1.1464 » collé
-                // depuis le site de la BCE se lisait 1 en français (ExchangeRateFormatStyle).
-                fieldHighlight(TextField("taux", value: exchangeRateBinding, format: ExchangeRateFormatStyle())
+                // depuis le site de la BCE se lisait 1 en français (DecimalInputFormatStyle).
+                fieldHighlight(TextField("taux", value: exchangeRateBinding, format: .decimalInput)
                     .frame(width: 110).textFieldStyle(.roundedBorder), forRuleIDs: ["BR-FR-CO-12"])
                 Text(invoice.currency).font(.callout).fixedSize()
                 Button {

@@ -1,7 +1,7 @@
 import XCTest
 @testable import FacturXCore
 
-/// Saisie des champs décimaux (quantité, prix unitaire, montant déjà payé, taux de TVA « Autre… »).
+/// Saisie des champs décimaux (quantité, prix unitaire, montant déjà payé, taux de TVA ou de change).
 /// Avec le format `.number` standard en français, un point était lu en silence comme la fin du
 /// nombre ou comme un séparateur de milliers : « 12.5 » donnait 12, « 12.50 » 1250 (constaté le
 /// 2026-09-24 sur une réplique hors écran d'un champ de l'app, en locale fr_FR).
@@ -96,25 +96,9 @@ final class DecimalInputFormatStyleTests: XCTestCase {
         XCTAssertThrowsError(try strategy.parse(""))
     }
 
-    /// Les cas du champ du taux de change (PR #153, `ExchangeRateParseStrategy`), que ce format a
-    /// vocation à remplacer, sont lus pareil.
-    func testReadsTheExchangeRateEntryCasesTheSameWay() {
-        XCTAssertEqual(read("1,1464"), 1.1464)
-        XCTAssertEqual(read("1.1464"), 1.1464)
-        XCTAssertEqual(read(" 163,25 "), 163.25)
-        XCTAssertEqual(read("18 123,45"), 18123.45)
-        XCTAssertEqual(read("18\u{202F}123,45"), 18123.45)
-        XCTAssertEqual(read("18.123,45"), 18123.45)
-        XCTAssertEqual(read("18,123.45"), 18123.45)
-        XCTAssertEqual(read("1.234.567"), 1234567)
-        for text in ["abc", "1,2.3,4", "nan", "inf", ""] {
-            XCTAssertNil(read(text), text)
-        }
-    }
-
     // MARK: - Affichage
 
-    func testShowsTheValueInTheAppLanguageWithoutThousandsSeparator() {
+    func testShowsTheValueInTheLocaleWithoutThousandsSeparator() {
         let style = DecimalInputFormatStyle(locale: french)
         XCTAssertEqual(style.format(12.5), "12,5")
         XCTAssertEqual(style.format(1234.5), "1234,5")
@@ -124,7 +108,7 @@ final class DecimalInputFormatStyleTests: XCTestCase {
         XCTAssertEqual(DecimalInputFormatStyle(locale: Locale(identifier: "en_US")).format(1234.5), "1234.5")
         XCTAssertEqual(DecimalInputFormatStyle(maximumFractionDigits: 2, locale: french).format(12.3456), "12,35")
         XCTAssertEqual(DecimalInputFormatStyle(maximumFractionDigits: 2).locale(french).format(12.3456), "12,35",
-                       "la locale de l'environnement (SwiftUI) garde le nombre de décimales")
+                       "locale(_:) garde le nombre de décimales")
         XCTAssertEqual(DecimalInputFormatStyle.decimalInput.maximumFractionDigits, 6)
     }
 

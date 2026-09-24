@@ -1,8 +1,8 @@
 import Foundation
 
-/// Saisie d'un nombre décimal (quantité, prix unitaire, montant, taux) : affiché dans la langue de
-/// l'application (« 12,5 » en français), sans séparateur de milliers, et relu avec la virgule comme
-/// avec le point décimal.
+/// Saisie d'un nombre décimal (quantité, prix unitaire, montant, taux de TVA ou de change) :
+/// affiché selon les réglages régionaux du Mac comme avec `.number` (« 12,5 » en français), mais
+/// sans séparateur de milliers, et relu avec la virgule comme avec le point décimal.
 ///
 /// Le format numérique standard (`.number`) relit en français un point comme la fin du nombre ou
 /// comme un séparateur de milliers, sans aucune erreur : « 12.5 » donnait 12, « 0.5 » 0, « 12.50 »
