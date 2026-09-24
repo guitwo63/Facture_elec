@@ -1898,7 +1898,9 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-129 — Quantité facturée. Doit être positive, y compris sur un avoir : c'est le type de document (381) qui porte le sens du crédit.")
                                 }
                                 HStack(spacing: 2) {
-                                    NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
+                                    // Liseré sur la seule ligne dont le code est refusé (BR-CL-23).
+                                    fieldHighlight(NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180),
+                                                   forRuleIDs: line.hasAdmittedUnitCode ? [] : ["BR-CL-23"])
                                     InfoBadge(text: "BT-130 — Unité de mesure (code UN/ECE Rec 20 ou, pour un emballage, Rec 21).")
                                 }
                                 HStack(spacing: 2) {

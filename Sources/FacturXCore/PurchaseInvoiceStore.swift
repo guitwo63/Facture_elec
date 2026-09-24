@@ -46,6 +46,18 @@ public final class PurchaseInvoiceStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([PurchaseInvoice].self, from: data) {
             invoices = decoded
         }
+        replaceLegacyUnitCodesInDrafts()
+    }
+
+    /// Voir `InvoiceStore.replaceLegacyUnitCodesInDrafts()` : les saisies manuelles en brouillon,
+    /// dont l'unité vient de notre sélecteur. Une facture reçue arrive au statut « Reçue » et
+    /// garde le code de son fournisseur.
+    private func replaceLegacyUnitCodesInDrafts() {
+        var changed = false
+        for idx in invoices.indices where invoices[idx].status == .draft {
+            if invoices[idx].invoice.lines.replaceLegacyUnitCodes() { changed = true }
+        }
+        if changed { save() }
     }
 
     public func save() {

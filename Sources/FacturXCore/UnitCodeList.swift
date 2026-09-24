@@ -1,15 +1,21 @@
-/// Liste des codes d'unité (BT-130) admis par le Schematron Factur-X EN16931 : liste 8 de
+import Foundation
+
+/// Codes d'unité (BT-130) admis par le Schematron Factur-X EN16931 : liste 8 de
 /// `FACTUR-X_EN16931_codedb.xml`, dans le paquet Python factur-x 6.8
 /// (`facturx/xsd_and_schematron/facturx-en16931/`). C'est UN/ECE Rec 20 avec l'extension
 /// Rec 21 (BR-CL-23). Les mêmes 2162 codes forment la liste 15 du Schematron EXTENDED et la
-/// liste BR-CL-23 (fatale) d'`EXTENDED-CTC-FR-CII.xslt`. Le XSD, lui, n'en vérifie aucun.
+/// liste BR-CL-23 (fatale) d'`EXTENDED-CTC-FR-CII.xslt`. Le XSD, lui, n'en vérifie aucun, et
+/// le Schematron Order-X non plus. Contrôle local : BR-CL-23 dans `EN16931BusinessRules`.
 ///
-/// Régénérer la liste, depuis le dossier du codedb :
+/// Régénérer la liste, depuis le dossier du codedb, puis mettre à jour l'empreinte vérifiée
+/// par `UnitCodeListTests` :
 /// `xmllint --xpath '//cl[@id="8"]/enumeration/@value' FACTUR-X_EN16931_codedb.xml | sed -E 's/.*"(.*)"/\1/' | paste -sd ' ' - | fold -w 80 -s`
-enum SchematronUnitCodes {
-    static let all: Set<String> = Set(list.split(whereSeparator: \.isWhitespace).map(String.init))
+public enum UnitCodeList {
+    public static let codes: Set<String> = Set(list.split(whereSeparator: \.isWhitespace).map(String.init))
 
-    static let count = 2162
+    public static func contains(_ code: String) -> Bool {
+        codes.contains(code)
+    }
 
     private static let list = """
     10 11 13 14 15 20 21 22 23 24 25 27 28 33 34 35 37 38 40 41 56 57 58 59 60 61
@@ -120,4 +126,33 @@ enum SchematronUnitCodes {
     XZK XZL XZM XZN XZP XZQ XZR XZS XZT XZU XZV XZW XZX XZY XZZ YDK YDQ YRD Z11 Z9
     ZP ZZ
     """
+}
+
+extension InvoiceLine {
+    /// BR-CL-23 : le code d'unité qu'écrira le XML (C62 pour une ligne sans unité) est admis par
+    /// le Schematron.
+    public var hasAdmittedUnitCode: Bool {
+        UnitCodeList.contains(CIIXMLGenerator.xmlUnitCode(unit))
+    }
+
+    /// Remplace un ancien code d'unité refusé par le Schematron (`NormRefs.legacyUnitReplacements`)
+    /// par le code admis pour la même unité. Vrai si la ligne a changé.
+    @discardableResult
+    public mutating func replaceLegacyUnitCode() -> Bool {
+        guard let replacement = NormRefs.legacyUnitReplacements[unit.trimmingCharacters(in: .whitespaces)] else { return false }
+        unit = replacement
+        return true
+    }
+}
+
+extension Array where Element == InvoiceLine {
+    /// `replaceLegacyUnitCode()` sur chaque ligne. Vrai si au moins une ligne a changé.
+    @discardableResult
+    public mutating func replaceLegacyUnitCodes() -> Bool {
+        var changed = false
+        for idx in indices {
+            if self[idx].replaceLegacyUnitCode() { changed = true }
+        }
+        return changed
+    }
 }

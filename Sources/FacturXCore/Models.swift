@@ -1247,7 +1247,9 @@ public enum NormRefs {
 
     /// Codes que `units` proposait jusqu'au 2026-09-24, absents de la liste du Schematron,
     /// avec le code admis pour la même unité (les trois derniers sont des types d'emballage
-    /// Rec 21, préfixe X). Une ligne saisie avant la correction peut encore porter l'ancien code.
+    /// Rec 21, préfixe X). Une ligne saisie avant la correction peut encore porter l'ancien code :
+    /// les brouillons et les copies passent au nouveau (`InvoiceLine.replaceLegacyUnitCode()`),
+    /// et BR-CL-23 le propose pour un document émis.
     public static let legacyUnitReplacements: [String: String] = [
         "KTM": "KMT",
         "PCE": "H87",
