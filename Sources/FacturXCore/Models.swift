@@ -199,10 +199,19 @@ public enum SireneValidator {
         return sum % 10 == 0
     }
 
+    /// BR-FR-10 / BR-FR-32 (Schematron France CTC, fatales) : `matches(normalize-space($siren),
+    /// '^\d{9}$')` sur le SIREN émis, soit exactement 9 chiffres, sans clé de Luhn. Des espaces
+    /// ne sont admis qu'autour, que le générateur retire (`CIIXMLGenerator.xmlSiren`) :
+    /// « 732 829 320 » est refusé. Chiffres ASCII seulement, un peu plus strict que `\d`.
+    public static func isWellFormedSiren(_ value: String?) -> Bool {
+        guard let siren = CIIXMLGenerator.xmlSiren(value) else { return false }
+        let scalars = siren.unicodeScalars
+        return scalars.count == 9 && scalars.allSatisfy { ("0"..."9").contains($0) }
+    }
+
+    /// SIREN que la PDP accepte (`isWellFormedSiren`), à clé de Luhn juste.
     public static func isValidSiren(_ value: String?) -> Bool {
-        let numbers = (value ?? "").filter { $0.isNumber }
-        guard numbers.count == 9 else { return false }
-        return luhnCheck(numbers)
+        isWellFormedSiren(value) && luhnCheck(value ?? "")
     }
 
     public static func isValidSiret(_ value: String?) -> Bool {

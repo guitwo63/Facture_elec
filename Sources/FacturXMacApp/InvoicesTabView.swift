@@ -1163,10 +1163,10 @@ struct InvoiceEditorView: View {
     private var hasMandatoryWarnings: Bool {
         let s = invoice.seller
         let b = invoice.buyer
+        // BR-FR-10 : le SIREN de l'émetteur est exigé même avec un identifiant électronique.
         let sellerOk = !s.name.trimmingCharacters(in: .whitespaces).isEmpty
             && !s.country.trimmingCharacters(in: .whitespaces).isEmpty
-            && ((s.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
-                || (s.endpointID ?? "").trimmingCharacters(in: .whitespaces).count >= 9)
+            && SireneValidator.isWellFormedSiren(s.siren)
         let buyerOk = !b.name.trimmingCharacters(in: .whitespaces).isEmpty
             && !b.country.trimmingCharacters(in: .whitespaces).isEmpty
             && ((b.siren ?? "").trimmingCharacters(in: .whitespaces).count >= 9
@@ -1691,7 +1691,7 @@ struct InvoiceEditorView: View {
                 if hasMandatoryWarnings {
                     DisclosureGroup(isExpanded: $showMandatoryDetails) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), SIREN ou identifiant électronique (BT-34 émetteur, BT-49 destinataire), n° TVA si applicable.").font(.caption)
+                            Text("Émetteur et destinataire : nom, pays (code ISO 2 lettres), n° TVA si applicable. SIREN de l'émetteur (9 chiffres, BT-30) ; SIREN ou identifiant électronique du destinataire (BT-49).").font(.caption)
                             Text("Lignes : désignation non vide, quantité positive, prix unitaire, taux TVA, unité (code UN/ECE ex. C62, DAY, HUR).").font(.caption)
                             Text("En-tête : numéro de facture, date, échéance, devise (EUR ; hors euro, taux de change), mode de facturation (BT-23).").font(.caption)
                             Text("Mentions légales FR : frais de recouvrement (PMT), pénalités de retard (PMD), escompte (AAB) — pré-remplies, modifiables.").font(.caption)
@@ -1933,12 +1933,12 @@ struct InvoiceEditorView: View {
                         }, locked: fieldLocked, companyID: invoice.companyID)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.red, lineWidth: ["BR-06", "BR-09", "BR-FR-13"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
+                        .stroke(Color.red, lineWidth: ["BR-06", "BR-09", "BR-FR-10", "BR-FR-13"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                     GroupBox("Destinataire") {
                         PartySection(party: $invoice.buyer, role: .buyer, locked: fieldLocked)
                     }.lockable(fieldLocked)
                     .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.red, lineWidth: ["BR-07", "BR-11", "BR-FR-12"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
+                        .stroke(Color.red, lineWidth: ["BR-07", "BR-11", "BR-FR-12", "BR-FR-32"].contains(where: { errorRuleIDs.contains($0) }) ? 1.5 : 0))
                 }
 
                 GroupBox("Lignes") {

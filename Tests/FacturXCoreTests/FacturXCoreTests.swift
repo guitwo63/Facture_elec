@@ -401,8 +401,9 @@ final class FacturXCoreTests: XCTestCase {
             endpointID: inv.seller.endpointID, endpointSchemeID: inv.seller.endpointSchemeID
         )
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
-        XCTAssertTrue(rules.contains { $0.ruleId == "BR-FR-10" && $0.severity == .warning && $0.message.contains("SIREN") },
-                     "BR-FR-10 doit avertir sur un SIREN émetteur invalide (clé Luhn)")
+        XCTAssertTrue(rules.contains { $0.ruleId == "BT-30-LUHN" && $0.severity == .warning && $0.message.contains("SIREN") },
+                     "BT-30-LUHN doit avertir sur un SIREN émetteur à clé Luhn fausse")
+        XCTAssertFalse(rules.contains { $0.ruleId == "BR-FR-10" }, "9 chiffres : BR-FR-10 est respectée")
     }
 
     func testBusinessRulesUnknownCurrencyWarns() {
