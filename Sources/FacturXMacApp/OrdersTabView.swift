@@ -985,6 +985,10 @@ struct OrderEditorView: View {
                                         Text(inv.number).font(.headline)
                                         Text("\(inv.type == .creditNote ? "Avoir" : inv.type.isInternalCreditNote ? "Avoir interne" : "Facture") — \(String(format: "%.2f %@ TTC", inv.grandTotal, inv.currency))")
                                             .font(.caption2).foregroundStyle(.secondary)
+                                        if !CurrencyTotals.sameCurrency(inv.currency, order.currency) {
+                                            Text("Hors montant facturé : autre devise que la commande")
+                                                .font(.caption2).foregroundStyle(.orange)
+                                        }
                                     }
                                     Spacer()
                                     Text(inv.issueDate, format: .dateTime.day().month().year())
@@ -1013,10 +1017,10 @@ struct OrderEditorView: View {
         }.sorted { $0.issueDate > $1.issueDate }
     }
 
+    /// Seuls les factures et avoirs dans la devise de la commande comptent : des dollars ne se
+    /// déduisent pas d'une commande en euros. Les autres restent listés, signalés comme non comptés.
     private var linkedInvoicesAmount: Double {
-        linkedInvoices.reduce(0) { acc, inv in
-            inv.type.isCreditNote ? acc - inv.grandTotal : acc + inv.grandTotal
-        }.rounded(toPlaces: 2)
+        CurrencyTotals.total(linkedInvoices, in: order.currency)
     }
 
     /// 320 pt : le plus long libellé de sous-total de TVA, « TVA 0% — Livraison intracommunautaire »,
