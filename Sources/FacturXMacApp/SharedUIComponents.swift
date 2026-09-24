@@ -184,52 +184,22 @@ enum QuickExport {
     }
 
     private static func exportElectronicInvoices(_ invoices: [Invoice]) -> String {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Exporter ici"
-        guard panel.runModal() == .OK, let dir = panel.url else { return "" }
-        var ok = 0
-        var failed = 0
-        var skipped = 0
-        let gen = FacturXGenerator()
-        for inv in invoices {
-            if inv.type.isInternalCreditNote {
-                skipped += 1
-                continue
-            }
-            do {
-                let data = try gen.generate(invoice: inv)
-                let name = inv.type.isCreditNote ? "avoir-\(inv.number).pdf" : "facture-\(inv.number).pdf"
-                try data.write(to: dir.appendingPathComponent(name))
-                ok += 1
-            } catch {
-                failed += 1
-            }
-        }
-        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")\(skipped > 0 ? ", \(skipped) avoir(s) interne(s) ignoré(s)" : "")"
+        exportElectronic(ElectronicBulkExport(invoices: invoices))
     }
 
     private static func exportElectronicOrders(_ orders: [SalesOrder]) -> String {
+        exportElectronic(ElectronicBulkExport(orders: orders))
+    }
+
+    private static func exportElectronic(_ export: ElectronicBulkExport) -> String {
+        var export = export
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Exporter ici"
         guard panel.runModal() == .OK, let dir = panel.url else { return "" }
-        var ok = 0
-        var failed = 0
-        let gen = OrderXGenerator()
-        for order in orders {
-            do {
-                let data = try gen.generate(order: order)
-                let name = "commande-\(order.number).pdf"
-                try data.write(to: dir.appendingPathComponent(name))
-                ok += 1
-            } catch {
-                failed += 1
-            }
-        }
-        return "\(ok) fichier(s) généré(s)\(failed > 0 ? ", \(failed) échec(s)" : "")"
+        export.write(to: dir)
+        return export.message
     }
 }
 
