@@ -191,8 +191,11 @@ enum QuickExport {
         exportElectronic(ElectronicBulkExport(orders: orders))
     }
 
+    /// Les documents en erreur bloquante sont déjà écartés par `ElectronicBulkExport`, et listés
+    /// dans le message de fin : le dossier n'est demandé que s'il reste un fichier à y écrire.
     private static func exportElectronic(_ export: ElectronicBulkExport) -> String {
         var export = export
+        guard export.hasPendingDocuments else { return export.message }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -200,6 +203,26 @@ enum QuickExport {
         guard panel.runModal() == .OK, let dir = panel.url else { return "" }
         export.write(to: dir)
         return export.message
+    }
+}
+
+/// Compte rendu d'un export lancé depuis une liste. L'export groupé Factur-X/Order-X liste un
+/// document non exporté par ligne : au-delà de `maxHeight`, le texte défile au lieu de
+/// repousser la liste hors de l'écran. Sélectionnable, pour copier les numéros.
+struct ExportMessageText: View {
+    let message: String
+    var maxHeight: CGFloat = 120
+
+    var body: some View {
+        ScrollView {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: maxHeight)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
