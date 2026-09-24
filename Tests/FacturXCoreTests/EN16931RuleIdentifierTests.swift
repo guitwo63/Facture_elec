@@ -47,13 +47,24 @@ final class EN16931RuleIdentifierTests: XCTestCase {
 
     func testInvalidSirenAndSiretUseFrenchCTCRules() {
         var inv = invoice()
-        inv.seller.siren = "123456780"
-        inv.buyer.siren = "123456780"
+        inv.seller.siren = "12345678"
+        inv.buyer.siren = "12345678"
         inv.seller.siret = "73282932000075"
         let rules = EN16931BusinessRules.evaluate(invoice: inv)
         XCTAssertTrue(rules.contains { $0.ruleId == "BR-FR-10" && $0.message.contains("BT-30") }, "SIREN du vendeur : BT-30")
         XCTAssertTrue(rules.contains { $0.ruleId == "BR-FR-32" && $0.message.contains("BT-47") }, "SIREN de l'acheteur : BT-47")
         XCTAssertTrue(rules.contains { $0.ruleId == "BR-FR-09" }, "SIRET")
+    }
+
+    /// Aucun Schematron ne vérifie la clé de Luhn d'un SIREN : 9 chiffres respectent BR-FR-10
+    /// et BR-FR-32, et la clé fausse relève d'un contrôle interne.
+    func testSirenLuhnKeyUsesInternalIdentifiers() {
+        var inv = invoice()
+        inv.seller.siren = "123456780"
+        inv.buyer.siren = "123456780"
+        let found = ruleIDs(inv)
+        XCTAssertTrue(found.isSuperset(of: ["BT-30-LUHN", "BT-47-LUHN"]))
+        XCTAssertTrue(found.isDisjoint(with: ["BR-FR-10", "BR-FR-32"]))
     }
 
     func testIntraCommunitySupplyRulesUseICPrefix() {
