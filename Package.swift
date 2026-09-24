@@ -25,5 +25,10 @@ let package = Package(
             dependencies: ["FacturXCore"],
             path: "Tests/FacturXCoreTests"
         ),
+        .testTarget(
+            name: "FacturXMacAppTests",
+            dependencies: ["FacturXMacApp", "FacturXCore"],
+            path: "Tests/FacturXMacAppTests"
+        ),
     ]
 )

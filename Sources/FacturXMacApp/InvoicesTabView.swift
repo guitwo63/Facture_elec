@@ -1125,7 +1125,6 @@ struct InvoiceEditorView: View {
     @State private var superPDPMessage: String?
     @State private var superPDPSubmission: SuperPDPInvoiceSubmission?
     @State private var pdpDownloadedURL: URL?
-    @State private var syncingFromPDP = false
     @State private var lastSentPDPStatusCode: String?
     @State private var showStatusJournal = false
     @State private var showLegalMentions = false
@@ -1455,7 +1454,7 @@ struct InvoiceEditorView: View {
                                (invoice.superPDPRemoteID ?? superPDPSubmission?.remoteID ?? "").isEmpty {
                                 depositToSuperPDP()
                             } else {
-                                invoice.status = s
+                                setStatusChosenByUser(s)
                             }
                         } label: {
                             Label(s.label, systemImage: s.systemImage)
@@ -1599,7 +1598,7 @@ struct InvoiceEditorView: View {
                                 Menu {
                                     ForEach(forceable, id: \.self) { s in
                                         Button {
-                                            invoice.status = s
+                                            setStatusChosenByUser(s)
                                         } label: {
                                             Label(s.label, systemImage: s.systemImage)
                                         }
@@ -2096,11 +2095,6 @@ struct InvoiceEditorView: View {
                     onCancel: { showPrecedingInvoicePicker = false }
                 )
             }
-            .onChange(of: invoice.status) { newStatus in
-                guard !syncingFromPDP else { return }
-                notifyPDPStatusChange(to: newStatus)
-                sendInvoiceStatusAlertIfNeeded(newStatus)
-            }
             .sheet(isPresented: $showInvoicePreview) {
                 InvoicePreviewSheet(pdfData: previewPDFData, title: "Facture \(invoice.number)")
             }
@@ -2347,10 +2341,9 @@ struct InvoiceEditorView: View {
                     let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
                     let isCancellation = mapped == .cancelled && invoice.status != .cancelled && invoice.status != .paid
                     if (isAdvance || isCancellation) && mapped != invoice.status {
-                        syncingFromPDP = true
+                        // Statut reçu : il ne repart pas vers SUPER PDP (voir `setStatusChosenByUser`).
                         invoice.status = mapped
                         store.upsert(invoice)
-                        syncingFromPDP = false
                         superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status) — id distant \(rid). Statut facture mis à jour : \(mapped.label)."
                     } else if mapped == invoice.status {
                         superPDPMessage = "⟲ Reçu de SUPER PDP : statut \(updated.status)\(updated.enInvoiceRef.map { " (\($0))" } ?? "") — id distant \(rid)."
@@ -2537,9 +2530,22 @@ struct InvoiceEditorView: View {
         }
     }
 
-    /// Alerte email best-effort (au connecté, potentiellement utile si le
-    /// changement vient d'une synchronisation SUPER PDP en arrière-plan plutôt
-    /// que d'un clic explicite) — n'échoue jamais la mise à jour du statut.
+    /// Statut choisi par l'utilisateur : bouton de transition ou menu admin « Forcer ». C'est le
+    /// seul changement de statut qui part vers SUPER PDP et envoie l'alerte email. Un statut posé
+    /// par le programme n'y repart jamais : reçu de SUPER PDP (bouton de rafraîchissement,
+    /// `PDPPeriodicSyncEngine`), restauré d'une sauvegarde, ou « Envoyée » posé par le dépôt.
+    /// D'où l'appel ici et non dans un `onChange(of: invoice.status)`, qui se déclenche aussi pour
+    /// ces changements-là (un drapeau levé puis baissé dans le même bloc synchrone est déjà
+    /// retombé quand l'action d'`onChange` s'exécute).
+    private func setStatusChosenByUser(_ newStatus: InvoiceStatus) {
+        guard newStatus != invoice.status else { return }
+        invoice.status = newStatus
+        notifyPDPStatusChange(to: newStatus)
+        sendInvoiceStatusAlertIfNeeded(newStatus)
+    }
+
+    /// Alerte email best-effort au connecté, pour un statut choisi dans l'app (voir
+    /// `setStatusChosenByUser`) — n'échoue jamais la mise à jour du statut.
     private func sendInvoiceStatusAlertIfNeeded(_ newStatus: InvoiceStatus) {
         let smtp = smtpSettings.credentials(for: invoice.companyID)
         guard smtp.alertsEnabled, smtp.alertOnInvoiceStatusChange, smtp.isConfigured,
