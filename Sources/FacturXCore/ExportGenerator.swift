@@ -24,7 +24,10 @@ public struct ExportGenerator {
         (s ?? "").trimmingCharacters(in: .whitespaces)
     }
 
-    /// En-têtes et lignes CSV pour une liste de factures.
+    /// En-têtes et lignes CSV pour une liste de factures. Les montants sont dans la devise de
+    /// chaque facture ; hors euro, les deux dernières colonnes donnent le taux de change et la TVA
+    /// en euros (BT-111), vides pour une facture en euros ou sans taux. Elles sont ajoutées en fin
+    /// de ligne pour qu'un classeur qui lit les colonnes par position continue de fonctionner.
     public func invoiceCSV(_ invoices: [Invoice]) -> String {
         var rows: [[String]] = []
         rows.append([
@@ -33,9 +36,14 @@ public struct ExportGenerator {
             "Destinataire (nom)", "Destinataire (SIREN)", "Destinataire (TVA)",
             "Réf. commande", "Réf. contrat", "Réf. facture antérieure",
             "Total HT", "Total TVA", "Total TTC", "Mode facturation", "Notes",
-            "IBAN", "BIC", "Conditions de paiement"
+            "IBAN", "BIC", "Conditions de paiement",
+            "Taux de change (1 EUR = …)", "Total TVA en EUR (BT-111)"
         ])
         for inv in invoices {
+            // Même condition que la mention du PDF (`exchangeRateMention`) : le taux n'est donné
+            // qu'avec la TVA en euros qu'il produit.
+            let taxInEuros = inv.taxTotalInEuros
+            let rate = taxInEuros == nil ? nil : inv.exchangeRate
             rows.append([
                 csv(inv.number),
                 csv(inv.type.label),
@@ -59,7 +67,9 @@ public struct ExportGenerator {
                 csv(orBlank(inv.notes)),
                 csv(orBlank(inv.paymentIBAN)),
                 csv(orBlank(inv.paymentBIC)),
-                csv(orBlank(inv.paymentTerms))
+                csv(orBlank(inv.paymentTerms)),
+                rate.map(ExchangeRateText.string) ?? "",
+                taxInEuros.map { String(format: "%.2f", $0) } ?? ""
             ])
         }
         return encode(rows: rows)

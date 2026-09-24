@@ -193,11 +193,12 @@ struct TreasuryDashboardView: View {
     @State private var customFrom: Date = Calendar.current.dateInterval(of: .year, for: Date())?.start ?? Date()
     @State private var customTo: Date = Date()
 
-    private struct ClientBalance: Identifiable {
-        let id: String
-        let name: String
-        let outstanding: Double
-        let overdue: Double
+    /// Les soldes d'une devise dans « Par client » : un intertitre par devise dès qu'il y en a
+    /// plusieurs.
+    private struct ClientBalanceSection: Identifiable {
+        let currency: String
+        let balances: [ClientBalance]
+        var id: String { currency }
     }
 
     private var scopedInvoices: [Invoice] {
@@ -221,10 +222,6 @@ struct TreasuryDashboardView: View {
     /// rien et ne doit pas gonfler artificiellement les indicateurs.
     private var sentInvoices: [Invoice] {
         activeInvoices.filter { $0.status != .draft && $0.status != .issued }
-    }
-
-    private func signedAmount(_ inv: Invoice) -> Double {
-        inv.type.isCreditNote ? -inv.grandTotal : inv.grandTotal
     }
 
     /// Bornes de la période sélectionnée. `nil` = pas de borne (période "Tout").
@@ -274,26 +271,25 @@ struct TreasuryDashboardView: View {
     /// des autres KPI. Utile pour repérer les factures prêtes qui attendent l'envoi.
     private var validatedNotSentInvoices: [Invoice] { activeInvoices.filter { $0.status == .issued } }
 
-    private var caFacture: Double { caFactureInvoices.reduce(0) { $0 + signedAmount($1) } }
-    private var encaisse: Double { encaisseInvoices.reduce(0) { $0 + signedAmount($1) } }
-    private var enRetard: Double { enRetardInvoices.reduce(0) { $0 + signedAmount($1) } }
-    private var enAttente: Double { enAttenteInvoices.reduce(0) { $0 + signedAmount($1) } }
-    private var validatedNotSent: Double { validatedNotSentInvoices.reduce(0) { $0 + signedAmount($1) } }
-
-    private var byClient: [ClientBalance] {
-        var byName: [String: (outstanding: Double, overdue: Double)] = [:]
-        for inv in sentInvoices where inv.status != .paid {
-            let name = inv.buyer.name.trimmingCharacters(in: .whitespaces).isEmpty ? "Client sans nom" : inv.buyer.name
-            var entry = byName[name] ?? (outstanding: 0, overdue: 0)
-            entry.outstanding += signedAmount(inv)
-            if inv.isOverdue { entry.overdue += signedAmount(inv) }
-            byName[name] = entry
+    /// Montant dû par client, dans chaque devise : les soldes de `CurrencyTotals.clientBalances`,
+    /// déjà triés par devise, regroupés en une section par devise.
+    private var clientSections: [ClientBalanceSection] {
+        var sections: [ClientBalanceSection] = []
+        for balance in CurrencyTotals.clientBalances(sentInvoices.filter { $0.status != .paid }) {
+            if let last = sections.last, last.currency == balance.currency {
+                sections[sections.count - 1] = ClientBalanceSection(currency: last.currency, balances: last.balances + [balance])
+            } else {
+                sections.append(ClientBalanceSection(currency: balance.currency, balances: [balance]))
+            }
         }
-        return byName.map { ClientBalance(id: $0.key, name: $0.key, outstanding: $0.value.outstanding, overdue: $0.value.overdue) }
-            .sorted { $0.outstanding > $1.outstanding }
+        return sections
     }
 
-    private var currency: String { scopedInvoices.first?.currency ?? "EUR" }
+    /// « 1250.00 USD ». Une facture émise sans devise (BR-05) ne devrait pas exister, mais un
+    /// montant sans code resterait lisible.
+    private func amountText(_ amount: Double, _ currency: String) -> String {
+        String(format: "%.2f %@", amount, currency.isEmpty ? "(sans devise)" : currency)
+    }
 
     var body: some View {
         ScrollView {
@@ -318,31 +314,42 @@ struct TreasuryDashboardView: View {
                         DatePicker("", selection: $customTo, displayedComponents: .date).labelsHidden()
                     }
                 }
+                // Hauteur commune : une carte qui a des factures en plusieurs devises compte une
+                // ligne de montant par devise.
                 HStack(spacing: 16) {
-                    kpiCard("CA facturé — \(period.rawValue)", caFacture, invoices: caFactureInvoices, color: .blue, icon: "chart.line.uptrend.xyaxis")
-                    kpiCard("Encaissé — \(period.rawValue)", encaisse, invoices: encaisseInvoices, color: .green, icon: "checkmark.circle.fill")
-                    kpiCard("En attente", enAttente, invoices: enAttenteInvoices, color: .orange, icon: "hourglass")
-                    kpiCard("En retard", enRetard, invoices: enRetardInvoices, color: .red, icon: "exclamationmark.triangle.fill")
-                    kpiCard("Validées, non envoyées", validatedNotSent, invoices: validatedNotSentInvoices, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
+                    kpiCard("CA facturé — \(period.rawValue)", invoices: caFactureInvoices, color: .blue, icon: "chart.line.uptrend.xyaxis")
+                    kpiCard("Encaissé — \(period.rawValue)", invoices: encaisseInvoices, color: .green, icon: "checkmark.circle.fill")
+                    kpiCard("En attente", invoices: enAttenteInvoices, color: .orange, icon: "hourglass")
+                    kpiCard("En retard", invoices: enRetardInvoices, color: .red, icon: "exclamationmark.triangle.fill")
+                    kpiCard("Validées, non envoyées", invoices: validatedNotSentInvoices, color: Color(hex: InvoiceStatus.issued.hexColor), icon: InvoiceStatus.issued.systemImage)
                 }
+                .fixedSize(horizontal: false, vertical: true)
                 GroupBox("Par client — montant dû") {
-                    if byClient.isEmpty {
+                    let sections = clientSections
+                    if sections.isEmpty {
                         Text("Aucun montant en attente.").foregroundStyle(.secondary).padding()
                     } else {
-                        VStack(spacing: 0) {
-                            ForEach(byClient) { c in
-                                HStack {
-                                    Text(c.name).font(.body)
-                                    Spacer()
-                                    if c.overdue < 0 {
-                                        Label(String(format: "%.2f %@ en retard", abs(c.overdue), currency), systemImage: "exclamationmark.triangle.fill")
-                                            .font(.caption).foregroundStyle(.red)
-                                    }
-                                    Text(String(format: "%.2f %@", c.outstanding, currency))
-                                        .font(.body.bold()).monospacedDigit()
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections) { section in
+                                if sections.count > 1 {
+                                    Text(section.currency.isEmpty ? "Sans devise" : section.currency)
+                                        .font(.caption.bold()).foregroundStyle(.secondary)
+                                        .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 2)
                                 }
-                                .padding(.vertical, 6).padding(.horizontal, 8)
-                                Divider()
+                                ForEach(section.balances) { c in
+                                    HStack {
+                                        Text(c.name).font(.body)
+                                        Spacer()
+                                        if c.overdue > 0 {
+                                            Label(amountText(c.overdue, c.currency) + " en retard", systemImage: "exclamationmark.triangle.fill")
+                                                .font(.caption).foregroundStyle(.red)
+                                        }
+                                        Text(amountText(c.outstanding, c.currency))
+                                            .font(.body.bold()).monospacedDigit()
+                                    }
+                                    .padding(.vertical, 6).padding(.horizontal, 8)
+                                    Divider()
+                                }
                             }
                         }
                     }
@@ -353,21 +360,27 @@ struct TreasuryDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private func kpiCard(_ title: String, _ amount: Double, invoices: [Invoice], color: Color, icon: String) -> some View {
+    /// Un montant par devise, sans conversion, l'euro d'abord ; « 0.00 EUR » sans facture.
+    private func kpiCard(_ title: String, invoices: [Invoice], color: Color, icon: String) -> some View {
         let invoiceCount = invoices.filter { !$0.type.isCreditNote }.count
         let creditNoteCount = invoices.filter { $0.type.isCreditNote }.count
+        let totals = CurrencyTotals.byCurrency(invoices)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Image(systemName: icon).foregroundStyle(color)
                 Text(title).font(.caption).foregroundStyle(.secondary)
             }
-            Text(String(format: "%.2f %@", amount, currency))
-                .font(.title2.bold())
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(totals.isEmpty ? [CurrencyAmount(currency: CurrencyTotals.defaultCurrency, amount: 0)] : totals) { total in
+                    Text(amountText(total.amount, total.currency))
+                        .font(.title2.bold())
+                }
+            }
             Text("\(pluralized(invoiceCount, "facture", "factures")) · \(pluralized(creditNoteCount, "avoir", "avoirs"))")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.12)))
     }
 
