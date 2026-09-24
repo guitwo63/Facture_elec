@@ -1899,7 +1899,7 @@ struct InvoiceEditorView: View {
                                 }
                                 HStack(spacing: 2) {
                                     NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
-                                    InfoBadge(text: "BT-130 — Unité de mesure (UN/ECE Rec 20).")
+                                    InfoBadge(text: "BT-130 — Unité de mesure (code UN/ECE Rec 20 ou, pour un emballage, Rec 21).")
                                 }
                                 HStack(spacing: 2) {
                                     fieldHighlight(DoubleField("P.U. HT", value: $line.unitPrice, format: .number), forRuleIDs: ["BR-27"])

@@ -71,7 +71,7 @@ Les notes (BT-22) sont émises sans leurs espaces de début et de fin, comme sur
 | `line.name` | `ram:SpecifiedTradeProduct/ram:Name` | BT-153 | BR-25 | erreur |
 | `line.description` | `ram:SpecifiedTradeProduct/ram:Description` | BT-154 | — | — |
 | `line.quantity` | `ram:SpecifiedLineTradeDelivery/ram:BilledQuantity` | BT-129 | BT-129-POSITIVE (contrôle interne : EN 16931 admet une quantité nulle ou négative) | erreur |
-| `line.unit` | `ram:BilledQuantity/@unitCode` (C62 si vide) | BT-130 | BR-23 | avertissement |
+| `line.unit` | `ram:BilledQuantity/@unitCode` (C62 si vide ; les unités proposées sont toutes dans la liste du Schematron, UN/ECE Rec 20 et Rec 21, BR-CL-23 : voir `UnitCodeListTests`) | BT-130 | BR-23 | avertissement |
 | `line.unitPrice` | `ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount` | BT-146 | BR-27 | erreur |
 | `line.vatRate` | `ram:SpecifiedLineTradeSettlement/ram:ApplicableTradeTax/ram:RateApplicablePercent` (absent en catégorie O : BR-O-05) | BT-152 | BR-Z-05, BR-E-05, BR-AE-05, BR-IC-05, BR-G-05, BR-O-05 (taux non nul hors catégorie S) et BR-S-05 (taux nul ou négatif en catégorie S) ; BR-FR-16 (taux hors de la liste des taux français) ; BT-152-ZERO (rappel, contrôle interne) | erreur ; erreur ; avertissement |
 | `line.vatCategory` (suit le taux saisi : S, ou E à 0 %, voir « Catégorie de TVA d'une ligne à 0 % ») | `ram:ApplicableTradeTax/ram:CategoryCode` | BT-151 | BR-O-12 (une ligne O exclut toute autre catégorie, hors EXTENDED) | erreur |
