@@ -44,10 +44,11 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
         String(decoding: try CIIXMLGenerator().generate(invoice: invoice), as: UTF8.self)
     }
 
-    /// Adresse de l'annuaire (caractères admis en 0225) de `length` caractères : le SIREN, « _ »
-    /// et un suffixe.
-    private func directoryAddress(_ length: Int) -> String {
-        "732829320_" + String(repeating: "A", count: length - 10)
+    /// Adresse de l'annuaire (caractères admis en 0225) de `length` caractères : le SIREN de la
+    /// partie (par défaut celui de l'émetteur), « _ » et un suffixe. Elle désigne ainsi sa partie,
+    /// comme BR-FR-21 l'exige pour le destinataire.
+    private func directoryAddress(_ length: Int, siren: String = "732829320") -> String {
+        siren + "_" + String(repeating: "A", count: length - 10)
     }
 
     private func a(_ count: Int) -> String { String(repeating: "a", count: count) }
@@ -55,7 +56,7 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
     // MARK: - Limite de 125 caractères
 
     func testAnAddressOf125CharactersIsAdmitted() {
-        let invoice = invoice { $0.seller.endpointID = directoryAddress(125); $0.buyer.endpointID = directoryAddress(125) }
+        let invoice = invoice { $0.seller.endpointID = directoryAddress(125); $0.buyer.endpointID = directoryAddress(125, siren: "303265045") }
         XCTAssertEqual(lengthRules(invoice).map(\.message), [])
         XCTAssertTrue(isExportable(invoice))
     }
@@ -76,7 +77,7 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
 
     func testALongerBuyerAddressBlocks() {
         for length in [126, 200] {
-            let invoice = invoice { $0.buyer.endpointID = directoryAddress(length) }
+            let invoice = invoice { $0.buyer.endpointID = directoryAddress(length, siren: "303265045") }
             let rules = lengthRules(invoice)
             XCTAssertEqual(rules.map(\.severity), [.error], "\(length)")
             XCTAssertTrue(rules.first?.message.contains("(BT-49)") == true, "\(length)")
@@ -87,7 +88,7 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
 
     func testBothLongAddressesRaiseOneErrorEach() {
         let messages = lengthRules(invoice {
-            $0.seller.endpointID = directoryAddress(126); $0.buyer.endpointID = directoryAddress(130)
+            $0.seller.endpointID = directoryAddress(126); $0.buyer.endpointID = directoryAddress(130, siren: "303265045")
         }).map(\.message)
         XCTAssertEqual(messages.count, 2)
         XCTAssertTrue(messages.first?.contains("(BT-34)") == true && messages.first?.contains("126 caractères") == true)
@@ -98,7 +99,7 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
     /// compte.
     func testTheRuleCountsTheAddressAsEmitted() throws {
         let padded = invoice {
-            $0.seller.endpointID = "  " + directoryAddress(125) + "\n"; $0.buyer.endpointID = "\t" + directoryAddress(125) + " "
+            $0.seller.endpointID = "  " + directoryAddress(125) + "\n"; $0.buyer.endpointID = "\t" + directoryAddress(125, siren: "303265045") + " "
         }
         XCTAssertEqual(lengthRules(padded).map(\.message), [])
         XCTAssertTrue(try xml(padded).contains(#"<ram:URIID schemeID="0225">"# + directoryAddress(125) + "</ram:URIID>"))
@@ -109,10 +110,10 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
     /// BR-FR-25 vise l'adresse quel que soit son schéma, contrairement à BR-FR-23 (0225 seulement).
     func testTheLimitAppliesWhateverTheScheme() {
         for scheme in ["0225", "", "FR:SIRENE", "0183", "0200", "0088", "0009"] {
-            let long = invoice { $0.buyer.endpointID = directoryAddress(126); $0.buyer.endpointSchemeID = scheme }
+            let long = invoice { $0.buyer.endpointID = directoryAddress(126, siren: "303265045"); $0.buyer.endpointSchemeID = scheme }
             XCTAssertEqual(lengthRules(long).map(\.severity), [.error], "« \(scheme) »")
             XCTAssertFalse(isExportable(long), "« \(scheme) »")
-            let admitted = invoice { $0.buyer.endpointID = directoryAddress(125); $0.buyer.endpointSchemeID = scheme }
+            let admitted = invoice { $0.buyer.endpointID = directoryAddress(125, siren: "303265045"); $0.buyer.endpointSchemeID = scheme }
             XCTAssertEqual(lengthRules(admitted).map(\.message), [], "« \(scheme) »")
         }
     }
@@ -214,9 +215,9 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
     /// aussi la longueur : faux dès que BR-FR-23 ou BR-FR-25 vise l'adresse de cette partie.
     func testHasAdmittedElectronicAddressCoversTheLength() {
         let variants: [(String, admitted: Bool, (inout InvoiceParty) -> Void)] = [
-            ("125 caractères", true, { $0.endpointID = self.directoryAddress(125) }),
-            ("126 caractères", false, { $0.endpointID = self.directoryAddress(126) }),
-            ("126 caractères, schéma 0200", false, { $0.endpointID = self.directoryAddress(126); $0.endpointSchemeID = "0200" }),
+            ("125 caractères", true, { $0.endpointID = self.directoryAddress(125, siren: $0.siren ?? "") }),
+            ("126 caractères", false, { $0.endpointID = self.directoryAddress(126, siren: $0.siren ?? "") }),
+            ("126 caractères, schéma 0200", false, { $0.endpointID = self.directoryAddress(126, siren: $0.siren ?? ""); $0.endpointSchemeID = "0200" }),
             ("accent combinant, schéma 0200", false, { $0.endpointID = self.a(124) + "e\u{0301}"; $0.endpointSchemeID = "0200" }),
             ("SIREN de 126 chiffres", false, { $0.endpointID = nil; $0.siren = String(repeating: "7", count: 126) }),
             ("mal formée et trop longue", false, { $0.endpointID = "factures@" + self.a(120) }),
@@ -298,16 +299,16 @@ final class ElectronicAddressLengthRulesTests: XCTestCase {
         let cases: [(String, Invoice, [String])] = [
             ("adresses courtes", invoice(), []),
             ("125 caractères des deux côtés", invoice {
-                $0.seller.endpointID = directoryAddress(125); $0.buyer.endpointID = directoryAddress(125)
+                $0.seller.endpointID = directoryAddress(125); $0.buyer.endpointID = directoryAddress(125, siren: "303265045")
             }, []),
             ("126 caractères, émetteur", invoice { $0.seller.endpointID = directoryAddress(126) }, ["BR-FR-25_BT-34"]),
-            ("126 caractères, destinataire", invoice { $0.buyer.endpointID = directoryAddress(126) }, ["BR-FR-25_BT-49"]),
+            ("126 caractères, destinataire", invoice { $0.buyer.endpointID = directoryAddress(126, siren: "303265045") }, ["BR-FR-25_BT-49"]),
             ("les deux parties", invoice {
-                $0.seller.endpointID = directoryAddress(200); $0.buyer.endpointID = directoryAddress(126)
+                $0.seller.endpointID = directoryAddress(200); $0.buyer.endpointID = directoryAddress(126, siren: "303265045")
             }, ["BR-FR-25_BT-34", "BR-FR-25_BT-49"]),
             ("125 caractères entourés d'espaces", invoice { $0.seller.endpointID = " \t" + directoryAddress(125) + " \n" }, []),
             ("schéma vide", invoice { $0.seller.endpointID = directoryAddress(126); $0.seller.endpointSchemeID = "" }, ["BR-FR-25_BT-34"]),
-            ("schéma 0200", invoice { $0.buyer.endpointID = directoryAddress(126); $0.buyer.endpointSchemeID = "0200" }, ["BR-FR-25_BT-49"]),
+            ("schéma 0200", invoice { $0.buyer.endpointID = directoryAddress(126, siren: "303265045"); $0.buyer.endpointSchemeID = "0200" }, ["BR-FR-25_BT-49"]),
             ("accent combinant, 126 points de code", invoice {
                 $0.buyer.endpointID = a(124) + "e\u{0301}"; $0.buyer.endpointSchemeID = "0200"
             }, ["BR-FR-25_BT-49"]),
