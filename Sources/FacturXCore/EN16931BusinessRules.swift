@@ -238,6 +238,24 @@ public enum EN16931BusinessRules {
                 results.append(BusinessRuleResult(ruleId: "BR-23", severity: .warning,
                     message: "BR-23 : \(label) — l'unité (BT-130) n'est pas renseignée (code UN/ECE, ex. C62, DAY)."))
             }
+            // BR-CL-23 (Schematron EN16931 et EXTENDED ; fatal en EXTENDED-CTC-FR) : le code
+            // d'unité écrit dans le XML doit être dans la liste UN/ECE Rec 20 + Rec 21
+            // (`UnitCodeList`). Le sélecteur ne propose que des codes admis : un autre code vient
+            // d'une ligne saisie avant le 2026-09-24 (PCE…) ou d'un import. Sur une facture reçue,
+            // c'est le code du fournisseur : rien à corriger chez nous, d'où un avertissement.
+            let unitCode = CIIXMLGenerator.xmlUnitCode(line.unit)
+            if !UnitCodeList.contains(unitCode) {
+                if context == .issued {
+                    let remedy = NormRefs.legacyUnitReplacements[unitCode]
+                        .flatMap { code in NormRefs.units.first { $0.code == code } }
+                        .map { "choisissez « \($0.label) », la même unité" } ?? "choisissez une unité de la liste"
+                    results.append(BusinessRuleResult(ruleId: "BR-CL-23", severity: .error,
+                        message: "BR-CL-23 : \(label) — le code d'unité « \(unitCode) » (BT-130) n'est pas dans la liste UN/ECE Rec 20 et Rec 21 : la PDP rejetterait la facture ; \(remedy)."))
+                } else {
+                    results.append(BusinessRuleResult(ruleId: "BR-CL-23", severity: .warning,
+                        message: "BR-CL-23 : \(label) — le code d'unité « \(unitCode) » (BT-130) n'est pas dans la liste UN/ECE Rec 20 et Rec 21."))
+                }
+            }
             // Contrôle interne : EN 16931 décrit ce calcul du montant net de ligne sans en
             // faire une règle BR.
             let computed = (line.quantity * line.unitPrice).rounded(toPlaces: 2)

@@ -316,6 +316,9 @@ public struct SalesOrder: Codable, Hashable, Identifiable {
         if let contractRef, !contractRef.trimmingCharacters(in: .whitespaces).isEmpty {
             invoice.contractRef = contractRef
         }
+        // Une commande émise avant le 2026-09-24 peut porter un ancien code d'unité (PCE…), que
+        // le Schematron des factures refuse (BR-CL-23) : la facture reçoit le code admis.
+        invoice.lines.replaceLegacyUnitCodes()
         return invoice
     }
 }

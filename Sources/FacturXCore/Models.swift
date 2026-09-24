@@ -1218,6 +1218,10 @@ public enum NormRefs {
         NormRef("CNY", "Yuan chinois (CNY)"),
     ]
 
+    /// Unités proposées pour BT-130. Chaque code doit figurer dans la liste des unités du
+    /// Schematron (UN/ECE Rec 20 avec l'extension Rec 21, BR-CL-23 : liste 8 de
+    /// `FACTUR-X_EN16931_codedb.xml`), sinon la PDP rejette la facture (« Value of '@unitCode'
+    /// is not allowed »). Le XSD, lui, admet n'importe quel code. Vérifié par `UnitCodeListTests`.
     public static let units: [NormRef] = [
         NormRef("C62", "Unité (C62)"),
         NormRef("DAY", "Jour (DAY)"),
@@ -1228,17 +1232,30 @@ public enum NormRefs {
         NormRef("KGM", "Kilogramme (KGM)"),
         NormRef("GRM", "Gramme (GRM)"),
         NormRef("MTR", "Mètre (MTR)"),
-        NormRef("KTM", "Kilomètre (KTM)"),
+        NormRef("KMT", "Kilomètre (KMT)"),
         NormRef("MTQ", "Mètre cube (MTQ)"),
         NormRef("LTR", "Litre (LTR)"),
         NormRef("MTK", "Mètre carré (MTK)"),
         NormRef("SET", "Ensemble (SET)"),
-        NormRef("PCE", "Pièce (PCE)"),
+        NormRef("H87", "Pièce (H87)"),
         NormRef("PR", "Paire (PR)"),
-        NormRef("PCK", "Paquet (PCK)"),
-        NormRef("BX", "Boîte (BX)"),
-        NormRef("ROL", "Rouleau (ROL)"),
+        NormRef("XPK", "Paquet (XPK)"),
+        NormRef("XBX", "Boîte (XBX)"),
+        NormRef("XRO", "Rouleau (XRO)"),
         NormRef("TNE", "Tonne (TNE)"),
+    ]
+
+    /// Codes que `units` proposait jusqu'au 2026-09-24, absents de la liste du Schematron,
+    /// avec le code admis pour la même unité (les trois derniers sont des types d'emballage
+    /// Rec 21, préfixe X). Une ligne saisie avant la correction peut encore porter l'ancien code :
+    /// les brouillons et les copies passent au nouveau (`InvoiceLine.replaceLegacyUnitCode()`),
+    /// et BR-CL-23 le propose pour un document émis.
+    public static let legacyUnitReplacements: [String: String] = [
+        "KTM": "KMT",
+        "PCE": "H87",
+        "PCK": "XPK",
+        "BX": "XBX",
+        "ROL": "XRO",
     ]
 
     public static let countries: [NormRef] = [

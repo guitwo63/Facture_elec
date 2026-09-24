@@ -52,6 +52,18 @@ public final class OrderStore: ObservableObject {
         }
         migrateBuyerSellerSemanticsIfNeeded()
         fixInconsistentVATCategories()
+        replaceLegacyUnitCodesInDrafts()
+    }
+
+    /// Voir `InvoiceStore.replaceLegacyUnitCodesInDrafts()` : même correction des brouillons. Une
+    /// commande émise garde son code ; le Schematron Order-X ne contrôle pas la liste, et une
+    /// facture tirée de la commande reçoit le code admis (`SalesOrder.toInvoice`).
+    private func replaceLegacyUnitCodesInDrafts() {
+        var changed = false
+        for idx in orders.indices where orders[idx].status == .draft {
+            if orders[idx].lines.replaceLegacyUnitCodes() { changed = true }
+        }
+        if changed { save() }
     }
 
     /// Voir `InvoiceStore.fixInconsistentVATCategories()` — même correction, même bug

@@ -356,6 +356,14 @@ struct NormRefPicker: View {
         self._code = code
     }
 
+    /// Un code hors liste reste affiché (« Autre… (PCE) ») : ancien code d'unité, devise ou pays
+    /// venu d'un import… Sans lui, on ne voyait que « Autre… ».
+    private var customLabel: String {
+        let stored = code.trimmingCharacters(in: .whitespaces)
+        guard !stored.isEmpty, !options.contains(where: { $0.code == code }) else { return "Autre…" }
+        return "Autre… (\(stored))"
+    }
+
     var body: some View {
         Picker(label, selection: Binding(
             get: { options.first(where: { $0.code == code })?.id ?? "__custom__" },
@@ -365,7 +373,7 @@ struct NormRefPicker: View {
             }
         )) {
             ForEach(options) { ref in Text(ref.label).tag(ref.id as String) }
-            Text("Autre…").tag("__custom__" as String)
+            Text(customLabel).tag("__custom__" as String)
         }
     }
 }

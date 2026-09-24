@@ -87,6 +87,20 @@ public final class InvoiceStore: ObservableObject {
             numberFormatOverrides = decoded
         }
         fixInconsistentVATCategories()
+        replaceLegacyUnitCodesInDrafts()
+    }
+
+    /// Brouillons dont une ligne porte encore un ancien code d'unité, refusé par le Schematron
+    /// (BR-CL-23) et proposé par le sélecteur jusqu'au 2026-09-24 (PCE « Pièce »…) : le code
+    /// passe au code admis pour la même unité (`NormRefs.legacyUnitReplacements`). Une facture
+    /// émise garde le code avec lequel elle est partie ; BR-CL-23 la signale. Idempotent,
+    /// comme `fixInconsistentVATCategories()`.
+    private func replaceLegacyUnitCodesInDrafts() {
+        var changed = false
+        for idx in invoices.indices where invoices[idx].status == .draft {
+            if invoices[idx].lines.replaceLegacyUnitCodes() { changed = true }
+        }
+        if changed { save() }
     }
 
     /// Corrige les lignes dont la catégorie de TVA est restée non standard (ex. "Z") alors
@@ -275,6 +289,10 @@ public final class InvoiceStore: ObservableObject {
             l.id = UUID()
             return l
         }
+        // La copie d'une facture émise avec un ancien code d'unité (PCE…) serait rejetée
+        // (BR-CL-23) : le brouillon reçoit le code admis, l'original garde le sien. De même
+        // pour l'avoir, l'acompte et le solde ci-dessous.
+        copy.lines.replaceLegacyUnitCodes()
         return copy
     }
 
@@ -297,6 +315,7 @@ public final class InvoiceStore: ObservableObject {
             l.id = UUID()
             return l
         }
+        credit.lines.replaceLegacyUnitCodes()
         return credit
     }
 
@@ -315,6 +334,7 @@ public final class InvoiceStore: ObservableObject {
         deposit.notes = "Facture d'acompte"
         deposit.prepaidAmount = 0
         deposit.billingMode = invoice.billingMode.forDeposit
+        deposit.lines.replaceLegacyUnitCodes()
         return deposit
     }
 
@@ -333,6 +353,7 @@ public final class InvoiceStore: ObservableObject {
         final.prepaidAmount = deposits.reduce(0) { $0 + $1.grandTotal }.rounded(toPlaces: 2)
         final.notes = "Facture de solde"
         final.billingMode = invoice.billingMode.forFinalSettlement
+        final.lines.replaceLegacyUnitCodes()
         return final
     }
 

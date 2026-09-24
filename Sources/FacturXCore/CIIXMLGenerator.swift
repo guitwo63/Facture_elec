@@ -83,7 +83,7 @@ public struct CIIXMLGenerator {
         let rateXML = line.vatCategory == .outOfScope
             ? "" : "\n              <ram:RateApplicablePercent>\(formatRate(line.vatRate))</ram:RateApplicablePercent>"
         let category = line.vatCategory.rawValue
-        let unitCode = line.unit.trimmingCharacters(in: .whitespaces).isEmpty ? "C62" : line.unit
+        let unitCode = Self.xmlUnitCode(line.unit)
         let desc = line.description.map { """
             <ram:Description>\(escape($0))</ram:Description>
 """ } ?? ""
@@ -470,6 +470,14 @@ public struct CIIXMLGenerator {
 
     private func formatRate(_ rate: Double) -> String {
         Self.xmlRate(rate)
+    }
+
+    /// BT-130 : le code d'unité sans espaces autour, C62 (« unité ») pour une ligne sans unité.
+    /// `EN16931BusinessRules` contrôle cette même chaîne (BR-CL-23), comme le Schematron, qui
+    /// compare l'attribut tel quel : « H87 » précédé d'une espace y serait refusé.
+    static func xmlUnitCode(_ unit: String) -> String {
+        let code = unit.trimmingCharacters(in: .whitespaces)
+        return code.isEmpty ? "C62" : code
     }
 
     private func xmlTypeCode(for type: InvoiceTypeCode) -> String {
