@@ -152,7 +152,7 @@ public struct CIIXMLGenerator {
         // l'identifiant vide était rejeté (BR-FR-32 pour le SIREN, BR-CO-09 pour le n° TVA), et
         // comptait comme présent pour les règles qui l'interdisent (BR-O-02), alors que les
         // contrôles locaux le tiennent pour absent. On n'émet donc que la valeur rognée, non vide.
-        let legalOrg = trimmedNonEmpty(party.siren).map { siren -> String in
+        let legalOrg = Self.xmlSiren(party.siren).map { siren -> String in
             """
         <ram:SpecifiedLegalOrganization>
           <ram:ID schemeID="\(party.legalSchemeID)">\(escape(siren))</ram:ID>
@@ -161,7 +161,7 @@ public struct CIIXMLGenerator {
         } ?? ""
 
         let endpointIDValue = trimmedNonEmpty(party.endpointID)
-        let sirenValue = trimmedNonEmpty(party.siren)
+        let sirenValue = Self.xmlSiren(party.siren)
         let effectiveEndpointID = endpointIDValue ?? sirenValue
         let effectiveSchemeID: String
         if endpointIDValue != nil {
@@ -486,6 +486,15 @@ public struct CIIXMLGenerator {
     /// comme le Schematron France CTC pour BR-FR-CO-12.
     static func xmlCurrency(_ code: String) -> String {
         code.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// BT-30 / BT-47 : le SIREN écrit dans `SpecifiedLegalOrganization/ID`, et en adresse
+    /// électronique (BT-34 / BT-49) à défaut d'adresse saisie : sans espaces ni retours à la ligne
+    /// autour, `nil` (rien d'émis) s'il est vide. `EN16931BusinessRules` contrôle cette même chaîne
+    /// (BR-FR-10, BR-FR-32), comme le Schematron France CTC, qui refuse un espace à l'intérieur.
+    static func xmlSiren(_ siren: String?) -> String? {
+        guard let value = siren?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
     }
 
     /// BT-130 : le code d'unité sans espaces autour, C62 (« unité ») pour une ligne sans unité.
