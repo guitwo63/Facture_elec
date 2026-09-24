@@ -53,9 +53,13 @@ public struct ElectronicBulkExport {
     /// Faux quand il n'y a rien à écrire : l'app ne demande alors pas de dossier.
     public var hasPendingDocuments: Bool { !pending.isEmpty }
 
-    /// `generate` n'est à remplacer que dans les tests.
+    /// `generate` n'est à remplacer que dans les tests. Par défaut, le PDF porte le logo de la
+    /// société de la facture, comme à l'export à l'unité.
     public init(invoices: [Invoice],
-                generate: @escaping (Invoice) throws -> Data = { try FacturXGenerator().generate(invoice: $0) }) {
+                generate: @escaping (Invoice) throws -> Data = { invoice in
+                    try FacturXGenerator().generate(
+                        invoice: invoice, logo: PartyDirectory.shared.logoData(forCompanyID: invoice.companyID))
+                }) {
         noun = "facture"
         var pending: [Pending] = []
         var rejections: [Rejection] = []

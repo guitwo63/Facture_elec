@@ -1,4 +1,6 @@
 import XCTest
+import CoreGraphics
+import ImageIO
 import FacturXCore
 
 /// Export groupé Factur-X / Order-X (menu « Exporter » des listes) : même contrôle qu'à
@@ -229,11 +231,86 @@ final class ElectronicBulkExportTests: XCTestCase {
                        OrderXValidator().validate(pdf: OrderPDFRenderer().render(order: order)).errors)
     }
 
+    // MARK: - Logo
+
+    /// Comme l'export à l'unité (`sellerLogo` de l'éditeur) : le PDF porte le logo de la fiche de
+    /// la société de la facture ; une facture rattachée à aucune société n'en a pas.
+    func testInvoicePDFCarriesTheLogoOfItsCompanyLikeTheUnitExport() throws {
+        let logo = try pngLogo()
+        let company = DirectoryEntry(kinds: [.societe], party: sampleInvoice("-").seller, logoData: logo)
+        let savedEntries = PartyDirectory.shared.entries
+        defer { PartyDirectory.shared.entries = savedEntries }
+        PartyDirectory.shared.entries.append(company) // en mémoire seulement, jamais enregistré
+        var withCompany = sampleInvoice("2026-0010")
+        withCompany.companyID = company.id
+        let withoutCompany = sampleInvoice("2026-0011")
+        let unitExport = try FacturXGenerator().generate(invoice: withCompany, logo: logo)
+        XCTAssertEqual(imageCount(inFirstPageOf: unitExport), 1, "précondition : le logo est une image de la page")
+
+        var export = ElectronicBulkExport(invoices: [withCompany, withoutCompany])
+        export.write(to: directory)
+
+        let exported = try Data(contentsOf: directory.appendingPathComponent("facture-2026-0010.pdf"))
+        XCTAssertEqual(imageCount(inFirstPageOf: exported), 1, "logo de la société, comme à l'unité")
+        let noCompany = try Data(contentsOf: directory.appendingPathComponent("facture-2026-0011.pdf"))
+        XCTAssertEqual(imageCount(inFirstPageOf: noCompany), 0, "sans société, pas de logo, comme à l'unité")
+    }
+
+    /// Recherche partagée par l'éditeur (`sellerLogo`) et l'export groupé.
+    func testLogoIsTheOneOfTheInvoiceCompany() {
+        let directory = PartyDirectory()
+        let company = DirectoryEntry(kinds: [.societe], party: sampleInvoice("-").seller, logoData: Data([1, 2, 3]))
+        let other = DirectoryEntry(kinds: [.societe], party: sampleInvoice("-").seller, logoData: Data([4]))
+        directory.entries = [other, company] // en mémoire seulement, jamais enregistré
+        XCTAssertEqual(directory.logoData(forCompanyID: company.id), Data([1, 2, 3]))
+        XCTAssertNil(directory.logoData(forCompanyID: nil))
+        XCTAssertNil(directory.logoData(forCompanyID: UUID()))
+    }
+
     // MARK: - Aides
 
     /// Messages des règles bloquantes, dans l'ordre où l'éditeur les affiche.
     private func blockingRuleErrors(_ invoice: Invoice) -> [String] {
         FacturXValidator().validate(invoice: invoice).businessRules.filter { $0.severity == .error }.map(\.message)
+    }
+
+    /// Logo PNG de 40 × 20 points, d'une seule couleur.
+    private func pngLogo() throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 0.8, green: 0.1, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    /// Images (XObject de sous-type Image) dessinées sur la première page du PDF.
+    private func imageCount(inFirstPageOf pdf: Data) -> Int {
+        guard let provider = CGDataProvider(data: pdf as CFData),
+              let page = CGPDFDocument(provider)?.page(at: 1),
+              let pageDictionary = page.dictionary else { return -1 }
+        var resources: CGPDFDictionaryRef?
+        var xObjects: CGPDFDictionaryRef?
+        guard CGPDFDictionaryGetDictionary(pageDictionary, "Resources", &resources), let resources,
+              CGPDFDictionaryGetDictionary(resources, "XObject", &xObjects), let xObjects else { return 0 }
+        var count = 0
+        CGPDFDictionaryApplyBlock(xObjects, { _, object, _ in
+            var stream: CGPDFStreamRef?
+            var subtype: UnsafePointer<CChar>?
+            if CGPDFObjectGetValue(object, .stream, &stream), let stream,
+               let dictionary = CGPDFStreamGetDictionary(stream),
+               CGPDFDictionaryGetName(dictionary, "Subtype", &subtype), let subtype,
+               String(cString: subtype) == "Image" {
+                count += 1
+            }
+            return true
+        }, nil)
+        return count
     }
 
     private func writtenFiles() throws -> [String] {

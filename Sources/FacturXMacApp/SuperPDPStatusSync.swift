@@ -50,6 +50,10 @@ final class PDPPeriodicSyncEngine: ObservableObject {
 
     private var task: Task<Void, Never>?
 
+    /// Reçoit les échecs : une entrée d'audit au début d'une panne, une à son retour à la
+    /// normale, plutôt qu'une par facture à chaque cycle (voir `SyncFailureJournal`).
+    var failureJournal = SyncFailureJournal.shared
+
     /// `credentialsProvider` résout les identifiants pour une société donnée (`nil` = le
     /// réglage par défaut/société principale) — voir `SuperPDPSettings.credentials(for:)`.
     /// La cadence reste pilotée par le seul réglage par défaut (simplification assumée :
@@ -90,6 +94,8 @@ final class PDPPeriodicSyncEngine: ObservableObject {
         var updatedCount = 0
         var errorCount = 0
         var queriedCount = 0
+        var firstError: String?
+        var queriedCompanies: Set<UUID?> = []
         for (companyID, candidates) in byCompany {
             // `usePDP` coupe TOUTES les fonctions PDP pour cette société, y compris ce
             // cycle en arrière-plan — sans quoi désactiver le bouton dans Réglages n'empêchait
@@ -98,11 +104,15 @@ final class PDPPeriodicSyncEngine: ObservableObject {
             let credentials = credentialsProvider(companyID)
             guard credentials.usePDP, credentials.isConfigured else { continue }
             queriedCount += candidates.count
+            queriedCompanies.insert(companyID)
+            var cycle = SyncCycle(kind: .salesStatus, companyID: companyID,
+                                  followedTargets: candidates.map(Self.syncTarget))
             for invoice in candidates {
                 guard let rid = invoice.superPDPRemoteID else { continue }
                 do {
                     let service = SuperPDPService()
                     let updated = try await service.getInvoiceStatus(remoteID: rid, credentials: credentials)
+                    cycle.recordSuccess(Self.syncTarget(invoice))
                     guard let mapped = PDPStatusMapper.functionalTransition(for: updated.status) else { continue }
                     let isAdvance = mapped.lifecycleRank > invoice.status.lifecycleRank
                     let isCancellation = mapped == .cancelled && invoice.status != .cancelled && invoice.status != .paid
@@ -122,21 +132,25 @@ final class PDPPeriodicSyncEngine: ObservableObject {
                     )
                 } catch {
                     errorCount += 1
-                    store.audit?.record(
-                        actor: "system",
-                        action: "pdp_status_error",
-                        target: invoice.number,
-                        details: "Synchronisation périodique échouée : \(error.localizedDescription)",
-                        objectType: .invoice,
-                        objectCode: invoice.number,
-                        companyID: invoice.companyID
-                    )
+                    if firstError == nil { firstError = error.localizedDescription }
+                    cycle.recordFailure(error, target: Self.syncTarget(invoice))
                 }
             }
+            // Moteur arrêté en plein cycle (bascule d'environnement) : rien n'est noté, les
+            // pannes en cours sont déjà celles du nouvel environnement.
+            guard !Task.isCancelled else { return }
+            failureJournal.close(cycle, audit: store.audit)
         }
+        guard !Task.isCancelled else { return }
+        failureJournal.forgetAccounts(of: .salesStatus, except: queriedCompanies)
         lastRunAt = Date()
         lastRunSummary = queriedCount == 0
             ? "Aucune facture à interroger."
             : "\(queriedCount) facture(s) interrogée(s), \(updatedCount) mise(s) à jour" + (errorCount > 0 ? ", \(errorCount) échec(s)" : "") + "."
+                + (firstError.map { " Erreur : \(SyncFailureJournal.brief($0))" } ?? "")
+    }
+
+    private static func syncTarget(_ invoice: Invoice) -> SyncTarget {
+        SyncTarget(id: invoice.id.uuidString, code: invoice.number)
     }
 }

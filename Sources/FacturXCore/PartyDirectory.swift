@@ -412,6 +412,14 @@ public final class PartyDirectory: ObservableObject {
         entries.first { $0.kinds.contains(.societe) && $0.isPrincipale }?.id
     }
 
+    /// Logo imprimé sur le PDF d'une facture : celui de la fiche de sa société (`companyID`),
+    /// aucun pour une facture rattachée à aucune société. Partagé par l'éditeur et l'export
+    /// groupé, pour que les deux produisent le même PDF.
+    public func logoData(forCompanyID companyID: UUID?) -> Data? {
+        guard let companyID else { return nil }
+        return entries.first { $0.id == companyID }?.logoData
+    }
+
     /// Désigne `id` comme société principale, en retirant l'indicateur de toutes les autres
     /// au préalable — garantit l'unicité au niveau du store plutôt que de faire confiance à
     /// l'UI seule.
