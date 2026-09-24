@@ -36,7 +36,7 @@ enum ValueTable: String, CaseIterable, Identifiable {
         case .currencies: return "Devises"
         case .units: return "Unités"
         case .countries: return "Pays"
-        case .endpointSchemes: return "Schémas d'identifiant"
+        case .endpointSchemes: return "Schémas d'adresse électronique"
         case .auditActionLabels: return "Libellés du journal"
         case .superPDPStatusCodes: return "Statuts SUPER PDP"
         }

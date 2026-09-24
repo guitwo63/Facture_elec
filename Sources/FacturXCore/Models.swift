@@ -1321,10 +1321,18 @@ public enum NormRefs {
         NormRef("CI", "Côte d'Ivoire (CI)"),
     ]
 
+    /// Schémas d'adresse électronique proposés (BT-34-1, BT-49-1) : un extrait de la liste EAS
+    /// (liste 17 du codedb Factur-X, contrôlée par BR-CL-25), mêmes codes et libellés qu'ARVERNX-SaaS
+    /// (décision de Guillaume du 2026-09-24). 0225, l'annuaire français, est le schéma par défaut :
+    /// le SIREN, éventuellement suivi de « _ » et d'un SIRET, d'un suffixe ou d'un code de routage.
+    /// Jusqu'au 2026-09-24, la liste proposait « SIRET (0183) », « Code RNA (0193) » et « Numéro TVA
+    /// (0200) » : en EAS, ce sont l'IDE suisse, l'identifiant UBL.BE et le code d'entité légale
+    /// lituanien. Aucune fiche ni aucun document ne les portait : rien n'a été migré. Un code hors
+    /// de la liste (facture reçue, import) reste affiché « Autre… (code) » par `NormRefPicker`.
     public static let endpointSchemes: [NormRef] = [
-        NormRef("0225", "SIREN (0225)"),
-        NormRef("0183", "SIRET (0183)"),
-        NormRef("0193", "Code RNA (0193)"),
-        NormRef("0200", "Numéro TVA (0200)"),
+        NormRef("0225", "Annuaire français — SIREN (0225)"),
+        NormRef("0009", "SIRET (0009)"),
+        NormRef("9957", "N° TVA français (9957)"),
+        NormRef("EM", "E-mail (EM)"),
     ]
 }

@@ -486,8 +486,10 @@ public struct CIIXMLGenerator {
     /// BT-34 / BT-49 : l'adresse électronique écrite dans `URIUniversalCommunication/URIID` et son
     /// schéma (BT-34-1 / BT-49-1). L'adresse saisie, sans espaces ni retours à la ligne autour,
     /// sous son schéma (vide, « FR:SIRENE » ou « 0183 » deviennent 0225) ; à défaut le SIREN
-    /// (`xmlSiren`) sous le schéma 0225 ; `nil` (rien d'émis) sans l'un ni l'autre.
-    /// `EN16931BusinessRules` contrôle cette même adresse (BR-FR-23), comme le Schematron France CTC.
+    /// (`xmlSiren`) sous le schéma 0225 ; `nil` (rien d'émis) sans l'un ni l'autre. « 0183 » est
+    /// le « SIRET » de l'ancienne liste (`NormRefs.endpointSchemes`), toujours émis en 0225 : un
+    /// document émis garde son XML. `EN16931BusinessRules` contrôle cette même adresse (BR-FR-23,
+    /// BR-FR-21), comme le Schematron France CTC.
     static func xmlEndpoint(_ party: InvoiceParty) -> (id: String, schemeID: String)? {
         if let entered = party.endpointID?.trimmingCharacters(in: .whitespacesAndNewlines), !entered.isEmpty {
             let raw = party.endpointSchemeID.trimmingCharacters(in: .whitespaces)
