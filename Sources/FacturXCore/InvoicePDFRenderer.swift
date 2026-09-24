@@ -172,6 +172,11 @@ public final class InvoicePDFRenderer {
             rowsBelowRule.append(TotalsRow(label: "\(invoice.prepaidAmountLabel):", amount: amount(invoice.prepaidAmount), font: font(size: 11), color: .darkGray))
             rowsBelowRule.append(TotalsRow(label: "Net à payer:", amount: amount(invoice.netToPay), font: boldFont(size: 13)))
         }
+        // Hors euro, la TVA doit aussi figurer en euros (directive TVA, art. 230 ; BT-111 du XML),
+        // suivie du taux appliqué. Une facture en euros garde exactement la même page.
+        if let taxInEuros = invoice.taxTotalInEuros {
+            rowsBelowRule.append(TotalsRow(label: "Total TVA en EUR:", amount: "EUR \(fmt(taxInEuros))", font: font(size: 11)))
+        }
         let x = totalsLabelX(rowsAboveRule + rowsBelowRule)
         var cy = y
         for row in rowsAboveRule {
@@ -186,6 +191,12 @@ public final class InvoicePDFRenderer {
         for row in rowsBelowRule {
             cy -= 16
             drawTotalsRow(context: context, row, x: x, y: cy)
+        }
+        for sentence in invoice.exchangeRateMention {
+            for line in wrappedLines(sentence, font: font(size: 8), width: pageWidth - margin - x) {
+                cy -= 11
+                drawText(context: context, text: line, x: x, y: cy, font: font(size: 8), color: .darkGray)
+            }
         }
     }
 

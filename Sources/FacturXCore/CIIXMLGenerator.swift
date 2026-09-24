@@ -387,15 +387,24 @@ public struct CIIXMLGenerator {
         let prepaidLine = invoice.prepaidAmount > 0 || invoice.billingMode.isAlreadyPaid
             ? "        <ram:TotalPrepaidAmount>\(String(format: "%.2f", invoice.prepaidAmount))</ram:TotalPrepaidAmount>\n"
             : ""
+        let currency = escape(Self.xmlCurrency(invoice.currency))
+        // BR-FR-CO-12 (France CTC, fatal) : hors euro, la devise de comptabilité EUR (BT-6), que le
+        // XSD place avant la devise de facture, et la TVA en euros (BT-111), juste après la TVA en
+        // devise de facture. Jamais sur une facture en euros : BT-6 doit alors différer de BT-5
+        // (FX-SCH-A-000129, BR-53). Sans taux de change, rien n'est émis et BR-FR-CO-12 bloque.
+        let taxCurrencyLine = invoice.taxTotalInEuros == nil ? "" : "      <ram:TaxCurrencyCode>EUR</ram:TaxCurrencyCode>\n"
+        let taxTotalInEurosLine = invoice.taxTotalInEuros.map {
+            "        <ram:TaxTotalAmount currencyID=\"EUR\">\(String(format: "%.2f", $0))</ram:TaxTotalAmount>\n"
+        } ?? ""
 
         return """
     <ram:ApplicableHeaderTradeSettlement>
-      <ram:InvoiceCurrencyCode>\(escape(invoice.currency))</ram:InvoiceCurrencyCode>
+\(taxCurrencyLine)      <ram:InvoiceCurrencyCode>\(currency)</ram:InvoiceCurrencyCode>
 \(paymentMeans)\(tradeTax)\(paymentTerms)      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
         <ram:LineTotalAmount>\(lineTotal)</ram:LineTotalAmount>
         <ram:TaxBasisTotalAmount>\(taxBasis)</ram:TaxBasisTotalAmount>
-        <ram:TaxTotalAmount currencyID="\(escape(invoice.currency))">\(taxTotal)</ram:TaxTotalAmount>
-        <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
+        <ram:TaxTotalAmount currencyID="\(currency)">\(taxTotal)</ram:TaxTotalAmount>
+\(taxTotalInEurosLine)        <ram:GrandTotalAmount>\(grand)</ram:GrandTotalAmount>
 \(prepaidLine)        <ram:DuePayableAmount>\(duePay)</ram:DuePayableAmount>
       </ram:SpecifiedTradeSettlementHeaderMonetarySummation>\(invoiceReferencedXML(invoice))
     </ram:ApplicableHeaderTradeSettlement>
@@ -470,6 +479,13 @@ public struct CIIXMLGenerator {
 
     private func formatRate(_ rate: Double) -> String {
         Self.xmlRate(rate)
+    }
+
+    /// BT-5 (et l'attribut currencyID des montants) : le code de devise sans espaces autour.
+    /// `EN16931BusinessRules` et `Invoice.taxTotalInEuros` comparent cette même chaîne à « EUR »,
+    /// comme le Schematron France CTC pour BR-FR-CO-12.
+    static func xmlCurrency(_ code: String) -> String {
+        code.trimmingCharacters(in: .whitespaces)
     }
 
     /// BT-130 : le code d'unité sans espaces autour, C62 (« unité ») pour une ligne sans unité.

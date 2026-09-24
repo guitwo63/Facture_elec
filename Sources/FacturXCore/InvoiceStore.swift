@@ -284,6 +284,7 @@ public final class InvoiceStore: ObservableObject {
         copy.precedingInvoiceRef = nil
         copy.precedingInvoiceDate = nil
         copy.linkedSettlementRef = nil
+        copy.clearExchangeRateForNewDate()
         copy.lines = invoice.lines.map { line in
             var l = line
             l.id = UUID()
@@ -309,6 +310,8 @@ public final class InvoiceStore: ObservableObject {
         credit.precedingInvoiceRef = invoice.number
         credit.precedingInvoiceDate = invoice.issueDate
         credit.linkedSettlementRef = nil
+        // Le taux de change de la facture est gardé : l'avoir annule la TVA en euros qu'elle a
+        // déclarée (même choix que le SaaS ARVERNX).
         credit.notes = "Avoir relatif à la facture \(invoice.number)"
         credit.lines = invoice.lines.map { line in
             var l = line
@@ -331,6 +334,7 @@ public final class InvoiceStore: ObservableObject {
         deposit.precedingInvoiceRef = nil
         deposit.precedingInvoiceDate = nil
         deposit.linkedSettlementRef = nil
+        deposit.clearExchangeRateForNewDate()
         deposit.notes = "Facture d'acompte"
         deposit.prepaidAmount = 0
         deposit.billingMode = invoice.billingMode.forDeposit
@@ -350,6 +354,7 @@ public final class InvoiceStore: ObservableObject {
         final.precedingInvoiceRef = deposits.first?.number
         final.precedingInvoiceDate = deposits.first?.issueDate
         final.linkedSettlementRef = nil
+        final.clearExchangeRateForNewDate()
         final.prepaidAmount = deposits.reduce(0) { $0 + $1.grandTotal }.rounded(toPlaces: 2)
         final.notes = "Facture de solde"
         final.billingMode = invoice.billingMode.forFinalSettlement
