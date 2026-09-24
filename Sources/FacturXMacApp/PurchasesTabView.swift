@@ -135,9 +135,11 @@ struct PurchasesTabView: View {
                 if let id = selectedID,
                    filteredInvoices.contains(where: { $0.id == id }) {
                     // Une instance d'éditeur par facture d'achat, dans un conteneur stable pour le
-                    // HSplitView (voir InvoicesTabView). Sans cela, `onChange(of: record.status)`
-                    // se déclenchait au changement de sélection et envoyait à SUPER PDP, donc au
-                    // fournisseur, le statut de la facture ouverte pour celle qu'on quitte.
+                    // HSplitView (voir InvoicesTabView). Sans cela, SwiftUI réutilise l'éditeur et
+                    // ses `@State` d'une facture à l'autre, et ses `onChange` se déclenchent au
+                    // simple changement de sélection (l'ancien `onChange(of: record.status)`
+                    // envoyait ainsi au fournisseur le statut de la facture ouverte pour celle
+                    // qu'on quitte).
                     VStack(spacing: 0) {
                         PurchaseInvoiceEditorView(record: binding(for: id))
                             .id(id)
@@ -260,7 +262,7 @@ struct PurchaseInvoiceEditorView: View {
                             ForEach(configuredTransitions, id: \.self) { s in
                                 let comptableOnly = requiresComptableWorkflow(s)
                                 Button {
-                                    record.status = s
+                                    setStatusChosenByUser(s)
                                 } label: {
                                     if sendingPDPFeedback, comptableOnly {
                                         HStack(spacing: 4) { ProgressView().controlSize(.small); Text(s.label) }
@@ -405,14 +407,21 @@ struct PurchaseInvoiceEditorView: View {
             Text("Cette facture d'achat a le statut « \(record.status.label) ». La modifier peut créer une incohérence comptable. Continuer ?")
         }
         .onChange(of: record.invoice.number) { _ in adminConfirmedEdit = false }
-        .onChange(of: record.status) { newStatus in
-            notifyPDPStatusChange(to: newStatus)
-        }
+    }
+
+    /// Statut choisi par l'utilisateur (bouton de transition) : le seul changement de statut qui
+    /// part vers le fournisseur. Un statut posé par le programme, par exemple restauré d'une
+    /// sauvegarde pendant que la facture est ouverte, ne part jamais : d'où l'appel ici et non
+    /// dans un `onChange(of: record.status)`, qui se déclenche aussi pour ces changements-là.
+    private func setStatusChosenByUser(_ newStatus: PurchaseInvoiceStatus) {
+        guard newStatus != record.status else { return }
+        record.status = newStatus
+        notifyPDPStatusChange(to: newStatus)
     }
 
     /// Notifie SUPER PDP du nouveau statut, pour informer le fournisseur — best-effort,
     /// jamais bloquant : le statut local a déjà changé au moment où cette fonction s'exécute
-    /// (`.onChange` se déclenche après la mutation), un échec réseau n'annule jamais la
+    /// (`setStatusChosenByUser` l'appelle après la mutation), un échec réseau n'annule jamais la
     /// décision déjà prise, il est juste signalé. Ne fait rien pour un statut sans code
     /// réforme (transitions acheteur) ou une facture jamais déposée par le fournisseur sur
     /// PDP (saisie manuelle sans `superPDPRemoteID` : rien à notifier, personne à qui l'envoyer).
