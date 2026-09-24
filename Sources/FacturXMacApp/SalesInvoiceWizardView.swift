@@ -151,8 +151,8 @@ struct SalesInvoiceWizardView: View {
                 ForEach($lines) { $line in
                     HStack {
                         TextField("Désignation", text: $line.name)
-                        TextField("Qté", value: $line.quantity, format: .number).frame(width: 60)
-                        TextField("Prix U. HT", value: $line.unitPrice, format: .number).frame(width: 90)
+                        TextField("Qté", value: $line.quantity, format: .decimalInput).frame(width: 60)
+                        TextField("Prix U. HT", value: $line.unitPrice, format: .decimalInput).frame(width: 90)
                         // Catégorie de TVA (BT-151) tenue cohérente avec le taux par `editedVATRate` :
                         // S, ou E à 0 %. Cet assistant minimal n'offre pas de sélection fine
                         // (autoliquidation, export…), à affiner ensuite dans la fiche facture.

@@ -518,15 +518,15 @@ struct QuoteEditorView: View {
                     ForEach($quote.lines) { $line in
                         HStack {
                             TextField("Désignation", text: $line.name).disabled(isLocked)
-                            TextField("Qté", value: $line.quantity, format: .number).frame(width: 50).disabled(isLocked)
-                            TextField("Prix U.", value: $line.unitPrice, format: .number).frame(width: 70).disabled(isLocked)
+                            TextField("Qté", value: $line.quantity, format: .decimalInput).frame(width: 50).disabled(isLocked)
+                            TextField("Prix U.", value: $line.unitPrice, format: .decimalInput).frame(width: 70).disabled(isLocked)
                             // Un devis n'affiche pas de sélecteur de catégorie TVA (il n'émet pas de XML),
                             // mais toInvoice()/toOrder() recopient les lignes telles quelles : la catégorie
                             // suit donc le taux (`editedVATRate` : S, ou E à 0 %, dont le motif se saisit
                             // dans la facture ou la commande). Sans ce recalage, une catégorie laissée par
                             // un ancien taux à 0 % suivait la ligne repassée à taux plein, rejetée par le
                             // validateur EN16931 (BR-Z-05/BR-Z-09).
-                            TextField("TVA %", value: $line.editedVATRate, format: .number).frame(width: 50).disabled(isLocked)
+                            TextField("TVA %", value: $line.editedVATRate, format: .decimalInput).frame(width: 50).disabled(isLocked)
                             Text(String(format: "%.2f", line.lineTotal)).foregroundStyle(.secondary).frame(width: 70)
                         }
                     }

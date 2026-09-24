@@ -909,7 +909,7 @@ struct OrderEditorView: View {
                                     InfoBadge(text: "Désignation de la ligne. Obligatoire.")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("Qté", value: $line.quantity, format: .number)
+                                    DoubleField("Qté", value: $line.quantity, format: .decimalInput)
                                     InfoBadge(text: "Quantité demandée. Doit être positive.")
                                 }
                                 HStack(spacing: 2) {
@@ -917,7 +917,7 @@ struct OrderEditorView: View {
                                     InfoBadge(text: "Unité de mesure (code UN/ECE Rec 20 ou, pour un emballage, Rec 21).")
                                 }
                                 HStack(spacing: 2) {
-                                    DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
+                                    DoubleField("P.U. HT", value: $line.unitPrice, format: .decimalInput)
                                     InfoBadge(text: "Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {

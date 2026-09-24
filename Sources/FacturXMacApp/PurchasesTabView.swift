@@ -348,9 +348,9 @@ struct PurchaseInvoiceEditorView: View {
                                 ForEach($record.invoice.lines) { $line in
                                     HStack {
                                         TextField("Désignation *", text: $line.name).frame(minWidth: 220)
-                                        DoubleField("Qté", value: $line.quantity, format: .number)
+                                        DoubleField("Qté", value: $line.quantity, format: .decimalInput)
                                         NormRefPicker("Unité", options: NormRefs.units, code: $line.unit).frame(width: 180)
-                                        DoubleField("P.U. HT", value: $line.unitPrice, format: .number)
+                                        DoubleField("P.U. HT", value: $line.unitPrice, format: .decimalInput)
                                         VATRatePicker(rate: $line.editedVATRate)
                                         Text(String(format: "%.2f", line.lineTotal))
                                             .monospacedDigit().frame(width: 80, alignment: .trailing)

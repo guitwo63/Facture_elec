@@ -1894,7 +1894,7 @@ struct InvoiceEditorView: View {
                                 if invoice.type.isDeposit || invoice.type.isFinalSettlement || invoice.billingMode.isAlreadyPaid {
                                     HStack(spacing: 3) {
                                         Text(invoice.prepaidAmountLabel).font(.caption)
-                                        fieldHighlight(TextField("0,00", value: $invoice.prepaidAmount, format: .number)
+                                        fieldHighlight(TextField("0,00", value: $invoice.prepaidAmount, format: .decimalInput)
                                             .frame(width: 120).textFieldStyle(.roundedBorder), forRuleIDs: ["BR-FR-CO-09"])
                                         Text(invoice.currency).font(.caption).foregroundStyle(.secondary)
                                         InfoBadge(text: "BT-113 — Montant déjà payé (TotalPrepaidAmount), déduit du total TTC pour obtenir le net à payer : acomptes déjà réglés sur une facture de solde, ou totalité du total TTC en cadre « facture déjà payée » (B2/S2/M2).")
@@ -1956,7 +1956,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "Commande d'origine de la ligne — usage interne (rattachement aux commandes, exports), non transmise dans le XML Factur-X. Pour le numéro de ligne de commande normé, utilisez le champ optionnel BT-132.")
                                 }
                                 HStack(spacing: 2) {
-                                    fieldHighlight(DoubleField("Qté", value: $line.quantity, format: .number), forRuleIDs: ["BT-129-POSITIVE"])
+                                    fieldHighlight(DoubleField("Qté", value: $line.quantity, format: .decimalInput), forRuleIDs: ["BT-129-POSITIVE"])
                                     InfoBadge(text: "BT-129 — Quantité facturée. Doit être positive, y compris sur un avoir : c'est le type de document (381) qui porte le sens du crédit.")
                                 }
                                 HStack(spacing: 2) {
@@ -1966,7 +1966,7 @@ struct InvoiceEditorView: View {
                                     InfoBadge(text: "BT-130 — Unité de mesure (code UN/ECE Rec 20 ou, pour un emballage, Rec 21).")
                                 }
                                 HStack(spacing: 2) {
-                                    fieldHighlight(DoubleField("P.U. HT", value: $line.unitPrice, format: .number), forRuleIDs: ["BR-27"])
+                                    fieldHighlight(DoubleField("P.U. HT", value: $line.unitPrice, format: .decimalInput), forRuleIDs: ["BR-27"])
                                     InfoBadge(text: "BT-146 — Prix unitaire HT.")
                                 }
                                 HStack(spacing: 2) {
