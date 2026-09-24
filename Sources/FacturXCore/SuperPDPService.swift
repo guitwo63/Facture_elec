@@ -162,6 +162,11 @@ public struct SuperPDPDirectoryEntry: Identifiable, Hashable {
 public enum SuperPDPDirection: String, Codable {
     case received
     case sent
+
+    /// Valeur de l'API (paramètre et champ `direction` de `/v1.beta/invoices`, spec OpenAPI
+    /// 1.34.0.beta) : `in` pour une facture reçue, `out` pour une facture émise. Les valeurs
+    /// brutes restent `received`/`sent`, celles déjà enregistrées.
+    public var apiValue: String { self == .received ? "in" : "out" }
 }
 
 public struct SuperPDPInvoiceSubmission: Identifiable, Codable, Hashable {
@@ -782,45 +787,70 @@ public final class SuperPDPService {
         )
     }
 
-    /// Liste les factures connues de SUPER PDP (émises et/ou reçues) — `GET /v1.beta/invoices`,
-    /// documentée mais jusqu'ici non intégrée (voir `docs/integrations-superpdp.md` §2A).
-    /// Premier appelant : la réception automatique des factures d'achat (module Achats),
-    /// filtrée sur `direction: .received` pour ne récupérer que les factures déposées par
-    /// nos fournisseurs. Même conventions que le reste du fichier : jeton d'abord, enveloppe
-    /// de réponse tolérante (`data`/`invoices`/`results`/tableau brut, comme
-    /// `parseInvoiceEvents`), erreurs `SuperPDPError.decoding`/`.http`.
+    /// Factures par page de `GET /v1.beta/invoices` : le maximum permis (100 par défaut).
+    static let invoiceListPageSize = 1000
+    /// Garde-fou contre une pagination qui ne finirait pas : 50 000 factures au plus.
+    static let invoiceListMaxPages = 50
+
+    /// Liste les factures connues de SUPER PDP (émises et/ou reçues) — `GET /v1.beta/invoices`
+    /// (voir `docs/integrations-superpdp.md` §2A). Premier appelant : la réception automatique
+    /// des factures d'achat (module Achats), filtrée sur `direction: .received` pour ne
+    /// récupérer que les factures déposées par nos fournisseurs. Même conventions que le reste
+    /// du fichier : jeton d'abord, enveloppe de réponse tolérante (`data`/`invoices`/`results`/
+    /// tableau brut, comme `parseInvoiceEvents`), erreurs `SuperPDPError.decoding`/`.http`.
     ///
-    /// Le nom exact du paramètre de requête pour filtrer par direction n'est pas confirmé
-    /// contre le spec OpenAPI live (non consulté pour cet ajout) — `direction` est utilisé
-    /// par cohérence avec le champ `direction` déjà renvoyé par `/invoice_events`
-    /// (`mapInvoiceEvent`), à vérifier en conditions réelles.
+    /// Paramètres vérifiés contre la spec OpenAPI 1.34.0.beta :
+    /// - `direction` vaut `in` ou `out` (`SuperPDPDirection.apiValue`). L'app envoyait
+    ///   `received`, une valeur hors de la liste permise.
+    /// - La liste est paginée, par ids croissants. Les pages suivantes repartent après le
+    ///   dernier id reçu (`starting_after_id`) tant que la réponse annonce `has_after`. Sans
+    ///   cela, seules les 100 plus anciennes factures auraient été vues.
     public func listInvoices(direction: SuperPDPDirection? = nil, credentials: SuperPDPCredentials) async throws -> [SuperPDPInvoiceSubmission] {
         let token = try await fetchToken(credentials: credentials)
-        var endpoint = trimmedBase(credentials) + "/v1.beta/invoices"
-        if let direction {
-            endpoint += "?direction=\(direction.rawValue)"
+        let endpoint = trimmedBase(credentials) + "/v1.beta/invoices"
+        var invoices: [SuperPDPInvoiceSubmission] = []
+        var seenIDs = Set<String>()
+        var startingAfterID: String?
+        for _ in 0..<Self.invoiceListMaxPages {
+            var query = [URLQueryItem(name: "limit", value: String(Self.invoiceListPageSize))]
+            if let direction { query.append(URLQueryItem(name: "direction", value: direction.apiValue)) }
+            if let startingAfterID { query.append(URLQueryItem(name: "starting_after_id", value: startingAfterID)) }
+            var components = URLComponents(string: endpoint)
+            components?.queryItems = query
+            guard let url = components?.url else {
+                throw SuperPDPError.decoding("URL de liste de factures invalide : \(endpoint)")
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, resp) = try await session.data(for: req)
+            guard let http = resp as? HTTPURLResponse else {
+                throw SuperPDPError.decoding("Réponse non HTTP")
+            }
+            guard (200...299).contains(http.statusCode) else {
+                throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+            }
+            let page = try parseInvoiceListPage(data: data, defaultDirection: direction ?? .received)
+            // Une facture déjà vue (page renvoyée deux fois) serait comptée et journalisée deux fois.
+            invoices += page.invoices.filter { $0.remoteID.map { seenIDs.insert($0).inserted } ?? true }
+            // Page suivante seulement si l'API en annonce une et que le curseur avance.
+            guard page.hasAfter, let lastID = page.invoices.last?.remoteID, lastID != startingAfterID else { break }
+            startingAfterID = lastID
         }
-        guard let url = URL(string: endpoint) else {
-            throw SuperPDPError.decoding("URL de liste de factures invalide : \(endpoint)")
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, resp) = try await session.data(for: req)
-        guard let http = resp as? HTTPURLResponse else {
-            throw SuperPDPError.decoding("Réponse non HTTP")
-        }
-        guard (200...299).contains(http.statusCode) else {
-            throw SuperPDPError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
-        }
-        return try parseInvoiceList(data: data, defaultDirection: direction ?? .received)
+        return invoices
     }
 
     // Accès non-`private` (comme `mapDirectoryEntry`, contrairement à `parseInvoiceEvents`)
     // délibérément, pour rester testable en isolation via `@testable import` sans dépendre
     // d'un appel réseau réel — voir `SuperPDPInvoiceListTests`.
     func parseInvoiceList(data: Data, defaultDirection: SuperPDPDirection) throws -> [SuperPDPInvoiceSubmission] {
+        try parseInvoiceListPage(data: data, defaultDirection: defaultDirection).invoices
+    }
+
+    /// Une page de `GET /v1.beta/invoices` : ses factures, et `has_after` (une page suivante
+    /// existe ; `false` si absent, comme dans les enveloppes non paginées).
+    func parseInvoiceListPage(data: Data, defaultDirection: SuperPDPDirection) throws -> (invoices: [SuperPDPInvoiceSubmission], hasAfter: Bool) {
         let obj: Any
         do {
             obj = try JSONSerialization.jsonObject(with: data, options: [])
@@ -828,14 +858,16 @@ public final class SuperPDPService {
             throw SuperPDPError.decoding("\(error)")
         }
         var arr: [[String: Any]] = []
+        var hasAfter = false
         if let dict = obj as? [String: Any] {
             if let a = dict["data"] as? [[String: Any]] { arr = a }
             else if let a = dict["invoices"] as? [[String: Any]] { arr = a }
             else if let a = dict["results"] as? [[String: Any]] { arr = a }
+            hasAfter = dict["has_after"] as? Bool ?? false
         } else if let a = obj as? [[String: Any]] {
             arr = a
         }
-        return arr.map { mapInvoiceListItem($0, defaultDirection: defaultDirection) }
+        return (arr.map { mapInvoiceListItem($0, defaultDirection: defaultDirection) }, hasAfter)
     }
 
     func mapInvoiceListItem(_ dict: [String: Any], defaultDirection: SuperPDPDirection) -> SuperPDPInvoiceSubmission {
@@ -846,8 +878,13 @@ public final class SuperPDPService {
         }
         let remoteID = s("id") ?? s("invoice_id") ?? s("remote_id")
         let status = s("status") ?? "pending"
-        let directionStr = s("direction")
-        let direction: SuperPDPDirection = directionStr == "sent" ? .sent : (directionStr == "received" ? .received : defaultDirection)
+        // `in`/`out` pour l'API ; `received`/`sent` tolérés.
+        let direction: SuperPDPDirection
+        switch s("direction") {
+        case "in", "received": direction = .received
+        case "out", "sent": direction = .sent
+        default: direction = defaultDirection
+        }
         return SuperPDPInvoiceSubmission(
             id: remoteID ?? UUID().uuidString,
             remoteID: remoteID,
@@ -907,7 +944,8 @@ public final class SuperPDPService {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Le fichier déposé, XML ou PDF selon la spec OpenAPI 1.34.0.beta : pas du JSON.
+        req.setValue("application/xml, application/pdf", forHTTPHeaderField: "Accept")
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
             throw SuperPDPError.decoding("Réponse non HTTP")
