@@ -1156,8 +1156,7 @@ struct InvoiceEditorView: View {
         return !isAdmin
     }
     private var sellerLogo: Data? {
-        guard let cid = invoice.companyID else { return nil }
-        return PartyDirectory.shared.entries.first(where: { $0.id == cid })?.logoData
+        PartyDirectory.shared.logoData(forCompanyID: invoice.companyID)
     }
 
     private var hasMandatoryWarnings: Bool {
